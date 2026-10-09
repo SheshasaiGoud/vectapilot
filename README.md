@@ -58,3 +58,31 @@ VectaPilot is a hands-on learning project. It is built with a team of **virtual 
 (Claude Code subagents), each owning part of the roadmap. The core AI logic — retrieval and fusion,
 the agent loop, router fallback, eval metrics and guardrail checks — is **hand-written by me**; the
 virtual teammates scaffold, test and review.
+
+### Meet the team
+
+| Teammate | Role | Owns |
+|---|---|---|
+| Maya Chen | Tech Lead & Architect | Planning, ADRs, reviews, M11 write-up |
+| Diego Alvarez | Backend Engineer | FastAPI, LLM gateway, database (M0, M1, M9) |
+| Sofia Rossi | Frontend & DevOps Engineer | Web apps, CI, deploys (M0, M8, M10) |
+| Ananya Iyer | RAG Engineer | Ingestion, retrieval, citations, extraction (M2, M3, M6) |
+| Noah Fischer | Eval & Observability Engineer | Evals, CI gate, tracing, cost (M2–M4, M9, M10) |
+| Kenji Watanabe | ML Engineer | Intent router classifier (M4) |
+| Leo Okafor | Agents & MCP Engineer | MCP tools, write safety (M5) |
+| Zara Haddad | Safety Engineer | Guardrails, red-team suite (M7) |
+
+Each one is a file in [`.claude/agents/`](.claude/agents); the rules they all share live in
+[`CLAUDE.md`](CLAUDE.md). The animated team site in [`apps/web`](apps/web) is generated from those
+same files at build time.
+
+## Repository layout
+
+```
+.claude/agents/   virtual teammates (Claude Code subagents)
+apps/web/         Next.js team site (customer widget + staff dashboard later)
+docs/adr/         architecture decision records
+.github/          CI and deployment workflows
+```
+
+Run the team site locally: `cd apps/web && npm install && npm run dev`.

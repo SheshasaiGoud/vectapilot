@@ -1,0 +1,166 @@
+@import "tailwindcss";
+
+/* Design tokens. Palette follows the playbook: indigo for AI/primary, green for safe,
+   amber for needs-attention, red for risk. */
+@theme {
+  --color-ink-950: #05061a;
+  --color-ink-900: #0a0c25;
+  --color-ink-800: #11143a;
+  --color-ink-700: #1b1f4d;
+  --color-mist-50: #eef0ff;
+  --color-mist-200: #c9cdf0;
+  --color-mist-300: #a9aedb;
+  --color-mist-400: #8a90c2;
+
+  --animate-orbit: orbit 60s linear infinite;
+  --animate-orbit-reverse: orbit 60s linear infinite reverse;
+  --animate-float: float 7s ease-in-out infinite;
+  --animate-rise: rise 0.9s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-pulse-ring: pulse-ring 2.4s cubic-bezier(0.2, 0.7, 0.2, 1) infinite;
+  --animate-drift: drift 18s ease-in-out infinite alternate;
+  --animate-shimmer: shimmer 6s linear infinite;
+  --animate-wave: wave 1.4s ease-in-out infinite;
+
+  @keyframes wave {
+    0%,
+    60%,
+    100% {
+      transform: rotate(0deg);
+    }
+    10%,
+    30% {
+      transform: rotate(16deg);
+    }
+    20%,
+    40% {
+      transform: rotate(-8deg);
+    }
+  }
+
+  @keyframes orbit {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
+  }
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(18px);
+      filter: blur(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+      filter: none;
+    }
+  }
+  @keyframes pulse-ring {
+    0% {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    100% {
+      transform: scale(1.45);
+      opacity: 0;
+    }
+  }
+  @keyframes drift {
+    from {
+      transform: translate3d(-4%, -2%, 0) scale(1);
+    }
+    to {
+      transform: translate3d(4%, 3%, 0) scale(1.12);
+    }
+  }
+  @keyframes shimmer {
+    to {
+      background-position: 200% center;
+    }
+  }
+}
+
+/* next/font exposes these variables on <html>. */
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-space-grotesk), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+  }
+  body {
+    background-color: var(--color-ink-950);
+    color: var(--color-mist-50);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background: rgb(129 140 248 / 0.4);
+  }
+  :focus-visible {
+    outline: 2px solid #a5b4fc;
+    outline-offset: 3px;
+    border-radius: 0.5rem;
+  }
+}
+
+/* Orbit: hovering or focusing anything inside pauses every ring. */
+.orbit:hover .orbit-spin,
+.orbit:focus-within .orbit-spin {
+  animation-play-state: paused;
+}
+
+/* Scroll reveal in pure CSS — no JavaScript, driven by scroll position instead of time.
+   Progressive enhancement: browsers without scroll-driven animations, and visitors who prefer
+   reduced motion, simply see the content. Nothing is ever hidden waiting for a script. */
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+}
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal {
+      animation: reveal linear both;
+      animation-timeline: view();
+      animation-range: entry 5% cover 30%;
+    }
+  }
+}
+
+/* Animated gradient text for the wordmark. */
+.text-shimmer {
+  background-image: linear-gradient(90deg, #a5b4fc, #f0abfc, #67e8f9, #a5b4fc);
+  background-size: 200% auto;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: var(--animate-shimmer);
+}
+
+/* Honour the operating-system "reduce motion" setting for every CSS animation. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
