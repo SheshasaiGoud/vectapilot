@@ -1,0 +1,60 @@
+[project]
+name = "vectapilot-api"
+version = "0.1.0"
+description = "VectaPilot API — FastAPI service for the AI support copilot"
+authors = [
+    { name = "shesha", email = "sheshasaigoud@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "asyncpg>=0.32.0",
+    "fastapi>=0.143.0",
+    "pydantic-settings>=2.15.0",
+    "redis>=8.1.0",
+    "sqlalchemy[asyncio]>=2.1.4",
+    "uvicorn[standard]>=0.54.0",
+]
+
+[project.scripts]
+vectapilot-api = "vectapilot_api.main:run"
+
+[build-system]
+requires = ["uv_build>=0.12.24,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify, async pitfalls, ruff-specific, bandit (security)
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"] # `assert` is how pytest works
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = ["integration: needs real Postgres and Redis (set RUN_INTEGRATION=1)"]
+# An xfail test that unexpectedly passes is reported as a failure (see tests/test_readyz.py).
+xfail_strict = true
+filterwarnings = [
+    "error",
+    # Starlette 1.x prefers `httpx2` for TestClient. Kept on `httpx` until the human decides on
+    # adding the new package (see CLAUDE.md, Known issues).
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]

@@ -46,7 +46,19 @@ Invoke one with `@agent-<name>` or in plain words ("ask ananya-rag to review my 
 **The team site reads these files at build time** — adding or renaming a teammate also needs an
 entry in `apps/web/src/data/personas.ts` and `npm run avatars`; the build fails if they drift apart.
 
+## How changes land
+Feature branch → pull request → CI (`api (lint, types, tests)` and `web (lint, build)`) must pass
+→ the human reviews and merges. `main` is branch-protected; never push to it directly.
+`[HAND-WRITE]` work happens on the human's own branch and PR.
+
 ## Commands
+API (run inside `apps/api/`, Python 3.12 managed by uv):
+- `uv sync` — create/update the virtualenv from `uv.lock`
+- `uv run vectapilot-api` — dev server at http://127.0.0.1:8000 (needs `VECTAPILOT_DATABASE_URL`
+  and `VECTAPILOT_REDIS_URL`; see `/healthz`, `/readyz`, `/docs`)
+- `uv run pytest` · `uv run mypy` · `uv run ruff check .` · `uv run ruff format .`
+- `RUN_INTEGRATION=1 uv run pytest` — also run tests against real Postgres/Redis
+
 Team site (run inside `apps/web/`):
 - `npm run dev` — local dev server at http://localhost:3000
 - `npm run build` — static export to `apps/web/out/`
@@ -60,21 +72,27 @@ Planned in M0: `make up | make test | make lint | make eval | make migrate`.
 ## Repository layout
 ```
 .claude/agents/      virtual teammates (Claude Code subagents)
+apps/api/            FastAPI service (uv project): config, JSON logging, /healthz, /readyz
 apps/web/            Next.js — team site now; customer widget + staff dashboard later
 docs/adr/            architecture decision records
-.github/workflows/   deploy-site.yml — builds apps/web and publishes to GitHub Pages
+docs/learning/       guides for [HAND-WRITE] tasks
+.github/workflows/   ci.yml (lint, types, tests) · deploy-site.yml (GitHub Pages)
 ```
-Planned: `apps/api/` (FastAPI), `packages/mcp_server/`, `evals/`, `data/` (sample data only),
-`infra/`, `scripts/`.
+Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`, `scripts/`.
 
 ## Decisions
 - [ADR 0001](docs/adr/0001-virtual-team-as-claude-code-subagents.md) — virtual team as Claude Code subagents
 - [ADR 0002](docs/adr/0002-team-site-static-nextjs.md) — team site as a static Next.js export
+- [ADR 0003](docs/adr/0003-python-toolchain-uv.md) — Python toolchain: uv, ruff, mypy strict, pytest
 
 ## Current status
-- **Milestone:** M0 (foundations) — repo, licence, virtual team and team site done; Pages deploy
-  workflow written (needs Pages enabled on the repo).
-- **Next:** finish M0 — Docker Compose, CI, FastAPI health endpoint, success metrics.
+- **Milestone:** M0 (foundations). Done: repo, licence, virtual team, team site (live on GitHub
+  Pages), Node 24 pin. In PR 1: API skeleton + CI.
+- **M0 plan:** PR 1 API skeleton + CI → PR 2 Docker Compose, Dockerfile, Alembic + pgvector,
+  Makefile → PR 3 the human's `/readyz` implementation ([HAND-WRITE],
+  `docs/learning/m0-readiness.md`) → PR 4 business context, success metrics, wrap-up.
+- **Business:** a real business (details pending from the human).
+- **Observability:** no Langfuse in M0 (8 GB RAM Mac); decide in M1 (ADR 0004).
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -88,7 +106,11 @@ Planned: `apps/api/` (FastAPI), `packages/mcp_server/`, `evals/`, `data/` (sampl
 - Next.js collects anonymous telemetry by default locally (disabled in CI).
 - In the Claude desktop browser pane, animation frames are heavily throttled and plain screenshots
   can be stale: verify with DOM checks and the `zoom` capture instead.
-- Python 3.9.6 is installed; the backend needs 3.12 (M0).
+- System Python is 3.9.6; the API uses uv-managed Python 3.12 (never the system one).
+- Pending decision: Starlette 1.x deprecates `httpx` for `TestClient` in favour of `httpx2`
+  (by httpx's author, under the pydantic org). Adding the new package needs the human's approval;
+  until then pytest ignores that one warning.
+- Docker Desktop must be running for the local stack (PR 2).
 - `npm audit` reports 5 "high" issues, all in the dev-only lint chain
   (`eslint-config-next` → `fast-glob` → `micromatch` → `braces`). npm's suggested fix is a
   wrong-major downgrade, so it is accepted for now; re-check on each Next.js update.
@@ -108,3 +130,10 @@ Planned: `apps/api/` (FastAPI), `packages/mcp_server/`, `evals/`, `data/` (sampl
 - LazyMotion: why `m.*` + on-demand features cut initial JS from 201.4 KB to 182.7 KB (gzipped),
   and why we measured before and after instead of assuming.
 - Why `.nvmrc` is the single source of truth for the Node version (local and CI).
+- Liveness vs readiness: why `/healthz` must not check the database but `/readyz` must.
+- Fail-fast configuration: why a missing setting should stop startup, not the first request.
+- Why the app is built by a factory (`create_app`) instead of a module-level `app`.
+- `xfail(strict=True)`: how a test can turn red when code starts *working*, and why that's useful.
+- What `uv sync --locked` guarantees in CI.
+- Why third-party GitHub Actions are pinned to a commit SHA, and how PR 1's first CI run failed
+  (`setup-uv@v10` did not exist — verify refs with `gh api repos/<owner>/<repo>/commits/<ref>`).

@@ -82,6 +82,7 @@ same files at build time.
 
 ```
 .claude/agents/   virtual teammates (Claude Code subagents)
+apps/api/         FastAPI service (Python 3.12, uv)
 apps/web/         Next.js team site (customer widget + staff dashboard later)
 docs/adr/         architecture decision records
 .github/          CI and deployment workflows

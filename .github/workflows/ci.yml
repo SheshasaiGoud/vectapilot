@@ -1,0 +1,84 @@
+# Lint, type-check and test every pull request and every push to main.
+# Branch protection on main requires both jobs to pass before a PR can merge.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A new push to the same branch cancels the now-outdated run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: api (lint, types, tests)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/api
+    # Real Postgres (with pgvector) and Redis for the integration tests.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: vectapilot
+          POSTGRES_PASSWORD: vectapilot-ci # throwaway database that lives only inside this job
+          POSTGRES_DB: vectapilot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vectapilot"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:8-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      VECTAPILOT_ENVIRONMENT: ci
+      VECTAPILOT_DATABASE_URL: postgresql+asyncpg://vectapilot:vectapilot-ci@localhost:5432/vectapilot
+      VECTAPILOT_REDIS_URL: redis://localhost:6379/0
+      RUN_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to a commit SHA: setup-uv publishes no floating major tag (like `v10`) after v7,
+      # and a SHA cannot be re-pointed to different code (supply-chain safety).
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          version: "0.12.24" # same as local development
+          working-directory: apps/api
+          enable-cache: true
+
+      - run: uv sync --locked
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+      - run: uv run pytest
+
+  web:
+    name: web (lint, build)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
