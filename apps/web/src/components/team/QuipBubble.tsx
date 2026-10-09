@@ -1,6 +1,7 @@
 "use client";
 
-import { AnimatePresence, motion, useInView } from "motion/react";
+import { AnimatePresence, useInView } from "motion/react";
+import * as m from "motion/react-m";
 import { useEffect, useRef, useState } from "react";
 
 import type { Status } from "@/lib/types";
@@ -57,7 +58,7 @@ export function QuipBubble({
       ) : (
         <AnimatePresence mode="wait" initial={false}>
           {state.typing ? (
-            <motion.span
+            <m.span
               key="typing"
               className="flex gap-1"
               aria-label="typing"
@@ -66,16 +67,16 @@ export function QuipBubble({
               exit={{ opacity: 0 }}
             >
               {[0, 1, 2].map((dot) => (
-                <motion.span
+                <m.span
                   key={dot}
                   className="size-1.5 rounded-full bg-mist-300"
                   animate={{ y: [0, -4, 0], opacity: [0.4, 1, 0.4] }}
                   transition={{ duration: 0.9, repeat: Infinity, delay: dot * 0.15 }}
                 />
               ))}
-            </motion.span>
+            </m.span>
           ) : (
-            <motion.p
+            <m.p
               key={state.index}
               className="text-mist-50"
               initial={{ opacity: 0, y: 6 }}
@@ -84,7 +85,7 @@ export function QuipBubble({
               transition={{ duration: 0.25 }}
             >
               “{quips[state.index]}”
-            </motion.p>
+            </m.p>
           )}
         </AnimatePresence>
       )}

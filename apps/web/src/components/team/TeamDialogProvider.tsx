@@ -1,7 +1,8 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence } from "motion/react";
+import * as m from "motion/react-m";
 import {
   createContext,
   useCallback,
@@ -49,7 +50,7 @@ export function TeamDialogProvider({ team, children }: { team: Teammate[]; child
           {isOpen && member && (
             <Dialog.Portal forceMount>
               <Dialog.Overlay asChild forceMount>
-                <motion.div
+                <m.div
                   className="fixed inset-0 z-50 bg-ink-950/75 backdrop-blur-sm"
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
@@ -58,7 +59,7 @@ export function TeamDialogProvider({ team, children }: { team: Teammate[]; child
               </Dialog.Overlay>
               <div className="pointer-events-none fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
                 <Dialog.Content asChild forceMount>
-                  <motion.div
+                  <m.div
                     className="pointer-events-auto relative max-h-[88vh] w-full overflow-y-auto rounded-t-3xl bg-ink-900 ring-1 ring-white/10 sm:max-w-xl sm:rounded-3xl"
                     initial={{ opacity: 0, y: 40, scale: 0.96 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -66,7 +67,7 @@ export function TeamDialogProvider({ team, children }: { team: Teammate[]; child
                     transition={{ type: "spring", stiffness: 320, damping: 30 }}
                   >
                     <TeammateBrief member={member} />
-                  </motion.div>
+                  </m.div>
                 </Dialog.Content>
               </div>
             </Dialog.Portal>
@@ -96,14 +97,14 @@ function TeammateBrief({ member }: { member: Teammate }) {
           } as CSSProperties
         }
       >
-        <motion.div
+        <m.div
           className="w-20 shrink-0 overflow-hidden rounded-2xl ring-2 ring-[var(--accent)]"
           initial={{ scale: 0.6, rotate: -10 }}
           animate={{ scale: 1, rotate: 0 }}
           transition={{ type: "spring", stiffness: 260, damping: 14, delay: 0.05 }}
         >
           <Avatar src={member.avatarSrc} size={80} />
-        </motion.div>
+        </m.div>
         <div className="min-w-0">
           <Dialog.Title className="font-display text-2xl font-bold">{member.name}</Dialog.Title>
           <p className="text-sm font-medium" style={{ color: member.accent }}>
@@ -123,17 +124,17 @@ function TeammateBrief({ member }: { member: Teammate }) {
         </Dialog.Close>
       </div>
 
-      <motion.div
+      <m.div
         className="space-y-6 px-6 pb-7"
         initial="hidden"
         animate="show"
         transition={{ staggerChildren: 0.06, delayChildren: 0.1 }}
       >
-        <motion.div variants={section}>
+        <m.div variants={section}>
           <Dialog.Description className="text-mist-200">{member.bio}</Dialog.Description>
-        </motion.div>
+        </m.div>
 
-        <motion.section variants={section}>
+        <m.section variants={section}>
           <BriefHeading>Owns</BriefHeading>
           <ul className="flex flex-wrap gap-2">
             {member.milestones.map((m) => (
@@ -145,9 +146,9 @@ function TeammateBrief({ member }: { member: Teammate }) {
               </li>
             ))}
           </ul>
-        </motion.section>
+        </m.section>
 
-        <motion.section variants={section}>
+        <m.section variants={section}>
           <BriefHeading>Principles</BriefHeading>
           <ul className="space-y-1.5 text-sm text-mist-200">
             {member.principles.map((p) => (
@@ -159,9 +160,9 @@ function TeammateBrief({ member }: { member: Teammate }) {
               </li>
             ))}
           </ul>
-        </motion.section>
+        </m.section>
 
-        <motion.section variants={section}>
+        <m.section variants={section}>
           <BriefHeading>Permissions</BriefHeading>
           <ul className="flex flex-wrap gap-1.5">
             {member.tools.map((tool) => (
@@ -174,14 +175,14 @@ function TeammateBrief({ member }: { member: Teammate }) {
             Read live from <code className="font-mono">{member.agentPath}</code> · model:{" "}
             <code className="font-mono">{member.model}</code>. Least privilege — only the tools this role needs.
           </p>
-        </motion.section>
+        </m.section>
 
-        <motion.section variants={section}>
+        <m.section variants={section}>
           <BriefHeading>Try it in Claude Code</BriefHeading>
           <CopyCommand command={command} />
-        </motion.section>
+        </m.section>
 
-        <motion.a
+        <m.a
           variants={section}
           href={member.agentUrl}
           target="_blank"
@@ -192,8 +193,8 @@ function TeammateBrief({ member }: { member: Teammate }) {
           <span aria-hidden className="transition-transform group-hover:translate-x-1">
             →
           </span>
-        </motion.a>
-      </motion.div>
+        </m.a>
+      </m.div>
     </>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { motion, useReducedMotion, useSpring } from "motion/react";
+import { useReducedMotion, useSpring } from "motion/react";
+import * as m from "motion/react-m";
 import type { CSSProperties, PointerEvent } from "react";
 
 import { Avatar } from "@/components/team/Avatar";
@@ -57,7 +58,7 @@ function TeammateCard({
   }
 
   return (
-    <motion.article
+    <m.article
       whileHover={{ y: -6 }}
       style={{ rotateX, rotateY, transformPerspective: 900 }}
       onPointerMove={handlePointerMove}
@@ -120,6 +121,6 @@ function TeammateCard({
           →
         </span>
       </div>
-    </motion.article>
+    </m.article>
   );
 }

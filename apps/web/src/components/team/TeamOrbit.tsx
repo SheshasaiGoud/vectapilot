@@ -1,6 +1,7 @@
 "use client";
 
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence } from "motion/react";
+import * as m from "motion/react-m";
 import { useEffect, useState, type CSSProperties } from "react";
 
 import { Avatar } from "@/components/team/Avatar";
@@ -47,7 +48,7 @@ export function TeamOrbit({ team, human }: { team: Teammate[]; human: HumanLead 
           aria-hidden
           className="absolute inset-0 animate-pulse-ring rounded-full border-2 border-indigo-400/60 [animation-delay:1.2s]"
         />
-        <motion.button
+        <m.button
           type="button"
           onClick={() => {
             setWave((w) => w + 1);
@@ -59,13 +60,13 @@ export function TeamOrbit({ team, human }: { team: Teammate[]; human: HumanLead 
           className="relative block w-full overflow-hidden rounded-full shadow-[0_0_70px_-10px_#818cf8] ring-4 ring-indigo-400/70"
         >
           <Avatar src={human.avatarSrc} size={130} eager />
-        </motion.button>
+        </m.button>
         <span className="pointer-events-none absolute -bottom-2.5 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-indigo-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-lg">
           {human.name} · lead
         </span>
         <AnimatePresence>
           {greeting && (
-            <motion.p
+            <m.p
               key={wave}
               role="status"
               className="pointer-events-none absolute bottom-full left-1/2 mb-3 -translate-x-1/2 whitespace-nowrap rounded-full bg-white px-3 py-1 text-xs font-semibold text-ink-950 shadow-xl"
@@ -74,7 +75,7 @@ export function TeamOrbit({ team, human }: { team: Teammate[]; human: HumanLead 
               exit={{ opacity: 0, y: -6 }}
             >
               👋 The crew says hi, {human.name}!
-            </motion.p>
+            </m.p>
           )}
         </AnimatePresence>
       </div>
@@ -138,7 +139,7 @@ function OrbitAvatar({
 }) {
   const { kind } = member.status;
   return (
-    <motion.button
+    <m.button
       type="button"
       onClick={() => onOpen(member.id)}
       aria-haspopup="dialog"
@@ -149,7 +150,7 @@ function OrbitAvatar({
       style={{ "--accent": member.accent } as CSSProperties}
     >
       {/* Re-keyed on every wave so the hop replays; nothing plays on first render. */}
-      <motion.span
+      <m.span
         key={wave}
         className="relative block"
         initial={false}
@@ -169,11 +170,11 @@ function OrbitAvatar({
             💤
           </span>
         )}
-      </motion.span>
+      </m.span>
       <span className="pointer-events-none absolute left-1/2 top-full z-20 mt-2 -translate-x-1/2 whitespace-nowrap rounded-full bg-ink-800/95 px-2.5 py-1 text-xs opacity-0 ring-1 ring-white/10 transition-opacity group-hover/avatar:opacity-100 group-focus-visible/avatar:opacity-100">
         <span className="font-semibold">{member.firstName}</span>
         <span className="text-mist-400"> · {member.role}</span>
       </span>
-    </motion.button>
+    </m.button>
   );
 }

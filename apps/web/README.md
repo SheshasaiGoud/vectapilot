@@ -43,6 +43,9 @@ they disagree (a teammate without a persona, an unknown milestone owner, a missi
 - **Animation:** CSS for entrances and loops (scroll reveal uses `animation-timeline: view()` as
   progressive enhancement — content is never hidden waiting for JavaScript); Motion for physics
   (card tilt, dialog, orbit wave). `prefers-reduced-motion` is respected by both.
+- **Motion is lazy-loaded:** components use `m.*` from `motion/react-m` inside `<LazyMotion strict>`,
+  and the animation features load on demand. Measured: initial JS 201.4 KB → 182.7 KB gzipped.
+  Use `m.div`, never `motion.div` — strict mode throws if you do.
 - **Accessibility:** Radix Dialog (focus trap, Escape, labelled title/description), keyboard-
   reachable cards via a stretched button, visible focus rings.
 
