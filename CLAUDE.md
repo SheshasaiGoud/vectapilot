@@ -76,9 +76,13 @@ Planned: `apps/api/` (FastAPI), `packages/mcp_server/`, `evals/`, `data/` (sampl
   workflow written (needs Pages enabled on the repo).
 - **Next:** finish M0 — Docker Compose, CI, FastAPI health endpoint, success metrics.
 
+## Environment
+- Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
+  installed; `nvm use 22` switches back for other projects.
+- A Claude desktop session keeps the PATH it was launched with, so it may still see Node 22 until
+  the app restarts. Prefix commands with `PATH="$HOME/.nvm/versions/node/v24.21.0/bin:$PATH"` if so.
+
 ## Known issues
-- Node 22.11 is installed locally; some ESLint packages want ≥ 22.13 (EBADENGINE warnings).
-  CI uses Node 24 LTS; upgrading local Node to 24 LTS is planned.
 - A stray `~/package-lock.json` exists outside the repo (not ours). `turbopack.root` pins the repo
   root so Next.js ignores it.
 - Next.js collects anonymous telemetry by default locally (disabled in CI).
@@ -101,3 +105,6 @@ Planned: `apps/api/` (FastAPI), `packages/mcp_server/`, `evals/`, `data/` (sampl
 - Why avatars are separate files instead of inlined SVG (a measured decision).
 - What `basePath` does and why GitHub Pages needs it.
 - How we proved the drift guard works (made it fail on purpose).
+- LazyMotion: why `m.*` + on-demand features cut initial JS from 201.4 KB to 182.7 KB (gzipped),
+  and why we measured before and after instead of assuming.
+- Why `.nvmrc` is the single source of truth for the Node version (local and CI).

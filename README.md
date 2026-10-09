@@ -5,9 +5,11 @@ questions from the business's own documents (with citations), takes safe actions
 tools, extracts data from uploaded documents, and hands risky or uncertain cases to a human with a
 drafted reply.
 
-> **Status:** 🚧 Milestone M0 (foundations) — the project has just started. Nothing below is built yet;
-> this README will be updated as each milestone lands. Any metric shown here will be a real,
-> measured number — never a placeholder.
+**🌐 Meet the team:** [sheshasaigoud.github.io/vectapilot](https://sheshasaigoud.github.io/vectapilot/)
+
+> **Status:** 🚧 Milestone M0 (foundations) — the project has just started. The product below is not
+> built yet; this README will be updated as each milestone lands. Any metric shown here will be a
+> real, measured number — never a placeholder.
 
 ## The problem
 
