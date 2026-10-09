@@ -1,0 +1,60 @@
+# Builds the team site (apps/web) as static HTML and publishes it to GitHub Pages.
+# Runs when the site or the team definitions change on main (the site reads .claude/agents/).
+name: Deploy team site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - ".claude/agents/**"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+# Least privilege: read the code, write only to Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; never cancel one that is already publishing.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
+        env:
+          # The site is served from https://<user>.github.io/vectapilot/
+          NEXT_PUBLIC_BASE_PATH: /vectapilot
+          NEXT_TELEMETRY_DISABLED: 1
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: apps/web/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
