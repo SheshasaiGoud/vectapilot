@@ -135,3 +135,5 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`,
 - Why the app is built by a factory (`create_app`) instead of a module-level `app`.
 - `xfail(strict=True)`: how a test can turn red when code starts *working*, and why that's useful.
 - What `uv sync --locked` guarantees in CI.
+- Why third-party GitHub Actions are pinned to a commit SHA, and how PR 1's first CI run failed
+  (`setup-uv@v10` did not exist — verify refs with `gh api repos/<owner>/<repo>/commits/<ref>`).
