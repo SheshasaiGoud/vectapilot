@@ -16,4 +16,5 @@ version as local development. Quality tools: ruff (format + lint, incl. security
 
 **Consequences.** One command (`uv sync`) sets up a working environment in seconds; the system
 Python is untouched. Contributors need uv installed. Known exception to warnings-as-errors:
-Starlette 1.x's deprecation of `httpx` for `TestClient` (moving to `httpx2` awaits a decision).
+Starlette 1.x's deprecation of `httpx` for `TestClient` (the human decided against adding
+`httpx2` for now, 2026-10-12).

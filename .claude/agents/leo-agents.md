@@ -28,6 +28,8 @@ sandbox you may build fully.
 
 ## How you work
 - Tools cannot be triggered by raw user text alone; the loop decides, and writes need confirmation.
+- Tools and their credentials are per business: a tool call can only ever touch the current
+  business's systems and data (ADR 0004).
 - Prefer small, single-purpose tools with boring, explicit schemas.
 - Every failure path (timeout, bad arguments, partial failure) has a test and a human fallback.
 

@@ -1,9 +1,11 @@
 # VectaPilot
 
-**AI Support & Operations Copilot for small businesses** — a supervised assistant that answers customer
-questions from the business's own documents (with citations), takes safe actions through permissioned
-tools, extracts data from uploaded documents, and hands risky or uncertain cases to a human with a
-drafted reply.
+**A configurable AI customer-support platform for many kinds of businesses** — clinics, veterinary
+clinics and pet stores, online shops and other service or retail businesses. For each business it
+answers customer questions from that business's own approved documents (with citations), takes safe
+actions through permissioned tools, extracts data from uploaded documents, and hands risky or
+uncertain cases to a human with a drafted reply. Each business's data stays isolated.
+Details: [docs/business-context.md](docs/business-context.md).
 
 **🌐 Meet the team:** [sheshasaigoud.github.io/vectapilot](https://sheshasaigoud.github.io/vectapilot/)
 

@@ -4,9 +4,12 @@ Project memory for Claude Code. Every session **and every teammate subagent** re
 Keep it short, true and current.
 
 ## What this is
-VectaPilot is an AI Support & Operations Copilot for small businesses: grounded RAG answers with
-citations, safe actions through MCP tools, document extraction, human-in-the-loop review, evals in
-CI. It is a hands-on learning and portfolio project; the human lead (**shesha**, GitHub
+VectaPilot is a **configurable, multi-business AI customer-support platform** — clinics and
+healthcare centres, veterinary clinics and pet stores, e-commerce and other service or retail
+businesses each configure their own identity, channels, languages, knowledge and escalation rules
+(see [`docs/business-context.md`](docs/business-context.md)). Grounded RAG answers with citations,
+safe actions through MCP tools, document extraction, human-in-the-loop review, evals in CI.
+It is a hands-on learning and portfolio project; the human lead (**shesha**, GitHub
 `SheshasaiGoud`) is a web engineer becoming an AI engineer. The plan follows the
 "SupportPilot Project Playbook" (the playbook's name for this project; this repo is VectaPilot).
 
@@ -29,6 +32,13 @@ CI. It is a hands-on learning and portfolio project; the human lead (**shesha**,
    `apps/web/AGENTS.md` → `node_modules/next/dist/docs/`). Check compatibility before installing.
 8. **Finish with a hand-off note:** what changed (files), how it was verified, what the human should
    now be able to explain, and 1–3 quiz questions.
+9. **Multi-business by default.** Never hard-code a business, channel, language or document set.
+   Everything business-specific comes from that business's configuration, and every data path
+   (database, vector search, files, caches, prompts, tools, logs) is scoped by `business_id`.
+10. **Ask, don't invent.** Unresolved technical or business decisions go to the human as questions
+    (see `docs/business-context.md` §9); proposals are labelled as proposals.
+11. **Dependencies.** Before proposing any new package, explain exactly what it is (name, publisher,
+    what pulls it in) and its concrete benefit — then wait for a yes.
 
 ## The team (`.claude/agents/`)
 | Agent | Person | Owns |
@@ -50,6 +60,8 @@ entry in `apps/web/src/data/personas.ts` and `npm run avatars`; the build fails 
 Feature branch → pull request → CI (`api (lint, types, tests)` and `web (lint, build)`) must pass
 → the human reviews and merges. `main` is branch-protected; never push to it directly.
 `[HAND-WRITE]` work happens on the human's own branch and PR.
+Automatic CI fixes are **disabled** (the human's choice): when CI fails, read the log, explain the
+cause, and propose the fix.
 
 ## Commands
 API (run inside `apps/api/`, Python 3.12 managed by uv):
@@ -84,15 +96,19 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`,
 - [ADR 0001](docs/adr/0001-virtual-team-as-claude-code-subagents.md) — virtual team as Claude Code subagents
 - [ADR 0002](docs/adr/0002-team-site-static-nextjs.md) — team site as a static Next.js export
 - [ADR 0003](docs/adr/0003-python-toolchain-uv.md) — Python toolchain: uv, ruff, mypy strict, pytest
+- [ADR 0004](docs/adr/0004-multi-business-isolation.md) — isolation between businesses: shared tables + `business_id` + Postgres row-level security
 
 ## Current status
 - **Milestone:** M0 (foundations). Done: repo, licence, virtual team, team site (live on GitHub
-  Pages), Node 24 pin. In PR 1: API skeleton + CI.
-- **M0 plan:** PR 1 API skeleton + CI → PR 2 Docker Compose, Dockerfile, Alembic + pgvector,
-  Makefile → PR 3 the human's `/readyz` implementation ([HAND-WRITE],
-  `docs/learning/m0-readiness.md`) → PR 4 business context, success metrics, wrap-up.
-- **Business:** a real business (details pending from the human).
-- **Observability:** no Langfuse in M0 (8 GB RAM Mac); decide in M1 (ADR 0004).
+  Pages), Node 24 pin, API skeleton + CI (PR #1, merged).
+- **M0 plan (remaining):** business-context PR (multi-business model, ADR 0004 proposed) →
+  **Docker PR** (Compose, Dockerfile, Alembic + pgvector, Makefile — remind the human to start
+  Docker Desktop first) → the human's `/readyz` PR ([HAND-WRITE], `docs/learning/m0-readiness.md`)
+  → wrap-up (metrics sign-off, ADR on local stack/observability, quiz).
+- **Business model:** configurable multi-business platform. Decided: fictional pilot businesses for
+  now (all eval data labelled synthetic), row-level-security isolation, config files via PRs (admin
+  screen later), regions India + other countries. Still open: `docs/business-context.md` §9.
+- **Observability:** no Langfuse in M0 (8 GB RAM Mac); decide in M1 and record it in an ADR.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -107,10 +123,11 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`,
 - In the Claude desktop browser pane, animation frames are heavily throttled and plain screenshots
   can be stale: verify with DOM checks and the `zoom` capture instead.
 - System Python is 3.9.6; the API uses uv-managed Python 3.12 (never the system one).
-- Pending decision: Starlette 1.x deprecates `httpx` for `TestClient` in favour of `httpx2`
-  (by httpx's author, under the pydantic org). Adding the new package needs the human's approval;
-  until then pytest ignores that one warning.
-- Docker Desktop must be running for the local stack (PR 2).
+- `httpx2` — **decided No for now** (2026-10-12). Starlette 1.x's `TestClient` prefers the
+  `httpx2` package and falls back to `httpx` with a deprecation warning, which pytest ignores
+  (see `apps/api/pyproject.toml`). Do not re-propose without explaining the exact dependency and
+  its benefit first (rule 11).
+- Docker Desktop must be running for the local stack (Docker PR) — remind the human before it.
 - `npm audit` reports 5 "high" issues, all in the dev-only lint chain
   (`eslint-config-next` → `fast-glob` → `micromatch` → `braces`). npm's suggested fix is a
   wrong-major downgrade, so it is accepted for now; re-check on each Next.js update.

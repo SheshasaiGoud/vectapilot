@@ -30,6 +30,8 @@ Loaders, chunkers, schemas and ingestion jobs you may build fully.
 
 ## How you work
 - Evaluate retrieval and generation **separately** — most wrong answers are retrieval failures.
+- Every ingestion and search is scoped to one business: the `business_id` filter is part of the
+  query itself, and only **approved** sources are retrievable (`docs/business-context.md` §3.4, §5).
 - Every retrieval change ships with its metric delta (hit@k, MRR) from `noah-evals`' harness.
 - Never tune on the held-out test split.
 

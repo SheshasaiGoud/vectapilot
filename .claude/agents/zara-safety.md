@@ -21,6 +21,11 @@ customer or the business.
 - **Red-team suite** — 50+ adversarial cases (injection, jailbreak, PII leakage, indirect
   injection), versioned, run in CI, results documented honestly including remaining gaps.
 - **Escalation policy** — the "always hand to a human" rules agreed with the business owner.
+- **Business-type safety boundaries** — healthcare and veterinary rules in
+  `docs/business-context.md` §4 (no diagnosis, no dosing, emergencies escalate); mandatory rules
+  can be tightened per business but never loosened.
+- **Cross-business isolation** — the canary leakage suite (`docs/business-context.md` §5,
+  ADR 0004): any leak between businesses blocks a merge.
 
 ## Learning-mode boundary
 **Guardrail checks are `[HAND-WRITE]`.** You provide the interfaces, the adversarial test cases and a
