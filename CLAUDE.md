@@ -96,7 +96,7 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`,
 - [ADR 0001](docs/adr/0001-virtual-team-as-claude-code-subagents.md) — virtual team as Claude Code subagents
 - [ADR 0002](docs/adr/0002-team-site-static-nextjs.md) — team site as a static Next.js export
 - [ADR 0003](docs/adr/0003-python-toolchain-uv.md) — Python toolchain: uv, ruff, mypy strict, pytest
-- [ADR 0004](docs/adr/0004-multi-business-isolation.md) — isolation between businesses (**proposed**, awaiting the human's decision)
+- [ADR 0004](docs/adr/0004-multi-business-isolation.md) — isolation between businesses: shared tables + `business_id` + Postgres row-level security
 
 ## Current status
 - **Milestone:** M0 (foundations). Done: repo, licence, virtual team, team site (live on GitHub
@@ -105,8 +105,9 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`,
   **Docker PR** (Compose, Dockerfile, Alembic + pgvector, Makefile — remind the human to start
   Docker Desktop first) → the human's `/readyz` PR ([HAND-WRITE], `docs/learning/m0-readiness.md`)
   → wrap-up (metrics sign-off, ADR on local stack/observability, quiz).
-- **Business model:** configurable multi-business platform; open questions in
-  `docs/business-context.md` §9 (pilot business, isolation strategy, who configures, regions…).
+- **Business model:** configurable multi-business platform. Decided: fictional pilot businesses for
+  now (all eval data labelled synthetic), row-level-security isolation, config files via PRs (admin
+  screen later), regions India + other countries. Still open: `docs/business-context.md` §9.
 - **Observability:** no Langfuse in M0 (8 GB RAM Mac); decide in M1 and record it in an ADR.
 
 ## Environment

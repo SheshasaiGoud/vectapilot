@@ -1,6 +1,6 @@
 # ADR 0004 — Keeping businesses isolated in a multi-business platform
 
-- **Status:** proposed · 2026-10-12 · decision pending (business-context §9, Q2)
+- **Status:** accepted · 2026-10-12 · chosen by shesha (business-context §9, Q2)
 
 **Context.** VectaPilot serves many businesses (clinics, vet clinics, pet stores, online shops…).
 Each business's configuration, knowledge sources, conversations and data must never leak to, or
@@ -17,7 +17,7 @@ prompts, in tools and in logs — not only in SQL queries.
 | (c) | A separate schema per business | Strong | Migrations run once per business; harder vector/eval tooling |
 | (d) | A separate database per business | Strongest | Highest operating cost; overkill for a pilot |
 
-**Proposed decision.** (b): every business-owned table has a non-null `business_id`; RLS policies
+**Decision.** (b): every business-owned table has a non-null `business_id`; RLS policies
 enforce it; the API sets the current business on each database connection; vector search includes
 the `business_id` filter inside the query. The same scoping applies to files, caches, prompts,
 tool credentials and logs (business-context §5). A cross-business "canary" leakage test suite runs

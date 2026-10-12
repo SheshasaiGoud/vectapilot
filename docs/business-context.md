@@ -1,6 +1,6 @@
 # Business context — a configurable, multi-business support platform
 
-- **Status:** draft v0.1 · 2026-10-12 · owner: shesha
+- **Status:** draft v0.2 · 2026-10-12 · owner: shesha · Priority-1 decisions answered (§9)
 - **Legend:** ✅ decided by shesha · 🟡 proposed (needs approval) · ❓ open question (see §9)
 
 Nothing marked 🟡 or ❓ is a requirement yet. Open questions are asked, not assumed.
@@ -37,6 +37,10 @@ stores · e-commerce businesses · other service-based or retail businesses.
    that need professional judgement always go to a human (§4).
 5. **Ask, don't invent** — unresolved technical or business decisions are listed in §9.
 
+**Pilot** ✅ (Q1): development and evaluation use **fictional businesses** for now. All evaluation
+data is labelled *synthetic*, so results describe the system, not real-world performance. A real
+pilot business is still needed before any real-world claim (playbook, M11).
+
 ---
 
 ## 2. How configuration is layered 🟡
@@ -50,8 +54,12 @@ platform defaults          e.g. "always offer a human", AI disclosure, rate limi
 - A business inherits its type's template and adds its own settings on top.
 - 🟡 **Safety rules can be tightened but never loosened** by a business: a clinic may add
   escalation triggers but cannot switch off the healthcare emergency rules.
-- 🟡 Every configuration change is versioned and audited (who changed what, when), and the
-  evaluation suite reruns for that business before the change goes live.
+- ✅ (Q3) **Configuration lives in versioned files**, managed by the platform operator through pull
+  requests; a self-serve admin screen for businesses comes later. 🟡 Proposed layout:
+  `config/businesses/<business_id>.yaml`, validated against a schema in CI; documents for the
+  fictional businesses under `data/sample/<business_id>/` (real business documents never go in git).
+- 🟡 Every configuration change is reviewed in a PR (who changed what, when), and the evaluation
+  suite reruns for that business before the change merges.
 
 ---
 
@@ -170,8 +178,11 @@ crisis line) → urgent hand-off to staff. The red-flag list is configured per b
 must be reviewed by a professional (Q8). Missing a real emergency is the worst failure mode, so
 this category is evaluated for **recall** (§6).
 
-**Health data** is sensitive personal data in most regions (e.g. India's DPDP Act, GDPR, HIPAA).
-❓ Q4 (regions) and ❓ Q7 (may the assistant ask for a reason-for-visit or symptoms when booking?).
+**Health data** is sensitive personal data in most regions. Regions ✅ (Q4): **India** (Digital
+Personal Data Protection Act) **plus other countries** — ❓ Q4b which ones, since each adds its own
+privacy law (e.g. GDPR, HIPAA) and emergency numbers. Emergency guidance is therefore always
+configured per business, never hard-coded. ❓ Q7: may the assistant ask for a reason-for-visit or
+symptoms when booking?
 
 ### 4.2 Veterinary clinics and pet stores
 
@@ -200,11 +211,12 @@ trauma, signs of bloat, difficult birth, heatstroke → the business's configure
 **Requirement** ✅: one business's configuration, knowledge, conversations and data can never be
 seen by — or influence answers for — another business.
 
-**Proposed controls** 🟡 (technical decision: ❓ Q2, recorded in ADR 0004)
+**Controls** — database strategy ✅ (Q2, ADR 0004 accepted): shared tables + `business_id` +
+Postgres row-level security. The other controls are 🟡 proposed.
 
 | Where | Control |
 |---|---|
-| Database | Every row carries a `business_id`; every query is scoped to it; 🟡 Postgres **row-level security** enforces this inside the database as a second line of defence |
+| Database | Every row carries a `business_id`; every query is scoped to it; ✅ Postgres **row-level security** enforces this inside the database as a second line of defence |
 | Vector search | The `business_id` filter is part of the search itself, never applied afterwards |
 | Files | Uploads stored under per-business paths |
 | Caches and queues | Keys always include the `business_id` |
@@ -225,7 +237,8 @@ what you have not tested).
 Measured **per business**, and broken down by business type, language and channel. A release must
 meet the thresholds for **every** pilot business — a good average cannot hide one business getting
 worse. Each target says where it comes from — the playbook or Claude's proposal — and all are
-starting points to revisit after the first measured baseline.
+starting points to revisit after the first measured baseline. While the pilot is fictional (Q1),
+every number is reported as measured on **synthetic** data.
 
 | Area | Metric | How it is measured | Proposed starting target |
 |---|---|---|---|
@@ -250,8 +263,8 @@ topic within 24 hours?) and approval of these targets.
 
 ## 7. Example configurations (illustrative, fictional)
 
-Shows how three very different businesses fit one model. ❓ Q3 decides whether real configuration
-lives in files like this or in the database behind an admin screen.
+Shows how three very different businesses fit one model. Configuration lives in files like these
+(✅ Q3); the exact schema is designed when the first one is needed.
 
 ```yaml
 business_id: sunrise-clinic            # fictional multi-doctor clinic
@@ -294,25 +307,26 @@ escalation:
 | M5 | Tools and their credentials are per business |
 | M6 | Extraction schemas per business type |
 | M7 | Healthcare/veterinary safety rules + the cross-business leakage suite |
-| M8 | Staff dashboard scoped to one business; ❓ Q3 decides whether businesses get a self-serve admin screen |
+| M8 | Staff dashboard scoped to one business; a self-serve admin screen comes later (✅ Q3) |
 | M2–M10 | Eval sets and metrics per business (§6) |
-| M11 | Pilot with at least one real business (❓ Q1) |
+| M11 | Pilot with at least one real business — evaluation data is fictional until then (✅ Q1) |
 
 ---
 
-## 9. Open decisions — for shesha ❓
+## 9. Decisions and open questions — for shesha
 
-**Priority 1 — needed before M2 (data model, ingestion)**
-1. **Pilot:** which business type(s) come first, and is there at least one **real** business for
-   the pilot and its evaluation data? (The playbook's strongest advice.)
-2. **Isolation strategy:** shared tables + `business_id` + row-level security (proposed) — or a
-   separate schema or database per business? (ADR 0004)
-3. **Who configures a business:** the platform operator via configuration files in git, or each
-   business through a self-serve admin screen (larger M8)?
-4. **Regions:** which countries will businesses and their customers be in? (Data protection law,
-   data residency, emergency numbers.)
+**Answered** ✅ (2026-10-12)
 
-**Priority 2 — needed before the related milestone**
+| # | Question | Decision |
+|---|---|---|
+| Q1 | Pilot business | Fictional businesses for now; evaluation data labelled synthetic; a real pilot is still needed before M11 |
+| Q2 | Isolation strategy | Shared tables + `business_id` + Postgres row-level security (ADR 0004 accepted) |
+| Q3 | Who configures a business | Versioned config files via PRs now; self-serve admin screen later |
+| Q4 | Regions | India plus other countries |
+
+**Still open** ❓
+
+4b. **Other countries:** which ones, besides India? (Privacy law, data residency, emergency numbers.)
 5. **WhatsApp:** in scope for the first pilot? Directly via Meta's Cloud API or through a provider?
 6. **Translation:** may answers be translated from a source in another language?
 7. **Health data at booking:** may the assistant ask for symptoms or a reason for the visit?
