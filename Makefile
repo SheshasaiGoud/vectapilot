@@ -1,0 +1,52 @@
+# VectaPilot developer commands. Run `make` (or `make help`) to list them.
+
+COMPOSE := docker compose -f infra/compose.yaml
+API     := cd apps/api &&
+LOCAL_DB_URL    := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapilot-dev}@127.0.0.1:5432/vectapilot
+LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
+
+.DEFAULT_GOAL := help
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test test-integration check
+
+help: ## List the available commands
+	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
+
+# ── Local stack (Docker) ────────────────────────────────────────────────────────────────
+up: ## Start Postgres + Redis, run migrations, start the API (http://127.0.0.1:8000)
+	$(COMPOSE) up --build --detach --wait
+
+down: ## Stop the local stack (database data is kept)
+	$(COMPOSE) down
+
+logs: ## Follow the logs of every service
+	$(COMPOSE) logs --follow
+
+ps: ## Show the status of every service
+	$(COMPOSE) ps --all
+
+migrate: ## Apply database migrations
+	$(COMPOSE) run --rm migrate
+
+reset-db: ## DELETE all local database data (asks for confirmation)
+	@read -p "This deletes ALL local Postgres data. Type 'yes' to continue: " answer && [ "$$answer" = yes ]
+	$(COMPOSE) down --volumes
+
+# ── Quality checks (the same ones CI runs) ──────────────────────────────────────────────
+lint: ## Format check + lint (API and web)
+	$(API) uv run ruff format --check . && uv run ruff check .
+	cd apps/web && npm run lint
+
+format: ## Auto-format the API code
+	$(API) uv run ruff format .
+
+typecheck: ## Strict type check of the API
+	$(API) uv run mypy
+
+test: ## API tests that need no services
+	$(API) uv run pytest
+
+test-integration: up ## API tests including real Postgres + Redis (starts the stack)
+	$(API) RUN_INTEGRATION=1 VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" \
+		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run pytest
+
+check: lint typecheck test ## Everything CI checks, locally

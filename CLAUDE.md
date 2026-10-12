@@ -64,12 +64,19 @@ Automatic CI fixes are **disabled** (the human's choice): when CI fails, read th
 cause, and propose the fix.
 
 ## Commands
+From the repository root (`make` lists everything):
+- `make up` — Postgres + pgvector, Redis, migrations, API at http://127.0.0.1:8000 (Docker Desktop must run)
+- `make down` · `make ps` · `make logs` · `make migrate` · `make reset-db` (deletes local data, asks first)
+- `make check` — lint + types + tests, as CI · `make test-integration` — tests against the real stack
+
 API (run inside `apps/api/`, Python 3.12 managed by uv):
 - `uv sync` — create/update the virtualenv from `uv.lock`
 - `uv run vectapilot-api` — dev server at http://127.0.0.1:8000 (needs `VECTAPILOT_DATABASE_URL`
   and `VECTAPILOT_REDIS_URL`; see `/healthz`, `/readyz`, `/docs`)
 - `uv run pytest` · `uv run mypy` · `uv run ruff check .` · `uv run ruff format .`
 - `RUN_INTEGRATION=1 uv run pytest` — also run tests against real Postgres/Redis
+- `uv run alembic upgrade head` · `uv run alembic revision -m "..." --rev-id 000N` — migrations
+  (database URL comes from Settings / `apps/api/.env`, never from alembic.ini)
 
 Team site (run inside `apps/web/`):
 - `npm run dev` — local dev server at http://localhost:3000
@@ -79,32 +86,34 @@ Team site (run inside `apps/web/`):
 - Preview the production build: `python3 -m http.server 4173 --bind 127.0.0.1 --directory out`
 - GitHub Pages build: `NEXT_PUBLIC_BASE_PATH=/vectapilot npm run build` (CI does this)
 
-Planned in M0: `make up | make test | make lint | make eval | make migrate`.
 
 ## Repository layout
 ```
 .claude/agents/      virtual teammates (Claude Code subagents)
-apps/api/            FastAPI service (uv project): config, JSON logging, /healthz, /readyz
+apps/api/            FastAPI service (uv project): config, JSON logging, /healthz, /readyz,
+                     Alembic migrations, Dockerfile
 apps/web/            Next.js — team site now; customer widget + staff dashboard later
 docs/adr/            architecture decision records
 docs/learning/       guides for [HAND-WRITE] tasks
-.github/workflows/   ci.yml (lint, types, tests) · deploy-site.yml (GitHub Pages)
+.github/workflows/   ci.yml (lint, types, tests, image build) · deploy-site.yml (GitHub Pages)
+infra/               compose.yaml — the local stack
+Makefile             developer commands
 ```
-Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`, `scripts/`.
+Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/`.
 
 ## Decisions
 - [ADR 0001](docs/adr/0001-virtual-team-as-claude-code-subagents.md) — virtual team as Claude Code subagents
 - [ADR 0002](docs/adr/0002-team-site-static-nextjs.md) — team site as a static Next.js export
 - [ADR 0003](docs/adr/0003-python-toolchain-uv.md) — Python toolchain: uv, ruff, mypy strict, pytest
 - [ADR 0004](docs/adr/0004-multi-business-isolation.md) — isolation between businesses: shared tables + `business_id` + Postgres row-level security
+- [ADR 0005](docs/adr/0005-local-stack-docker-compose.md) — local stack with Docker Compose; no Langfuse in M0
 
 ## Current status
 - **Milestone:** M0 (foundations). Done: repo, licence, virtual team, team site (live on GitHub
   Pages), Node 24 pin, API skeleton + CI (PR #1, merged).
-- **M0 plan (remaining):** business-context PR (multi-business model, ADR 0004 proposed) →
-  **Docker PR** (Compose, Dockerfile, Alembic + pgvector, Makefile — remind the human to start
-  Docker Desktop first) → the human's `/readyz` PR ([HAND-WRITE], `docs/learning/m0-readiness.md`)
-  → wrap-up (metrics sign-off, ADR on local stack/observability, quiz).
+- **M0 done so far:** API skeleton + CI (#1), business context (#2), Docker stack (this PR).
+- **M0 remaining:** the human's `/readyz` PR ([HAND-WRITE], `docs/learning/m0-readiness.md`) →
+  wrap-up (metrics sign-off, quiz).
 - **Business model:** configurable multi-business platform. Decided: fictional pilot businesses for
   now (all eval data labelled synthetic), row-level-security isolation, config files via PRs (admin
   screen later), regions India + other countries. Still open: `docs/business-context.md` §9.
@@ -127,7 +136,8 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`,
   `httpx2` package and falls back to `httpx` with a deprecation warning, which pytest ignores
   (see `apps/api/pyproject.toml`). Do not re-propose without explaining the exact dependency and
   its benefit first (rule 11).
-- Docker Desktop must be running for the local stack (Docker PR) — remind the human before it.
+- Docker Desktop must be running for `make up` / `make test-integration`.
+- The Docker healthcheck calls `/healthz` every 10 s, so API access logs contain those requests.
 - `npm audit` reports 5 "high" issues, all in the dev-only lint chain
   (`eslint-config-next` → `fast-glob` → `micromatch` → `braces`). npm's suggested fix is a
   wrong-major downgrade, so it is accepted for now; re-check on each Next.js update.
@@ -152,5 +162,8 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `infra/`,
 - Why the app is built by a factory (`create_app`) instead of a module-level `app`.
 - `xfail(strict=True)`: how a test can turn red when code starts *working*, and why that's useful.
 - What `uv sync --locked` guarantees in CI.
+- Why the API image is multi-stage, non-root and cannot modify its own code.
+- Why the `migrate` job runs before the API starts, and what a migration "head" is.
+- Why the stack's ports are published on 127.0.0.1 only.
 - Why third-party GitHub Actions are pinned to a commit SHA, and how PR 1's first CI run failed
   (`setup-uv@v10` did not exist — verify refs with `gh api repos/<owner>/<repo>/commits/<ref>`).

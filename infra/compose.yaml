@@ -1,0 +1,64 @@
+# Local development stack: Postgres (+ pgvector), Redis, a one-off migration job, and the API.
+# Start it from the repository root with `make up`.
+#
+# Ports are published on 127.0.0.1 only, so nothing here is reachable from other devices on
+# your network. The default password is for this local stack only; override it in infra/.env.
+name: vectapilot
+
+x-api-environment: &api-environment
+  VECTAPILOT_ENVIRONMENT: local
+  VECTAPILOT_DATABASE_URL: postgresql+asyncpg://vectapilot:${POSTGRES_PASSWORD:-vectapilot-dev}@postgres:5432/vectapilot
+  VECTAPILOT_REDIS_URL: redis://redis:6379/0
+  VECTAPILOT_LOG_LEVEL: ${VECTAPILOT_LOG_LEVEL:-INFO}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: vectapilot
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vectapilot-dev}
+      POSTGRES_DB: vectapilot
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      # Postgres 18 keeps its data under /var/lib/postgresql/18/docker; mount the parent.
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vectapilot -d vectapilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:8-alpine
+    ports: ["127.0.0.1:6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Applies database migrations once, then exits. The API only starts if this succeeds.
+  migrate:
+    # Reuses the image built by the `api` service; building it here too would race.
+    image: vectapilot-api:dev
+    pull_policy: never
+    command: ["alembic", "upgrade", "head"]
+    environment: *api-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    image: vectapilot-api:dev
+    build: ../apps/api
+    environment: *api-environment
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:

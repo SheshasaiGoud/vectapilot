@@ -87,7 +87,18 @@ same files at build time.
 apps/api/         FastAPI service (Python 3.12, uv)
 apps/web/         Next.js team site (customer widget + staff dashboard later)
 docs/adr/         architecture decision records
+infra/            Docker Compose stack for local development
 .github/          CI and deployment workflows
 ```
 
-Run the team site locally: `cd apps/web && npm install && npm run dev`.
+## Run it locally
+
+Requirements: Docker Desktop, [uv](https://docs.astral.sh/uv/), Node 24 (`nvm use`).
+
+```bash
+make up      # Postgres + pgvector, Redis, migrations, API on http://127.0.0.1:8000
+make check   # lint, type checks and tests — the same checks CI runs
+make down    # stop the stack
+```
+
+Team site: `cd apps/web && npm install && npm run dev`.
