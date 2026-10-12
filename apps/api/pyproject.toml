@@ -54,7 +54,7 @@ markers = ["integration: needs real Postgres and Redis (set RUN_INTEGRATION=1)"]
 xfail_strict = true
 filterwarnings = [
     "error",
-    # Starlette 1.x prefers `httpx2` for TestClient. Kept on `httpx` until the human decides on
-    # adding the new package (see CLAUDE.md, Known issues).
+    # Starlette 1.x prefers `httpx2` for TestClient; the human decided to stay on `httpx` for now
+    # (2026-10-12, see CLAUDE.md, Known issues), so this one deprecation warning is ignored.
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]
