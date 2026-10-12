@@ -60,7 +60,29 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run ruff check .
       - run: uv run mypy
+      - name: Apply database migrations
+        run: uv run alembic upgrade head
       - run: uv run pytest
+
+  api-image:
+    name: api image (docker build)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      # Builds the same image `make up` uses, so a broken Dockerfile fails the PR, not a deploy.
+      - run: docker build --tag vectapilot-api:ci apps/api
+      - name: Container starts and /healthz answers
+        run: |
+          docker run --detach --name api --publish 127.0.0.1:8000:8000 \
+            --env VECTAPILOT_DATABASE_URL=postgresql+asyncpg://u:p@127.0.0.1:1/db \
+            --env VECTAPILOT_REDIS_URL=redis://127.0.0.1:1/0 \
+            vectapilot-api:ci
+          for attempt in $(seq 1 30); do
+            curl --silent --fail http://127.0.0.1:8000/healthz && exit 0
+            sleep 1
+          done
+          docker logs api
+          exit 1
 
   web:
     name: web (lint, build)
