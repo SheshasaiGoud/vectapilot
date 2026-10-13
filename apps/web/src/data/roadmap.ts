@@ -10,7 +10,10 @@ export interface Milestone {
   owners: string[];
 }
 
-export const currentMilestone = "M0";
+export const currentMilestone = "M1";
+
+/** Teammates who review every milestone; shown as always active. */
+export const reviewers: string[] = ["maya-tech-lead"];
 
 export const milestones: Milestone[] = [
   {

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import palette from "@/data/palette.json";
 import { humanLead, personas } from "@/data/personas";
-import { currentMilestone, milestones } from "@/data/roadmap";
+import { currentMilestone, milestones, reviewers } from "@/data/roadmap";
 import { readAgentFiles } from "@/lib/agents";
 import type { HumanLead, MilestoneView, Status, Teammate } from "@/lib/types";
 
@@ -25,6 +25,7 @@ function isPaletteColor(color: string): color is PaletteColor {
 
 /** Status is derived from the roadmap, never hand-written, so it cannot go stale. */
 function statusFor(id: string): Status {
+  if (reviewers.includes(id)) return { kind: "active", label: "Reviews every milestone" };
   const now = milestones.findIndex((m) => m.id === currentMilestone);
   if (milestones[now].owners.includes(id)) {
     return { kind: "active", label: `On ${currentMilestone} now` };
@@ -59,6 +60,9 @@ export function getTeamData(): {
     for (const owner of milestone.owners) {
       if (!personas[owner]) problems.push(`${milestone.id} owner "${owner}" is not a teammate`);
     }
+  }
+  for (const reviewer of reviewers) {
+    if (!personas[reviewer]) problems.push(`reviewer "${reviewer}" is not a teammate`);
   }
   if (!milestones.some((m) => m.id === currentMilestone)) {
     problems.push(`currentMilestone "${currentMilestone}" is not in the roadmap`);
