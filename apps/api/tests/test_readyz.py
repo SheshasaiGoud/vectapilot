@@ -1,9 +1,7 @@
-"""Tests for the readiness checks you hand-write (guide: docs/learning/m0-readiness.md).
+"""Tests for the readiness checks (guide: docs/learning/m0-readiness.md).
 
-Today they fail with NotImplementedError, so the whole file is marked xfail(strict=True).
-When your implementation makes them pass, strict mode turns each "unexpected pass" into a
-failure — that is your signal to delete the `pytestmark` line below. Do not edit the tests to
-make them pass; change the code.
+The endpoint logic is tested with fake checks (no database needed); the check functions are
+tested against unreachable servers and, with RUN_INTEGRATION=1, against the real local stack.
 """
 
 import asyncio
@@ -24,9 +22,6 @@ from vectapilot_api.health import (
     check_redis,
     get_readiness_checks,
 )
-
-pytestmark = pytest.mark.xfail(strict=True, reason="HAND-WRITE: readiness checks not implemented")
-
 
 # ── Fake checks: the endpoint logic is tested without any real database ─────────────────────
 
@@ -53,15 +48,15 @@ def raising(name: str) -> ReadinessCheck:
     return check
 
 
-def use_checks(app: FastAPI, *checks: ReadinessCheck) -> None:
-    app.dependency_overrides[get_readiness_checks] = lambda: list(checks)
+def use_checks(app: FastAPI, **checks: ReadinessCheck) -> None:
+    app.dependency_overrides[get_readiness_checks] = lambda: checks
 
 
 # ── The /readyz endpoint ─────────────────────────────────────────────────────────────────────
 
 
 def test_all_checks_passing_returns_200(app: FastAPI, client: TestClient) -> None:
-    use_checks(app, passing("postgres"), passing("redis"))
+    use_checks(app, postgres=passing("postgres"), redis=passing("redis"))
 
     response = client.get("/readyz")
 
@@ -76,7 +71,7 @@ def test_all_checks_passing_returns_200(app: FastAPI, client: TestClient) -> Non
 
 
 def test_any_failing_check_returns_503(app: FastAPI, client: TestClient) -> None:
-    use_checks(app, passing("postgres"), failing("redis"))
+    use_checks(app, postgres=passing("postgres"), redis=failing("redis"))
 
     response = client.get("/readyz")
 
@@ -88,7 +83,7 @@ def test_any_failing_check_returns_503(app: FastAPI, client: TestClient) -> None
 
 
 def test_a_check_that_raises_is_reported_not_crashed(app: FastAPI, client: TestClient) -> None:
-    use_checks(app, raising("postgres"), passing("redis"))
+    use_checks(app, postgres=raising("postgres"), redis=passing("redis"))
 
     response = client.get("/readyz")
 
@@ -98,7 +93,7 @@ def test_a_check_that_raises_is_reported_not_crashed(app: FastAPI, client: TestC
 
 def test_a_slow_check_times_out(app: FastAPI, client: TestClient) -> None:
     # The test settings use readiness_timeout_seconds=0.5.
-    use_checks(app, passing("postgres", delay=5), passing("redis"))
+    use_checks(app, postgres=passing("postgres", delay=5), redis=passing("redis"))
 
     started = time.perf_counter()
     response = client.get("/readyz")
@@ -110,7 +105,7 @@ def test_a_slow_check_times_out(app: FastAPI, client: TestClient) -> None:
 
 
 def test_checks_run_concurrently(app: FastAPI, client: TestClient) -> None:
-    use_checks(app, passing("postgres", delay=0.3), passing("redis", delay=0.3))
+    use_checks(app, postgres=passing("postgres", delay=0.3), redis=passing("redis", delay=0.3))
 
     started = time.perf_counter()
     response = client.get("/readyz")

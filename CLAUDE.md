@@ -111,9 +111,10 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
 ## Current status
 - **Milestone:** M0 (foundations). Done: repo, licence, virtual team, team site (live on GitHub
   Pages), Node 24 pin, API skeleton + CI (PR #1, merged).
-- **M0 done so far:** API skeleton + CI (#1), business context (#2), Docker stack (this PR).
-- **M0 remaining:** the human's `/readyz` PR ([HAND-WRITE], `docs/learning/m0-readiness.md`) →
-  wrap-up (metrics sign-off, quiz).
+- **M0 done so far:** API skeleton + CI (#1), business context (#2), Docker stack (#3),
+  `/readyz` readiness checks (m0/readyz — `check_redis` hand-written by shesha; the rest completed
+  by Claude at shesha's request, with a line-by-line explanation).
+- **M0 remaining:** wrap-up — metrics sign-off (`docs/business-context.md` §6), end-of-milestone quiz.
 - **Business model:** configurable multi-business platform. Decided: fictional pilot businesses for
   now (all eval data labelled synthetic), row-level-security isolation, config files via PRs (admin
   screen later), regions India + other countries. Still open: `docs/business-context.md` §9.
@@ -137,6 +138,8 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   (see `apps/api/pyproject.toml`). Do not re-propose without explaining the exact dependency and
   its benefit first (rule 11).
 - Docker Desktop must be running for `make up` / `make test-integration`.
+- Keep exactly one working copy (`~/Developer/vectapilot`) open in Cursor. A second clone in
+  `~/Documents` caused edits to land in the wrong copy (moved to the Trash, 2026-10-13).
 - The Docker healthcheck calls `/healthz` every 10 s, so API access logs contain those requests.
 - `npm audit` reports 5 "high" issues, all in the dev-only lint chain
   (`eslint-config-next` → `fast-glob` → `micromatch` → `braces`). npm's suggested fix is a
@@ -165,5 +168,8 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
 - Why the API image is multi-stage, non-root and cannot modify its own code.
 - Why the `migrate` job runs before the API starts, and what a migration "head" is.
 - Why the stack's ports are published on 127.0.0.1 only.
+- `/readyz`: `asyncio.gather` (checks run concurrently), `asyncio.timeout` (a hung dependency can't
+  hang the probe), why `except TimeoutError` must come before `except Exception`, why checks catch
+  `Exception` but never `BaseException` (cancellation), and why the checks are keyed by name.
 - Why third-party GitHub Actions are pinned to a commit SHA, and how PR 1's first CI run failed
   (`setup-uv@v10` did not exist — verify refs with `gh api repos/<owner>/<repo>/commits/<ref>`).
