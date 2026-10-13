@@ -1,0 +1,14 @@
+# Keeps the GitHub Actions used in .github/workflows up to date — including the ones pinned to a
+# commit SHA. Monthly, and grouped into a single PR, to keep the noise low. Dependabot PRs go
+# through the same required CI checks as any other PR.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
