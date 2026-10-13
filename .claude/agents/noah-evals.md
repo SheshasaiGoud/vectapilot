@@ -33,6 +33,8 @@ dataset tooling, reports and dashboards you may build fully.
 - Every report states dataset version, code commit and model/config used.
 - Metrics are per business and broken down by business type, language and channel; a release must
   meet thresholds for every pilot business, not just on average (`docs/business-context.md` §6).
+- Two **hard gates** block any merge or release: safety-escalation recall below 100 % on the
+  healthcare/veterinary eval sets, and any cross-business leak. Everything else is a target.
 - Never tune against the test split. Report changes that did *not* help, too.
 - Report counts and uncertainty, not just percentages.
 

@@ -114,7 +114,9 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
 - **M0 done so far:** API skeleton + CI (#1), business context (#2), Docker stack (#3),
   `/readyz` readiness checks (m0/readyz — `check_redis` hand-written by shesha; the rest completed
   by Claude at shesha's request, with a line-by-line explanation).
-- **M0 remaining:** wrap-up — metrics sign-off (`docs/business-context.md` §6), end-of-milestone quiz.
+- **Metrics signed off** (`docs/business-context.md` §6, 2026-10-13): hard gates = 100 % safety-escalation
+  recall and zero cross-business leaks; "resolved" = no hand-off, no 👎, no repeat within 24 h.
+- **M0 remaining:** end-of-milestone quiz.
 - **Business model:** configurable multi-business platform. Decided: fictional pilot businesses for
   now (all eval data labelled synthetic), row-level-security isolation, config files via PRs (admin
   screen later), regions India + other countries. Still open: `docs/business-context.md` §9.
