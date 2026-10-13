@@ -1,6 +1,6 @@
 # Business context — a configurable, multi-business support platform
 
-- **Status:** draft v0.2 · 2026-10-12 · owner: shesha · Priority-1 decisions answered (§9)
+- **Status:** v0.3 · 2026-10-13 · owner: shesha · Priority-1 decisions answered; metrics signed off (§6)
 - **Legend:** ✅ decided by shesha · 🟡 proposed (needs approval) · ❓ open question (see §9)
 
 Nothing marked 🟡 or ❓ is a requirement yet. Open questions are asked, not assumed.
@@ -232,32 +232,36 @@ what you have not tested).
 
 ---
 
-## 6. Success metrics 🟡
+## 6. Success metrics ✅ (signed off by shesha, 2026-10-13)
 
 Measured **per business**, and broken down by business type, language and channel. A release must
 meet the thresholds for **every** pilot business — a good average cannot hide one business getting
-worse. Each target says where it comes from — the playbook or Claude's proposal — and all are
-starting points to revisit after the first measured baseline. While the pilot is fictional (Q1),
-every number is reported as measured on **synthetic** data.
+worse. Each target says where it came from (the playbook or Claude's proposal); all are starting
+targets, revisited after the first measured baseline. While the pilot is fictional (Q1), every
+number is reported as measured on **synthetic** data.
 
-| Area | Metric | How it is measured | Proposed starting target |
-|---|---|---|---|
-| **Answer accuracy** | Correctness | Golden question set per business, human labels + a judge calibrated against them | ≥ 90 % (playbook) |
-| | Faithfulness | Every claim supported by a cited, approved source | ≥ 95 % (playbook) |
-| | Retrieval hit@5 | The right source chunk is in the top 5 | ≥ 90 % (playbook) |
-| **Successful resolution** | Auto-resolution rate | Conversations resolved without staff, *at* the correctness target above | ≥ 50 % (playbook) |
-| | Wrong-answer rate | Auto-sent answers later marked wrong by staff | ≤ 2 % (Claude's proposal) |
-| **Response time** | Latency p50 / p95 | Message received → reply sent, per channel | p95 < 6 s for web chat (playbook) |
-| **Customer satisfaction** | Thumbs-up rate | 👍/👎 after a conversation | Baseline first, then a target |
-| | Optional CSAT score | 1–5 survey | Baseline first |
-| **Appropriate escalation** | Escalation recall — **safety** | Share of emergency / professional-judgement cases escalated (healthcare, veterinary eval sets) | **100 %** — a miss blocks release (Claude's proposal) |
-| | Escalation recall — other mandatory rules | Share of must-escalate cases escalated | ≥ 95 % (Claude's proposal) |
-| | Escalation precision | Share of escalations that staff agree were needed | ≥ 80 % (Claude's proposal) |
-| **Isolation** | Cross-business leaks | Canary leakage suite (§5) | **0** — any leak blocks release (Claude's proposal) |
-| Cost (secondary) | Cost per conversation | Traced tokens × prices | < $0.02 (playbook) |
+**🚫 Hard gates** — a single failure blocks a merge or release, however good everything else is:
+missing a safety escalation, and any leak between businesses.
 
-❓ Q11: the definition of "resolved" (e.g. no hand-off, no 👎, and no repeat contact on the same
-topic within 24 hours?) and approval of these targets.
+**Definition of "resolved"** ✅ (Q11): the AI handled the conversation without a hand-off to
+staff, the customer gave no 👎, **and** the customer did not contact the same business about the
+same topic again within 24 hours.
+
+| Area | Metric | How it is measured | Starting target | Measurable from |
+|---|---|---|---|---|
+| **Answer accuracy** | Correctness | Golden question set per business, human labels + a judge calibrated against them | ≥ 90 % (playbook) | M2 (eval v0) |
+| | Faithfulness | Every claim supported by a cited, approved source | ≥ 95 % (playbook) | M2–M3 |
+| | Retrieval hit@5 | The right source chunk is in the top 5 | ≥ 90 % (playbook) | M2 |
+| **Successful resolution** | Auto-resolution rate | Conversations "resolved" (definition above) *at* the correctness target | ≥ 50 % (playbook) | Real pilot (M11) |
+| | Wrong-answer rate | Auto-sent answers later marked wrong by staff | ≤ 2 % (Claude's proposal) | Staff review (M8) + real pilot |
+| **Response time** | Latency p50 / p95 | Message received → reply sent, per channel | p95 < 6 s for web chat (playbook) | M1 (per call), M9 (per conversation) |
+| **Customer satisfaction** | Thumbs-up rate | 👍/👎 after a conversation | Set at the real pilot after a 2–4-week baseline | Real pilot (M11) |
+| | Optional CSAT score | 1–5 survey | Set at the real pilot after a baseline | Real pilot (M11) |
+| **Appropriate escalation** | Escalation recall — **safety** | Share of emergency / professional-judgement cases escalated (healthcare, veterinary eval sets) | **100 %** — 🚫 hard gate (Claude's proposal) | M4 (router); gated from M7 |
+| | Escalation recall — other mandatory rules | Share of must-escalate cases escalated | ≥ 95 % (Claude's proposal) | M4–M7 |
+| | Escalation precision | Share of escalations that staff agree were needed | ≥ 80 % (Claude's proposal) | M7 (labelled set); real pilot (staff) |
+| **Isolation** | Cross-business leaks | Canary leakage suite (§5) | **0** — 🚫 hard gate (Claude's proposal) | M2 (first per-business data) |
+| Cost (secondary) | Cost per conversation | Traced tokens × prices | < $0.02 (playbook) | M1 (per call), M9 |
 
 ---
 
@@ -315,7 +319,7 @@ escalation:
 
 ## 9. Decisions and open questions — for shesha
 
-**Answered** ✅ (2026-10-12)
+**Answered** ✅ (Q1–Q4 on 2026-10-12 · Q11 on 2026-10-13)
 
 | # | Question | Decision |
 |---|---|---|
@@ -323,6 +327,7 @@ escalation:
 | Q2 | Isolation strategy | Shared tables + `business_id` + Postgres row-level security (ADR 0004 accepted) |
 | Q3 | Who configures a business | Versioned config files via PRs now; self-serve admin screen later |
 | Q4 | Regions | India plus other countries |
+| Q11 | Metrics | Targets in §6 approved; hard gates: safety-escalation recall 100 % and zero cross-business leaks; "resolved" = no hand-off, no 👎, no repeat within 24 h; satisfaction targets set at the real pilot |
 
 **Still open** ❓
 
@@ -335,4 +340,3 @@ escalation:
 9. **Outside staff hours:** what should escalations do?
 10. **Live data:** which systems hold prices, stock, orders and appointment slots for each business
     type (e.g. a shop platform, a clinic calendar)?
-11. **Metrics:** approve the targets in §6 and the definition of "resolved".
