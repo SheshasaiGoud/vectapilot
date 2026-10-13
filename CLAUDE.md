@@ -109,18 +109,24 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
 - [ADR 0005](docs/adr/0005-local-stack-docker-compose.md) — local stack with Docker Compose; no Langfuse in M0
 
 ## Current status
-- **Milestone:** M0 (foundations). Done: repo, licence, virtual team, team site (live on GitHub
-  Pages), Node 24 pin, API skeleton + CI (PR #1, merged).
-- **M0 done so far:** API skeleton + CI (#1), business context (#2), Docker stack (#3),
-  `/readyz` readiness checks (m0/readyz — `check_redis` hand-written by shesha; the rest completed
-  by Claude at shesha's request, with a line-by-line explanation).
-- **Metrics signed off** (`docs/business-context.md` §6, 2026-10-13): hard gates = 100 % safety-escalation
-  recall and zero cross-business leaks; "resolved" = no hand-off, no 👎, no repeat within 24 h.
-- **M0 remaining:** end-of-milestone quiz.
+- **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
+  #3 Docker stack · #4 `/readyz` (`check_redis` hand-written by shesha; the rest completed by Claude
+  at shesha's request, explained line by line) · #5 metrics sign-off. End-of-milestone quiz passed.
+  To review: after a leaked secret, rotate *first*; explain SHA pinning and the Docker hardening
+  (non-root, read-only code, 127.0.0.1 ports) without notes.
+- **Metrics** (`docs/business-context.md` §6): hard gates = 100 % safety-escalation recall and zero
+  cross-business leaks; "resolved" = no hand-off, no 👎, no repeat within 24 h.
 - **Business model:** configurable multi-business platform. Decided: fictional pilot businesses for
   now (all eval data labelled synthetic), row-level-security isolation, config files via PRs (admin
   screen later), regions India + other countries. Still open: `docs/business-context.md` §9.
-- **Observability:** no Langfuse in M0 (8 GB RAM Mac); decide in M1 and record it in an ADR.
+  Recommended: start looking for one real pilot business now (needed for credible M11 results).
+- **Next: M1 (LLM gateway, owner `diego-backend`)** — plan it with `maya-tech-lead` first.
+  Learning approach agreed: 2–3 small `[HAND-WRITE]` pieces (~10–20 lines each, e.g. cost-per-call
+  accounting, retry with backoff), each followed by the human explaining it back in their own words.
+  Decisions to confirm in M1 planning (Claude's recommendations): Anthropic API; the key lives only in
+  `apps/api/.env` with a monthly spend limit set in the console; a small model by default, a larger
+  one for hard cases; tracing via Langfuse Cloud free tier (the 8 GB Mac cannot self-host it) —
+  record the choice in an ADR.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -143,6 +149,8 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
 - Keep exactly one working copy (`~/Developer/vectapilot`) open in Cursor. A second clone in
   `~/Documents` caused edits to land in the wrong copy (moved to the Trash, 2026-10-13).
 - The Docker healthcheck calls `/healthz` every 10 s, so API access logs contain those requests.
+- GitHub secret scanning and push protection are enabled (GitHub default for public repos; verified
+  2026-10-13). Dependabot keeps GitHub Actions updated monthly (`.github/dependabot.yml`).
 - `npm audit` reports 5 "high" issues, all in the dev-only lint chain
   (`eslint-config-next` → `fast-glob` → `micromatch` → `braces`). npm's suggested fix is a
   wrong-major downgrade, so it is accepted for now; re-check on each Next.js update.

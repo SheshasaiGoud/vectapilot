@@ -9,9 +9,9 @@ Details: [docs/business-context.md](docs/business-context.md).
 
 **🌐 Meet the team:** [sheshasaigoud.github.io/vectapilot](https://sheshasaigoud.github.io/vectapilot/)
 
-> **Status:** 🚧 Milestone M0 (foundations) — the project has just started. The product below is not
-> built yet; this README will be updated as each milestone lands. Any metric shown here will be a
-> real, measured number — never a placeholder.
+> **Status:** ✅ M0 (foundations) complete · 🚧 M1 (LLM gateway) next. The AI features below are not
+> built yet; this README is updated as each milestone lands. Any metric shown here will be a real,
+> measured number — never a placeholder.
 
 ## The problem
 
@@ -43,8 +43,8 @@ message → guardrails → router (classifier, LLM fallback) → RAG | agent + M
 
 | | Milestone | Status |
 |---|---|---|
-| M0 | Foundations — repo, Docker Compose, CI, health endpoint | 🚧 In progress |
-| M1 | LLM gateway — retries, structured output, cost accounting | ⏳ |
+| M0 | Foundations — repo, Docker Compose, CI, health endpoint | ✅ Done |
+| M1 | LLM gateway — retries, structured output, cost accounting | 🚧 Next |
 | M2 | Ingestion + baseline RAG with citations | ⏳ |
 | M3 | RAG v2 — hybrid search, reranking, abstention | ⏳ |
 | M4 | Intent router — trained classifier + LLM fallback | ⏳ |
