@@ -171,9 +171,10 @@ How our contract (the `cost_usd` docstring) reads it:
   prompt.
 - The tier is chosen **once per request** and prices **every** class of that request, output
   included, from that tier's prices. The quote does not say which classes the higher prices
-  raise; PR 3's price check confirms that on the page. If the page leaves a class at its standard
-  price, the catalog's long-prompt tier simply repeats that price, so your code is the same
-  either way.
+  raise; PR 3's price check confirmed it on the page's model table (2026-10-14): Haiku 5.5's
+  long-prompt tier raises **all five** classes, each by exactly 5×. Had the page left a class at
+  its standard price, the catalog's long-prompt tier would simply repeat that price, so your code
+  is the same either way.
 - **"Each request is priced on its own"**: one call to `cost_usd` prices one response. A retry or a
   repair is a separate request with its own tier; the gateway adds them up (PR 6).
 - Whether a model has this tier at all is data: `long_prompt` is `None` for a single-tier model.

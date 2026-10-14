@@ -1,0 +1,75 @@
+# The model catalog (ADR 0006): model ids, prices and aliases. Model ids live only here; callers
+# use an alias. Loaded and validated by `gateway/catalog.py` when the app starts: an invalid file,
+# or an alias whose model has no price, stops startup.
+#
+# Prices: list prices in US dollars per million tokens (MTok), for global routing (the default;
+# `inference_geo: "us"` costs 1.1x and makes a call's cost incomplete, ADR 0006).
+#   Source:  https://platform.claude.com/docs/en/about-claude/pricing (section "Model pricing")
+#   Checked: 2026-10-14. Re-check about monthly; change `catalog_version` with any change here.
+# Page column -> key: "Base input tokens" -> input · "Output tokens" -> output ·
+# "Cache hits and refreshes" -> cache_read · "5m cache writes" -> cache_write_5m ·
+# "1h cache writes" -> cache_write_1h.
+# Write prices exactly as the page does: they are read as Decimal (`parse_float=Decimal`), never
+# as float, so 0.10 stays exactly 0.10.
+
+catalog_version = "2026-10-14.1"
+
+[models.claude-haiku-5-5]
+source_url = "https://platform.claude.com/docs/en/about-claude/pricing"
+checked = 2026-10-14
+
+# Page row "Claude Haiku 5.5 (for prompts up to 100,000 tokens)".
+[models.claude-haiku-5-5.standard]
+input = 0.10
+output = 0.50
+cache_read = 0.01
+cache_write_5m = 0.125
+cache_write_1h = 0.20
+
+# Page, "Long context pricing": "Claude Haiku 5.5 is priced by prompt length: a request whose
+# prompt is over 100,000 tokens pays higher prices. A request's prompt length counts all of its
+# input tokens, including cache reads and cache writes." Page row "Claude Haiku 5.5 (for prompts
+# over 100,000 tokens)": every one of the five classes is raised.
+[models.claude-haiku-5-5.long_prompt]
+threshold_tokens = 100_000
+
+[models.claude-haiku-5-5.long_prompt.prices]
+input = 0.50
+output = 2.50
+cache_read = 0.05
+cache_write_5m = 0.625
+cache_write_1h = 1
+
+# No long-prompt tier. Page, "Long context pricing": "Claude 4.6 and later models (except Claude
+# Haiku 5.5) [...] include the full 1M token context window at standard pricing."
+[models.claude-sonnet-5-5]
+source_url = "https://platform.claude.com/docs/en/about-claude/pricing"
+checked = 2026-10-14
+
+# Page row "Claude Sonnet 5.5".
+[models.claude-sonnet-5-5.standard]
+input = 2
+output = 10
+cache_read = 0.10
+cache_write_5m = 2.50
+cache_write_1h = 4
+
+# Aliases (ADR 0006, Models and region): effort `low` on both, always sent.
+# `max_output_tokens` is the largest `max_tokens` a call may use (a larger one is rejected, never
+# clamped) and sizes PR 8's worst-case cost reservation. Starting values decided by shesha
+# (2026-10-14); the live run confirms them: any truncation raises that alias's cap (PR 8).
+
+# Short replies (routing labels, brief answers) plus room for low-effort thinking, which
+# counts as output. Not sized for M6 document extraction: M6 re-sizes it (a raised cap or a new
+# alias, with a `catalog_version` change).
+[aliases.small]
+model = "claude-haiku-5-5"
+max_output_tokens = 1024
+effort = "low"
+
+# A grounded support answer with citations plus low-effort thinking; confirmed against the output
+# tokens measured in the live run (PR 9).
+[aliases.large]
+model = "claude-sonnet-5-5"
+max_output_tokens = 2048
+effort = "low"

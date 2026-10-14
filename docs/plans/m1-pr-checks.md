@@ -122,6 +122,10 @@ close-out PR (decided then).
   removed. The adapter emits no log records at all.
 - **[note]** Settings refuse `ANTHROPIC_LOG` with the anthropic provider, so the canary must build
   the adapter directly, not through `Settings`. Confirm in review.
+- **[step 3 review]** Keep the `pydantic_settings` logger pin that step 3 added in `config.py`
+  (`PYDANTIC_SETTINGS_DEBUG=1` otherwise logs every raw setting, key and DSN passwords included);
+  set `PYDANTIC_SETTINGS_DEBUG=1` in the subprocess canary too. Also review proxy and TLS variables
+  the HTTP client reads (`HTTPS_PROXY`, `SSL_CERT_FILE`, …).
 - **[review]** Request body per alias: model id, effort `low` in `output_config`, `max_tokens`; no
   `temperature`, no `thinking`, no `inference_geo`.
 - **[0006]** Usage mapping covers all five token classes (5-minute/1-hour cache-write split) and
@@ -143,6 +147,9 @@ close-out PR (decided then).
 - **[0006]** `cost_complete=false` when the answering model is unpriced, an attempt was cancelled or
   timed out after sending, or `usage.inference_geo` is not `global`. Cost is priced by the answering
   model's exact id and sums every billed attempt, repairs included.
+- **[step 3 review]** An `inference_geo` of `None` (the provider did not say) also counts as "not
+  `global`" ⇒ `cost_complete=false` (fail closed; decided 2026-10-14). Test:
+  `FakeReply(inference_geo=None)` gives `cost_complete=False`.
 - **[0007]** Exact `llm_call` record, emitted once in `finally` (also on error, deadline and
   cancel), metadata only:
   - `record_version`, `business_id`, alias, model requested and model answered, `catalog_version`,
@@ -213,6 +220,11 @@ close-out PR (decided then).
   `deadline_exceeded` or whose `attempt_timeouts` > 0, as k/n; `deadline_exceeded` is also reported
   on its own. The worst-case reservation uses the effective `max_tokens` (the request's, else the
   alias's).
+- **[step 3 review]** The aliases' `max_output_tokens` (starting values decided 2026-10-14: small
+  1024, large 2048) are only confirmed by measurement: report `truncated` as k/n per alias plus the median and max
+  `output_tokens` per alias, include at least one long non-English answer, and report latency
+  against `output_tokens`. Rule fixed before the live run: any truncation ⇒ raise that alias's cap
+  (new `catalog_version`) and re-run.
 
 ## PR 9 — close-out (shesha's live run)
 - **[0007]** Key entry, in a separate terminal that never starts Claude Code or Cursor:

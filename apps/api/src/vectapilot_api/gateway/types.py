@@ -164,6 +164,15 @@ If shesha reverses it, remove it here and from its tests.
 TRUNCATION_STOP_REASONS: Final[frozenset[str]] = frozenset(get_args(TruncationStopReason))
 
 
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
+"""How much the model may think and write (`output_config.effort`), set per alias in the catalog.
+
+The provider's levels, checked 2026-10-14 on
+https://platform.claude.com/docs/en/build-with-claude/effort. Which levels a model supports, and
+its default, differ per model; ADR 0006 sends `low` on both aliases, always.
+"""
+
+
 BusinessId = Annotated[str, Field(min_length=3, max_length=40), AfterValidator(_check_slug)]
 """The business a call belongs to: a lowercase slug, 3-40 characters (business-context §3.1)."""
 
@@ -198,8 +207,8 @@ class Usage(GatewayModel):
 
     Exactly the five billed classes, nothing else, so H1 prices tokens and only tokens. The
     provider's `usage.inference_geo` is not part of `Usage`: it travels next to it in the
-    per-attempt provider response (defined with the fake provider, PR 3, and shared by the adapter,
-    PR 5) and ends up in `CallRecord.inference_geo`.
+    per-attempt provider response (`providers.base.ProviderResponse`, shared by the fake provider
+    and the adapter) and ends up in `CallRecord.inference_geo`.
     """
 
     input_tokens: Count = 0
