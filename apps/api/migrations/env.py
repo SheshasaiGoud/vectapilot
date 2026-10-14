@@ -24,7 +24,7 @@ target_metadata = None
 
 
 def database_url() -> str:
-    return str(Settings().database_url)
+    return str(Settings().database_url.get_secret_value())  # passed to SQLAlchemy, never logged
 
 
 def run_migrations_offline() -> None:
