@@ -26,8 +26,9 @@ SDK's, ours, or both. Structured output: native `output_config.format`, or Pydan
   documented spend-limit 400 or 429 → `SpendLimitReached` (first, so it is never retried); (2) 402
   `billing_error` → `BillingError`; (3) connection errors, timeouts, 408, 409, 429, 5xx, 529 →
   `Transient`; (4) 401/403 → `AuthenticationFailed`; (5) 400/404/413/422 → `InvalidRequest`; (6)
-  else `ProviderError`. Only `Transient` is retried (Retry-After, else backoff); `x-should-retry`
-  can flip that for `Transient` and `ProviderError` only. Sources (2026-10-14): /api/errors,
+  else `ProviderError`. Only `Transient` is retried (Retry-After, else backoff; a Retry-After above
+  the backoff cap is not retried, decided 2026-10-14); `x-should-retry` can flip that for
+  `Transient` and `ProviderError` only. Sources (2026-10-14): /api/errors,
   /api/rate-limits; for the header and 408/409, the SDK's `_base_client._should_retry` (v1.13.0).
 - **Time limits.** Each attempt has a timeout (expiry: `Transient`); one deadline caps the call,
   retries and repair included (`DeadlineExceeded`). `CancelledError` always propagates. H2 gets the
@@ -58,7 +59,8 @@ SDK's, ours, or both. Structured output: native `output_config.format`, or Pydan
   Omitted `thinking` means adaptive, billed as output (decided; measured live). `inference_geo` is
   never sent; shesha checks the workspace default is `global` (organisations with the legacy
   global-routing opt-out default to `us`). One workspace for all businesses until M7. Calls need a
-  `BusinessId` (business-context §3.1).
+  `BusinessId` (business-context §3.1). A `max_tokens` above the alias's maximum is rejected before
+  any call, never clamped (decided 2026-10-14).
 - **Settings.** Flat `VECTAPILOT_LLM_*`; the key is `VECTAPILOT_ANTHROPIC_API_KEY` (`SecretStr`),
   from the process environment only (in `.env` it stops startup). Fail fast: `test`/`ci` ⇒ fake
   only; `production` ⇒ not fake; anthropic ⇒ key required and none of `ANTHROPIC_API_KEY`,

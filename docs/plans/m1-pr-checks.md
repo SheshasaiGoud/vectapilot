@@ -7,6 +7,8 @@ decisions; each PR copies its section into its own acceptance check and ticks it
 pull-request numbers. Tags: **[0006]** / **[0007]** = moved out of that ADR · **[plan]** = from the
 approved M1 plan (2026-10-14), never in an ADR · **[review]** = added by the ADR review
 (2026-10-14) · **[note]** = Maya's note, to be resolved in that PR (not a decision).
+**[step A review]** / **[step 2 review]** = from that step's review (2026-10-14); the step 2 lines
+are as shesha decided them.
 When M1 closes, this file is either kept as the record of what was checked or deleted in the
 close-out PR (decided then).
 
@@ -53,6 +55,9 @@ close-out PR (decided then).
   `re.match` with `$` also accepts a trailing newline. Tests reject: a trailing newline, uppercase,
   `--`, a leading or trailing `-`; **[note]** proposed: also the 3/40-character bounds (2 and 41
   rejected).
+- **[step 2 review]** One per-attempt provider response type (content, stop reason, `Usage`, model
+  id, request id, `inference_geo`), shared by the fake provider and the adapter. The price check
+  confirms which classes the long-prompt tier raises.
 
 ## PR 4 — `ci/coverage-gate`
 - **[0006]** One committed script runs the gate, used by both the CI `api` job and `make check`
@@ -113,6 +118,11 @@ close-out PR (decided then).
   `temperature`, no `thinking`, no `inference_geo`.
 - **[0006]** Usage mapping covers all five token classes (5-minute/1-hour cache-write split) and
   `usage.inference_geo`.
+- **[step 2 review]** The `usage.inference_geo` above is the provider's field, carried in PR 3's
+  per-attempt response type (not in `Usage`). The adapter validates every provider string into the
+  shared types at its boundary: a mismatch becomes a `ProviderError` that does not echo the value,
+  and an unknown stop reason maps to `other`. A `ValidationError` from a gateway model is never
+  logged, chained or turned into a string.
 
 ## PR 6 — `m1/gateway-complete`
 - **[0006]** Nested time limits: each attempt under `asyncio.timeout(attempt)`, the whole call under
@@ -132,7 +142,8 @@ close-out PR (decided then).
   - `outcome`, a closed enum: `ok`, `refusal`, `truncated`, `validation_failed`,
     `transient_exhausted`, `deadline_exceeded`, `cancelled`, `spend_limit`, `billing`,
     `auth_failed`, `invalid_request`, `provider_error`
-  - `stop_reason`, `retries`, `repairs`, `first_try_valid` (null if unstructured)
+  - `stop_reason`, `retries`, `repairs`, `attempt_timeouts` (**[step 2 review]**),
+    `first_try_valid` (null if unstructured)
   - five token classes, `cost_usd`, `cost_complete`, `cache_hit`
   - `latency_ms`: monotonic clock, the whole call, backoff and repair included
   - provider request ids
@@ -140,6 +151,23 @@ close-out PR (decided then).
     slug, for M9's per-step view)
   - New fields are additive; a breaking change bumps `record_version`.
 - **[0007]** The gateway never adds eval-case metadata; the measurement CLI does (PR 8).
+- **[step 2 review]**
+  - Per-attempt accounting lives in the `call` closure; the H2 signature is frozen once merged.
+  - Building or emitting the record cannot mask the outcome. Test: an odd stop reason or model id
+    through the fake gives exactly one record with the right outcome.
+  - A request `max_tokens` above the alias's maximum ⇒ typed error before any call, never clamped.
+  - For a call that reached the provider, attempts = 1 + `repairs` + `retries`; a repair's retries
+    count in `retries`.
+  - `attempt_timeouts` counts the attempts that hit the per-attempt timeout, at most the attempts.
+- **[note]** Proposed by Diego (step 2), pending shesha: `model_context_window_exceeded` is a
+  truncation ⇒ `OutputTruncated` (ADR 0006: truncation is a typed error; the stop-reasons page says
+  "Treat the response as truncated", checked 2026-10-14). If reversed, remove it from
+  `TruncationStopReason` and its tests.
+- **[note]** Open, shesha decides: do `other` and the stop reasons M1 never asks for (`tool_use`,
+  `pause_turn`, `stop_sequence`) become a result or a typed error? `LLMResult` accepts them today.
+  Maya's proposal: fail closed, a typed error that is never cached.
+- **[note]** Open: calls with no model call (a pre-call `max_tokens` rejection; a cache hit, PR 7).
+  Is a record emitted, and what do `retries`, `repairs` and `attempt_timeouts` hold?
 
 ## PR 7 — `m1/gateway-structured-and-cache`
 - **[0006]** The repair is a fresh request: the original messages plus feedback; it replays no
@@ -154,6 +182,8 @@ close-out PR (decided then).
   two schemas → two keys; a stored value whose `business_id` differs is never served). Refusals,
   truncations and errors are never cached. A hit records $0 and `cache_hit=True` and is
   re-validated.
+- **[note]** A cache hit makes no model call: see PR 6's open note on records for calls with no
+  model call (`CallRecord` already requires `attempt_timeouts` = 0 on a hit).
 
 ## PR 8 — `m1/measure`
 - **[0006]** `--live` cap mechanics: before each call, reserve its worst-case cost
@@ -171,6 +201,10 @@ close-out PR (decided then).
   6 s, message to reply).
 - **[0007]** The summary file is committed so the numbers last; this PR sets its location.
 - **[0007]** The CLI adds case metadata to its own output; the gateway never does.
+- **[step 2 review]** Timeout rate (decided 2026-10-14) = calls whose outcome is
+  `deadline_exceeded` or whose `attempt_timeouts` > 0, as k/n; `deadline_exceeded` is also reported
+  on its own. The worst-case reservation uses the effective `max_tokens` (the request's, else the
+  alias's).
 
 ## PR 9 — close-out (shesha's live run)
 - **[0007]** Key entry, in a separate terminal that never starts Claude Code or Cursor:
@@ -187,5 +221,7 @@ close-out PR (decided then).
 - **[0006]** H2 receives the deadline and a clock (see PR 2). Tests: a backoff or Retry-After delay
   that would end past the deadline is not slept; the last error is raised instead.
   `SpendLimitReached` and other non-retryable errors ⇒ exactly 1 call.
+- **[step 2 review]** Retry-After above `max_delay_s` ⇒ no retry, the error is raised (decided
+  2026-10-14; alternative considered: wait it if it fits before the deadline).
 
 H1 and H3: nothing moved from the ADRs.
