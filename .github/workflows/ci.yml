@@ -63,7 +63,12 @@ jobs:
       - run: uv run mypy
       - name: Apply database migrations
         run: uv run alembic upgrade head
-      - run: uv run pytest
+      # Every test, integration included (RUN_INTEGRATION=1 above), recording coverage.
+      - name: Tests (under coverage)
+        run: uv run coverage run -m pytest
+      # Same script as `make coverage` (ADR 0006): gateway/ combined >= 95.00 %, branches >= 95 %.
+      - name: Gateway coverage gate
+        run: uv run python scripts/coverage_gate.py
 
   api-image:
     name: api image (docker build)
