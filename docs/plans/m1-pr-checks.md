@@ -43,12 +43,20 @@ close-out PR (decided then).
     `ANTHROPIC_LOG` set ⇒ startup error (the SDK reads them).
   - deadline < attempt timeout ⇒ startup error.
   - invalid catalog, or a configured model without a price ⇒ startup error.
+- **[step A review]** `hide_input_in_errors` does not hide text a validator writes into its own
+  message. Every new Settings validator gets a canary test: the value (e.g. the key) is absent from
+  both `str(error)` and `errors(include_input=False)`; messages name fields and rules, never values.
 - **[review]** The key comes from the process environment only; a key found in `.env` stops
   startup. So the tmp `.env` test now expects an error (the plan said it "still resolves to test +
   fake").
 - **[review]** `conftest.py`: before any app import, set `VECTAPILOT_ENVIRONMENT=test` and
   `VECTAPILOT_LLM_PROVIDER=fake` in `os.environ`, and remove `VECTAPILOT_ANTHROPIC_API_KEY`,
   `ANTHROPIC_API_KEY` and `ANTHROPIC_BASE_URL`.
+- **[step A review]** `conftest.py:12` builds `UNREACHABLE_SETTINGS` at import time without
+  `_env_file=None`, so an exported `VECTAPILOT_*` variable (e.g. `VECTAPILOT_LOG_LEVEL=debug`) or a
+  value in `apps/api/.env` can break or change the whole test run. Pass `_env_file=None` and every
+  field explicitly (or build it in a fixture); test: the suite passes with junk `VECTAPILOT_*`
+  values exported. Moved to this step by shesha (2026-10-14).
 - **[review]** `BusinessId` (rule in business-context §3.1) is checked with `re.fullmatch`, because
   `re.match` with `$` also accepts a trailing newline. Tests reject: a trailing newline, uppercase,
   `--`, a leading or trailing `-`; **[note]** proposed: also the 3/40-character bounds (2 and 41

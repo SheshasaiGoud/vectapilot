@@ -156,6 +156,9 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   effect in PR 5. Until then Starlette 1.x's `TestClient` falls back to `httpx` with a deprecation
   warning that pytest ignores (`apps/api/pyproject.toml`).
 - Docker Desktop must be running for `make up` / `make test-integration`.
+- `Secret[...]` masks the DSNs in `Settings` (step A), not the plain string handed to SQLAlchemy and
+  redis-py: pytest's default traceback can print it if those libraries fail. Tests only ever use
+  dev/CI DSNs; when M9 adds an error tracker, turn off frame-variable capture and add a canary test.
 - Keep exactly one working copy (`~/Developer/vectapilot`) open in Cursor. A second clone in
   `~/Documents` caused edits to land in the wrong copy (moved to the Trash, 2026-10-13).
 - The Docker healthcheck calls `/healthz` every 10 s, so API access logs contain those requests.
