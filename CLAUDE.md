@@ -95,6 +95,7 @@ apps/api/            FastAPI service (uv project): config, JSON logging, /health
 apps/web/            Next.js — team site now; customer widget + staff dashboard later
 docs/adr/            architecture decision records
 docs/learning/       guides for [HAND-WRITE] tasks
+docs/plans/          per-PR acceptance checks for the current milestone
 .github/workflows/   ci.yml (lint, types, tests, image build) · deploy-site.yml (GitHub Pages)
 infra/               compose.yaml — the local stack
 Makefile             developer commands
@@ -129,7 +130,8 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   Order: A ∥ 1 → 2 → (H1 ∥ H2 ∥ 3 → {4, 5}) → 6 → 7 → (H3 ∥ 8) → 9. A: hide secrets in config
   errors · 1: ADRs · 2: types, stubs, guide · 3: settings, catalog, fake provider · 4: coverage gate ·
   5: Anthropic adapter · 6: `complete()` · 7: structured output + cache hook · 8: measurement CLI +
-  smoke dataset · 9: shesha's live run, "what I measured" note, quiz.
+  smoke dataset · 9: shesha's live run, "what I measured" note, quiz. Each PR's acceptance
+  checks: [`docs/plans/m1-pr-checks.md`](docs/plans/m1-pr-checks.md).
   Pending, shesha personally: new personal Anthropic org, dedicated workspace ($10/month limit,
   default inference geo `global`), key, price check on the day.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
