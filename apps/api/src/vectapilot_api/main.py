@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from vectapilot_api import __version__
 from vectapilot_api.config import Settings
+from vectapilot_api.gateway.catalog import load_catalog
 from vectapilot_api.health import router as health_router
 from vectapilot_api.log import configure_logging
 
@@ -24,6 +25,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Build the app. A factory (not a module-level `app`) so tests can pass their own settings."""
     settings = settings or Settings()  # values come from the environment
     configure_logging(settings.log_level)
+    # Fail fast (ADR 0006): an invalid catalog, or an alias whose model has no price, stops the
+    # app here, before it serves anything. The only LLM wiring in M1: no route, no gateway yet.
+    catalog = load_catalog()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -42,6 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="VectaPilot API", version=__version__, lifespan=lifespan)
     app.state.settings = settings
+    app.state.catalog = catalog
     app.include_router(health_router)
     return app
 

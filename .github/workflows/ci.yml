@@ -41,6 +41,7 @@ jobs:
           --health-cmd "redis-cli ping"
           --health-interval 5s --health-timeout 5s --health-retries 10
     env:
+      # alembic runs as ci; pytest's conftest pins test + fake before importing the app (ADR 0006)
       VECTAPILOT_ENVIRONMENT: ci
       VECTAPILOT_DATABASE_URL: postgresql+asyncpg://vectapilot:vectapilot-ci@localhost:5432/vectapilot
       VECTAPILOT_REDIS_URL: redis://localhost:6379/0
@@ -71,7 +72,9 @@ jobs:
       - uses: actions/checkout@v7
       # Builds the same image `make up` uses, so a broken Dockerfile fails the PR, not a deploy.
       - run: docker build --tag vectapilot-api:ci apps/api
-      - name: Container starts and /healthz answers
+      # `create_app` loads gateway/models.toml at startup, so this also proves the catalog ships
+      # inside the image (the wheel installed by `uv sync --no-editable`).
+      - name: Container starts (catalog loads) and /healthz answers
         run: |
           docker run --detach --name api --publish 127.0.0.1:8000:8000 \
             --env VECTAPILOT_DATABASE_URL=postgresql+asyncpg://u:p@127.0.0.1:1/db \

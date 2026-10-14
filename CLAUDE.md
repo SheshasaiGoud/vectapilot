@@ -57,8 +57,8 @@ Invoke one with `@agent-<name>` or in plain words ("ask ananya-rag to review my 
 entry in `apps/web/src/data/personas.ts` and `npm run avatars`; the build fails if they drift apart.
 
 ## How changes land
-Feature branch → pull request → CI (`api (lint, types, tests)` and `web (lint, build)`) must pass
-→ the human reviews and merges. `main` is branch-protected; never push to it directly.
+Feature branch → pull request → CI (`api (lint, types, tests)`, `api image (docker build)` and
+`web (lint, build)`) must pass → the human reviews and merges. `main` is branch-protected; never push to it directly.
 `[HAND-WRITE]` work happens on the human's own branch and PR.
 Automatic CI fixes are **disabled** (the human's choice): when CI fails, read the log, explain the
 cause, and propose the fix.
@@ -132,6 +132,7 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   5: Anthropic adapter · 6: `complete()` · 7: structured output + cache hook · 8: measurement CLI +
   smoke dataset · 9: shesha's live run, "what I measured" note, quiz. Each PR's acceptance
   checks: [`docs/plans/m1-pr-checks.md`](docs/plans/m1-pr-checks.md).
+  Done: 1 (#8), A (#9), 2 (#10); 3 in review. Next: shesha's H1 and H2, then 4 and 5.
   Pending, shesha personally: new personal Anthropic org, dedicated workspace ($10/month limit,
   default inference geo `global`), key, price check on the day.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or

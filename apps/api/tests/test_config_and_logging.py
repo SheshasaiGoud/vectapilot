@@ -62,7 +62,12 @@ def test_settings_error_does_not_echo_the_bad_value(bad_database_url: str, error
 
 
 def _settings_with_canary_passwords() -> Settings:
-    return Settings(_env_file=None, database_url=CANARY_DATABASE_URL, redis_url=CANARY_REDIS_URL)
+    return Settings(
+        _env_file=None,
+        database_url=CANARY_DATABASE_URL,
+        redis_url=CANARY_REDIS_URL,
+        anthropic_api_key=f"{CANARY}-key",
+    )
 
 
 def _json_log_line(settings: Settings) -> str:
@@ -83,7 +88,7 @@ def _json_log_line(settings: Settings) -> str:
     ],
 )
 def test_valid_settings_never_print_a_password(render: Callable[[Settings], str]) -> None:
-    # Both DSNs carry the canary; any way of turning Settings into text must mask it.
+    # The DSNs and the API key carry the canary; every way of turning Settings into text masks it.
     assert CANARY not in render(_settings_with_canary_passwords())
 
 
