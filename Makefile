@@ -6,7 +6,7 @@ LOCAL_DB_URL    := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapi
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test test-integration check
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -45,8 +45,11 @@ typecheck: ## Strict type check of the API
 test: ## API tests that need no services
 	$(API) uv run pytest
 
+coverage: ## API tests under coverage, then the gateway gate (>= 95 %, ADR 0006)
+	$(API) uv run coverage run -m pytest && uv run python scripts/coverage_gate.py
+
 test-integration: up ## API tests including real Postgres + Redis (starts the stack)
 	$(API) RUN_INTEGRATION=1 VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" \
 		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run pytest
 
-check: lint typecheck test ## Everything CI checks, locally
+check: lint typecheck coverage ## Everything CI checks, locally

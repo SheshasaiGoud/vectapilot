@@ -120,6 +120,8 @@ close-out PR (decided then).
   `ANTHROPIC_LOG=debug` and `VECTAPILOT_LOG_LEVEL=DEBUG` set before import. It finds no prompt,
   completion or key in caplog, stdout/stderr or exception text, and is shown red with the logger pin
   removed. The adapter emits no log records at all.
+- **[step 4 review]** The adapter's coverage comes from the in-process MockTransport tests (one per
+  error-table row); the subprocess canary is not measured by the coverage gate.
 - **[note]** Settings refuse `ANTHROPIC_LOG` with the anthropic provider, so the canary must build
   the adapter directly, not through `Settings`. Confirm in review.
 - **[step 3 review]** Keep the `pydantic_settings` logger pin that step 3 added in `config.py`
@@ -150,6 +152,9 @@ close-out PR (decided then).
 - **[step 3 review]** An `inference_geo` of `None` (the provider did not say) also counts as "not
   `global`" ⇒ `cost_complete=false` (fail closed; decided 2026-10-14). Test:
   `FakeReply(inference_geo=None)` gives `cost_complete=False`.
+- **[step 4 review]** Enforce that rule in `CallRecord._cost_rules` too: reject
+  `not cache_hit and inference_geo != "global" and cost_complete` (today `inference_geo=None` with
+  `cost_complete=True` is accepted), with a test for `None`.
 - **[0007]** Exact `llm_call` record, emitted once in `finally` (also on error, deadline and
   cancel), metadata only:
   - `record_version`, `business_id`, alias, model requested and model answered, `catalog_version`,

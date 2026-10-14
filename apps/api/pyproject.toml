@@ -25,6 +25,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "coverage>=7.16.2",
     "httpx>=0.28.1",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
@@ -45,7 +46,7 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "S"]
 [tool.mypy]
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["src", "tests", "migrations"]
+files = ["src", "tests", "migrations", "scripts"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -59,3 +60,15 @@ filterwarnings = [
     # (2026-10-12, see CLAUDE.md, Known issues), so this one deprecation warning is ignored.
     "ignore:Using `httpx` with `starlette.testclient` is deprecated",
 ]
+
+# Coverage gate for gateway/ (ADR 0006): `make coverage` runs scripts/coverage_gate.py, which holds
+# the thresholds. tests/test_coverage_gate.py pins these settings, so change both together.
+[tool.coverage.run]
+branch = true # measure both ways of every `if`/loop, not only the lines
+# Measure the whole package, so a module that no test imports shows up at 0 % instead of missing.
+source_pkgs = ["vectapilot_api"]
+
+[tool.coverage.report]
+precision = 2
+# Also count a directory without __init__.py (Python still imports it, as a namespace package).
+include_namespace_packages = true
