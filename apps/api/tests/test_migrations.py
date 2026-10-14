@@ -24,7 +24,7 @@ def test_migration_history_has_a_single_head() -> None:
 @pytest.mark.anyio
 async def test_migrations_enable_pgvector() -> None:
     settings = Settings()
-    engine = create_async_engine(str(settings.database_url))
+    engine = create_async_engine(str(settings.database_url.get_secret_value()))
     try:
         async with engine.connect() as connection:
             result = await connection.execute(

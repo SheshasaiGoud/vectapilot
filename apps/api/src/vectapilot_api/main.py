@@ -29,8 +29,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Clients connect lazily, so the API starts even when a dependency is down:
         # /healthz stays green and /readyz reports the problem.
-        app.state.db_engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
-        app.state.redis = Redis.from_url(str(settings.redis_url))
+        # The secret DSNs are unwrapped only here, straight into the clients — never into a log.
+        app.state.db_engine = create_async_engine(
+            str(settings.database_url.get_secret_value()), pool_pre_ping=True
+        )
+        app.state.redis = Redis.from_url(str(settings.redis_url.get_secret_value()))
         logger.info("startup", extra={"environment": settings.environment, "version": __version__})
         yield
         await app.state.redis.aclose()

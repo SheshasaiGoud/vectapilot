@@ -120,7 +120,7 @@ def test_checks_run_concurrently(app: FastAPI, client: TestClient) -> None:
 
 @pytest.mark.anyio
 async def test_check_postgres_reports_an_unreachable_database(settings: Settings) -> None:
-    engine = create_async_engine(str(settings.database_url))
+    engine = create_async_engine(str(settings.database_url.get_secret_value()))
     try:
         result = await check_postgres(engine)
     finally:
@@ -133,7 +133,7 @@ async def test_check_postgres_reports_an_unreachable_database(settings: Settings
 
 @pytest.mark.anyio
 async def test_check_redis_reports_an_unreachable_server(settings: Settings) -> None:
-    client = Redis.from_url(str(settings.redis_url))
+    client = Redis.from_url(str(settings.redis_url.get_secret_value()))
     try:
         result = await check_redis(client)
     finally:
@@ -151,7 +151,7 @@ async def test_check_redis_reports_an_unreachable_server(settings: Settings) -> 
 @pytest.mark.anyio
 async def test_check_postgres_passes_against_a_real_database() -> None:
     settings = Settings()
-    engine = create_async_engine(str(settings.database_url))
+    engine = create_async_engine(str(settings.database_url.get_secret_value()))
     try:
         assert await check_postgres(engine) == CheckResult("postgres", ok=True)
     finally:
@@ -162,7 +162,7 @@ async def test_check_postgres_passes_against_a_real_database() -> None:
 @pytest.mark.anyio
 async def test_check_redis_passes_against_a_real_server() -> None:
     settings = Settings()
-    client = Redis.from_url(str(settings.redis_url))
+    client = Redis.from_url(str(settings.redis_url.get_secret_value()))
     try:
         assert await check_redis(client) == CheckResult("redis", ok=True)
     finally:
