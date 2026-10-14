@@ -95,6 +95,7 @@ apps/api/            FastAPI service (uv project): config, JSON logging, /health
 apps/web/            Next.js — team site now; customer widget + staff dashboard later
 docs/adr/            architecture decision records
 docs/learning/       guides for [HAND-WRITE] tasks
+docs/plans/          per-PR acceptance checks for the current milestone
 .github/workflows/   ci.yml (lint, types, tests, image build) · deploy-site.yml (GitHub Pages)
 infra/               compose.yaml — the local stack
 Makefile             developer commands
@@ -107,6 +108,8 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
 - [ADR 0003](docs/adr/0003-python-toolchain-uv.md) — Python toolchain: uv, ruff, mypy strict, pytest
 - [ADR 0004](docs/adr/0004-multi-business-isolation.md) — isolation between businesses: shared tables + `business_id` + Postgres row-level security
 - [ADR 0005](docs/adr/0005-local-stack-docker-compose.md) — local stack with Docker Compose; no Langfuse in M0
+- [ADR 0006](docs/adr/0006-llm-gateway.md) — LLM gateway: the only path to a model; `anthropic` 1.x, gateway-owned retries and deadlines, Decimal cost by answering model, 95 % combined + branch-only coverage gate
+- [ADR 0007](docs/adr/0007-llm-observability.md) — LLM observability: metadata-only `llm_call` record; trace span in M3; no India API region; key never in the repo
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
@@ -120,13 +123,21 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   now (all eval data labelled synthetic), row-level-security isolation, config files via PRs (admin
   screen later), regions India + other countries. Still open: `docs/business-context.md` §9.
   Recommended: start looking for one real pilot business now (needed for credible M11 results).
-- **Next: M1 (LLM gateway, owner `diego-backend`)** — plan it with `maya-tech-lead` first.
-  Learning approach agreed: 2–3 small `[HAND-WRITE]` pieces (~10–20 lines each, e.g. cost-per-call
-  accounting, retry with backoff), each followed by the human explaining it back in their own words.
-  Decisions to confirm in M1 planning (Claude's recommendations): Anthropic API; the key lives only in
-  `apps/api/.env` with a monthly spend limit set in the console; a small model by default, a larger
-  one for hard cases; tracing via Langfuse Cloud free tier (the 8 GB Mac cannot self-host it) —
-  record the choice in an ADR.
+- **M1 (LLM gateway) — plan approved 2026-10-14** (ADR 0006, 0007), ~18 h / ~1.5 weeks.
+  `[HAND-WRITE]` by shesha, each with an explain-back: H1 `cost_usd`, H2 retry with backoff,
+  H3 `latency_summary`. Stuck protocol: time-box H1 2 h, H2 3 h → hint ladder (guide, per-test hint,
+  pseudo-code, pairing) → extend M1 or cut PR 8's scope; never quiet delegation.
+  Order: A ∥ 1 → 2 → (H1 ∥ H2 ∥ 3 → {4, 5}) → 6 → 7 → (H3 ∥ 8) → 9. A: hide secrets in config
+  errors · 1: ADRs · 2: types, stubs, guide · 3: settings, catalog, fake provider · 4: coverage gate ·
+  5: Anthropic adapter · 6: `complete()` · 7: structured output + cache hook · 8: measurement CLI +
+  smoke dataset · 9: shesha's live run, "what I measured" note, quiz. Each PR's acceptance
+  checks: [`docs/plans/m1-pr-checks.md`](docs/plans/m1-pr-checks.md).
+  Pending, shesha personally: new personal Anthropic org, dedicated workspace ($10/month limit,
+  default inference geo `global`), key, price check on the day.
+- **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
+  handle the Anthropic key. The key (`VECTAPILOT_ANTHROPIC_API_KEY`) never sits anywhere in the repo
+  tree (including `apps/api/.env`), a shell profile or history: shesha enters it with `read -s` in a
+  separate terminal that never runs Claude Code or Cursor, and closes that terminal after the run.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -141,10 +152,9 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
 - In the Claude desktop browser pane, animation frames are heavily throttled and plain screenshots
   can be stale: verify with DOM checks and the `zoom` capture instead.
 - System Python is 3.9.6; the API uses uv-managed Python 3.12 (never the system one).
-- `httpx2` — **decided No for now** (2026-10-12). Starlette 1.x's `TestClient` prefers the
-  `httpx2` package and falls back to `httpx` with a deprecation warning, which pytest ignores
-  (see `apps/api/pyproject.toml`). Do not re-propose without explaining the exact dependency and
-  its benefit first (rule 11).
+- `httpx2` — No on 2026-10-12, **reversed 2026-10-14** with `anthropic` 1.x (ADR 0006); takes
+  effect in PR 5. Until then Starlette 1.x's `TestClient` falls back to `httpx` with a deprecation
+  warning that pytest ignores (`apps/api/pyproject.toml`).
 - Docker Desktop must be running for `make up` / `make test-integration`.
 - Keep exactly one working copy (`~/Developer/vectapilot`) open in Cursor. A second clone in
   `~/Documents` caused edits to land in the wrong copy (moved to the Trash, 2026-10-13).
