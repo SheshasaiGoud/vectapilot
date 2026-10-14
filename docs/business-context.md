@@ -69,7 +69,7 @@ platform defaults          e.g. "always offer a human", AI disclosure, rate limi
 
 | Field | Notes |
 |---|---|
-| `business_id` | 🟡 Stable, unique identifier (slug). Every record and file belongs to exactly one. |
+| `business_id` | ✅ Stable, unique identifier: a lowercase slug that fully matches `[a-z0-9]+(-[a-z0-9]+)*` (`re.fullmatch`; `re.match` with `$` also accepts a trailing newline), 3–40 characters (2026-10-14, ADR 0006). Every record and file belongs to exactly one. |
 | Business name | Shown to end customers. |
 | Business type | One of the types in §1; selects the template (§2). |
 | Services | Name, short description; 🟡 optional duration and price *source* (see 3.4). |
@@ -332,6 +332,9 @@ escalation:
 **Still open** ❓
 
 4b. **Other countries:** which ones, besides India? (Privacy law, data residency, emergency numbers.)
+4c. **Model provider data location** (added 2026-10-14, ADR 0007): may end-customer data from
+    India, including health data, be processed on Anthropic's global or US inference with data at
+    rest in the US, and kept up to 2 years if flagged? Is a DPDP review needed first?
 5. **WhatsApp:** in scope for the first pilot? Directly via Meta's Cloud API or through a provider?
 6. **Translation:** may answers be translated from a source in another language?
 7. **Health data at booking:** may the assistant ask for symptoms or a reason for the visit?

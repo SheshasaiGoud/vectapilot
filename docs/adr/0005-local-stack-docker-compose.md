@@ -28,3 +28,7 @@ database. For observability: (i) self-host Langfuse now (as the playbook's M0 su
 service containers and builds the API image on every PR. Requires Docker Desktop running locally.
 Row-level security (ADR 0004) will need the API to connect as a non-owner role — added with the
 first business-owned table in M2.
+
+**Update 2026-10-14.** The Langfuse decision is in ADR 0007: the server is now v4, and self-hosting
+(4 cores / 16 GiB recommended) is still too heavy for the 8 GB Mac
+(langfuse.com/self-hosting/deployment/docker-compose, checked 2026-10-14).
