@@ -1,9 +1,10 @@
-# M1 hand-write: cost per call (H1) and retry with backoff (H2)
+# M1 hand-write: cost per call (H1), retry with backoff (H2) and latency summary (H3)
 
 These are the two `[HAND-WRITE]` pieces of the LLM gateway ([ADR 0006](../adr/0006-llm-gateway.md)).
 Everything around them (types, errors, settings, the provider adapter, the gateway itself) is built
-by the team; your two pieces are the ones that decide **money** and **time**. H3 (`latency_summary`)
-comes later, with step 8 (`m1/measure`); §2.13 only previews its concept.
+by the team; your two pieces are the ones that decide **money** and **time**. H3 (`latency_summary`,
+step 8, `m1/measure`) is an eval metric function rather than a gateway piece; it has its own
+section, §6, and §2.13 introduces its concept.
 
 ## Your tasks
 
@@ -26,6 +27,10 @@ comes later, with step 8 (`m1/measure`); §2.13 only previews its concept.
   Say so early, so we can adjust scope instead of rushing.
 
 ## 1. How to work
+
+> **Status (2026-10-15).** H1, H2 and H3 are implemented, by Claude at shesha's request; their
+> tests no longer carry the strict-xfail marker. This section describes the workflow they were
+> set up with and stays for reference. shesha's explain-backs (§5 and §6.3) are still pending.
 
 ```bash
 cd apps/api
@@ -325,17 +330,17 @@ For the 12 samples 1, 2, …, 12, Python's `statistics.quantiles` (run on 2026-1
 - the inclusive method gives **11.45**: it stays inside the data, but it rests on the top two
   samples alone.
 
-Larger n helps less than it seems. From n = 19 even the exclusive method stays inside the data, and
-at n = 20 the inclusive p95 of 1, …, 20 is 19.05, essentially the 19th value. Inside the data is not
-the same as precise: for n independent samples, the true p95 lies *above the sample maximum* with
+Larger n helps less than it seems. From n = 19 even the exclusive method stays inside the data (in
+exact arithmetic; floats can still push either method a few units in the last place past the max,
+§6.1), and at n = 20 the inclusive p95 of 1, …, 20 is 19.05, essentially the 19th value. Inside
+the data is not the same as precise: for n independent samples, the true p95 lies *above the sample maximum* with
 probability 0.95ⁿ, about 54 % at n = 12 and still about 36 % at n = 20. Only from n = 59 does that
 drop below 5 %.
 
 ADR 0007's rules follow from this: use the inclusive method; report p95 only when n ≥ 20
 **distinct** prompts (repeats of one prompt are not independent samples), and always next to n and
 min/max, so a reader can see how little it rests on; count timed-out calls instead of dropping them
-(dropping hides the slowest). H3 (`latency_summary`) comes with step 8, with its own stub, tests and
-section here.
+(dropping hides the slowest). H3 (`latency_summary`) turns these rules into code: §6.
 
 ## 3. Test by test, with level-2 hints
 
@@ -690,13 +695,14 @@ The tests, in file order:
 | 3 | Pseudo-code | On request only, in chat with Diego or Claude; never in this file |
 | 4 | Pairing review: we go through your code together, and you type | On request only |
 
-**Time-boxes** (agreed in M1 planning, 2026-10-14): H1 **2 h**, H2 **3 h**. The clock starts
-when you start writing code; reading this guide is not counted (decided 2026-10-14). When the
-time is up and you are still stuck, go one level up the ladder. Still stuck after level 4: extend
-M1 or cut PR 8's scope, never quiet delegation. If you ask Claude to write a piece, Claude reminds
-you of the learning goal once, respects your decision and records it in the hand-off; the
-explain-back stays part of acceptance whoever typed the code. Proposal: note in your PR which
-levels you used. It helps size H3.
+**Time-boxes** (agreed in M1 planning, 2026-10-14): H1 **2 h**, H2 **3 h**; H3: n/a, it is
+already implemented (status line in §6), so neither the ladder nor a time-box applies to it; its
+§6.1 and §6.2 are reading for the explain-back (§6.3). The clock starts when you start writing
+code; reading this guide is not counted (decided 2026-10-14). When the time is up and you are
+still stuck, go one level up the ladder. Still stuck after level 4: extend M1 or cut PR 8's scope,
+never quiet delegation. If you ask Claude to write a piece, Claude reminds you of the learning goal
+once, respects your decision and records it in the hand-off; the explain-back stays part of
+acceptance whoever typed the code. Proposal: note in your PR which levels you used.
 
 ## 5. Explain it back (part of acceptance)
 
@@ -717,3 +723,234 @@ levels you used. It helps size H3.
 - The gateway already has an `asyncio.timeout` around your function, so why does your function
   still check the deadline before sleeping?
 - Why does a Retry-After above the cap mean "give up" rather than "wait the cap"?
+
+**H3: latency summary**: see §6.3.
+
+## 6. H3: `latency_summary` (step 8)
+
+**Status:** latency_summary (H3): implemented by Claude at shesha's request (2026-10-15); shesha's explain-back is pending (§6.3).
+
+| | Function | Tests | Size | Time-box | Lands in |
+|---|---|---|---|---|---|
+| **H3** | `latency_summary` in [`measure/latency.py`](../../apps/api/src/vectapilot_api/measure/latency.py) | [`tests/measure/test_latency.py`](../../apps/api/tests/measure/test_latency.py): 18 tests, 34 cases, all passing | 15 lines of code in the body | n/a (implemented) | its own PR, before step 8's (decided 2026-10-15) |
+
+- **The docstring is the spec**, as for H1 and H2: read `latency_summary`'s docstring, then the
+  tests, then the body. `uv run pytest tests/measure/test_latency.py -v` shows every test passing.
+  Do not edit a test to make it pass; change the code (§1's rule).
+- **Your part: the explain-back (§6.3), still pending.** Read §6.1, then go through §6.2 test by
+  test: for each one, find the line of the body that makes it pass, and read the hint as the
+  mistake that test catches. Then answer §6.3 in your own words.
+- **Already there and tested:** `LatencySummary`, the result type
+  ([`tests/measure/test_latency_types.py`](../../apps/api/tests/measure/test_latency_types.py),
+  41 cases). It is frozen and strict, and refuses a summary that contradicts itself
+  (`min <= median <= max`, and `median <= p95 <= max`). So some mistakes show up as a Pydantic
+  `ValidationError` raised while building the result, not as an assert diff: its message names the
+  broken rule.
+- **Not this function's job** (PR 8 does it): choosing the samples (one per distinct prompt,
+  timed-out calls kept), grouping by alias, the timeout rate, refusals, printing and the committed
+  summary file. `latency_summary` sees only a sequence of numbers.
+
+### 6.1 The concepts (hint level 1)
+
+- **Inclusive vs exclusive (§2.13).** `statistics.quantiles(data, n=20)` cuts the sorted data into
+  20 groups of equal probability and returns the 19 boundaries between them; the last boundary is
+  the 95th percentile. The default method (`exclusive`) treats the data as a sample from a wider
+  population and may extrapolate beyond it: 12.35 for 1, …, 12, and 28.5 for the two samples 10 and
+  20, both above the largest sample. The `inclusive` method treats the smallest and the largest
+  sample as the 0th and 100th percentile and only interpolates between neighbours, so it stays
+  inside the data: 11.45 and 19.5. In words: sort the samples and number them from 0; p95 sits at
+  position 0.95 × (n − 1); when that falls between two samples, go that fraction of the way from
+  the lower one to the upper one.
+- **`min_n`, and what n counts.** A p95 from few samples rests on the top one or two (§2.13: at
+  n = 20 the true p95 still lies above the largest sample about 36 % of the time). Below `min_n` the
+  function returns `None`, so the report says "n = 12, no p95" instead of printing a number that
+  looks precise. The function counts what it is given; PR 8 makes that one sample per distinct
+  prompt.
+- **Repeats are not independent samples.** Twenty runs of one prompt share its length, its answer
+  length and the minutes of network they ran in. They tell you about that prompt, not about the
+  spread across prompts, so they add far less information than twenty different prompts.
+- **Timeouts hide the slowest calls.** A call that hit the deadline has no finished latency. Drop
+  it, and the summary loses exactly its slowest calls: the worse the service, the better the p95
+  looks. PR 8 keeps those calls (their recorded latency is a lower bound) and reports the timeout
+  rate next to the latency.
+- **Floats again (compare §2.4).** "In exact arithmetic p95 lies between the median and the max"
+  does not survive float rounding: the inclusive interpolation of twenty samples of 123.456 gives
+  123.45600000000002 (Python 3.12.15, 2026-10-15). Latency is a measurement, not money, so a few
+  units in the last place do not matter; but a report showing a p95 above its own max is visibly
+  wrong, and `LatencySummary` refuses it. Hence the clamp in the contract.
+- **Check the input first.** `statistics.StatisticsError` and Pydantic's `ValidationError` are
+  both subclasses of `ValueError`, so a plain `pytest.raises(ValueError)` would also pass when one
+  of them fires by accident. The tests therefore ask for exactly `ValueError`, raised by your
+  function before it computes anything, with a message that names the rule. NaN needs care: every
+  comparison with NaN is false, so it slips past a "less than zero" check and quietly breaks
+  sorting, min and max.
+- **Don't change the caller's data.** Sorting a copy leaves the caller's sequence as it was;
+  sorting in place reorders the caller's list (and a tuple cannot be sorted in place at all).
+
+### 6.2 Test by test, with level-2 hints
+
+`ONE_TO_12`, `ONE_TO_20` and `SHUFFLED_20` (1, …, 20 in a fixed mixed-up order) are tuples, so code
+that sorts in place cannot change them for the tests that follow. p95 is compared with a tolerance
+of 1e-9 (an equivalent formula may round the last digit differently); every other value exactly.
+Every expected value has its working in a comment next to it. The body already passes every test
+below. The hints were written for someone writing the body (hence "your code"); read each one as
+the mistake its test catches.
+
+- **`test_twelve_samples_have_no_p95`**: 1, …, 12 ⇒ n 12, min 1, median 6.5, max 12, no p95
+  (12 < 20).
+  <details><summary>Hint</summary>
+
+  A median of 7 means you took one middle sample; with an even n there are two, and the median is
+  their mean (the `statistics.median` docs). A p95 here means the `min_n` rule is missing.
+
+  </details>
+- **`test_twenty_samples_have_an_inclusive_p95`**: 1, …, 20 ⇒ median 10.5, p95 19.05, and
+  p95 <= max.
+  <details><summary>Hint</summary>
+
+  19.95 is the exclusive method: check which method you asked for (§6.1). No p95 at all: n = 20
+  equals `min_n`, and equal is enough.
+
+  </details>
+- **`test_nineteen_samples_have_no_p95`**: 1, …, 19 ⇒ n 19, min 1, median 10, max 19, no p95
+  (19 < 20, one short of ADR 0007's rule).
+  <details><summary>Hint</summary>
+
+  A p95 of 18.1 while the next test passes: the default of `min_n` is no longer 20. The signature
+  is part of the contract; write only the body.
+
+  </details>
+- **`test_min_n_is_the_smallest_n_with_a_p95`**: 12 samples: `min_n` 13 ⇒ no p95; `min_n` 12 ⇒
+  11.45.
+  <details><summary>Hint</summary>
+
+  If this fails while the 20-sample test passes, the number 20 is in your code: `min_n` is a
+  parameter. Then check the comparison at n equal to `min_n`.
+
+  </details>
+- **`test_the_order_of_the_samples_does_not_matter`**: `SHUFFLED_20` gives the same summary as
+  1, …, 20.
+  <details><summary>Hint</summary>
+
+  Which values did you read from the input as given? The first and last items are the min and max
+  only after sorting.
+
+  </details>
+- **`test_the_input_is_not_modified`**: after the call, the caller's list is still in its
+  mixed-up order.
+  <details><summary>Hint</summary>
+
+  §6.1, last bullet.
+
+  </details>
+- **`test_a_tuple_works_like_a_list`**: a tuple gives the same summary as the same list.
+  <details><summary>Hint</summary>
+
+  An `AttributeError` about `sort` is the previous test's problem, seen from a tuple.
+
+  </details>
+- **`test_equal_samples_each_count_as_a_sample`**: 5, 7, 5, 5 with `min_n` 2 ⇒ n 4, min 5,
+  median 5, max 7, p95 6.7.
+  <details><summary>Hint</summary>
+
+  n = 2 means equal samples were merged (a `set` does that). Every call is a sample, even when two
+  took the same time.
+
+  </details>
+- **`test_float_rounding_never_pushes_p95_out_of_median_to_max`** (3 cases): twenty and three
+  samples of 123.456, and 1, 123.456, 123.456 ⇒ p95 exactly 123.456.
+  <details><summary>Hint</summary>
+
+  A `ValidationError` saying `median_ms <= p95_ms <= max_ms must hold` is the type refusing the
+  unclamped value (§6.1, floats). Reread the docstring's "Float rounding" bullet.
+
+  </details>
+- **`test_a_single_sample_has_no_p95`**: 42 with `min_n` 2 ⇒ n 1, min, median and max 42, no p95.
+  <details><summary>Hint</summary>
+
+  If this raises, look at the order of your steps: the `min_n` rule must decide before any
+  percentile is computed, and one sample has nothing to interpolate between.
+
+  </details>
+- **`test_the_p95_stays_inside_the_data`** (6 cases): the exclusive-method trap. On five of the
+  six inputs the default method lands above the largest sample; `latency_summary`'s must stay
+  within [median, max].
+  <details><summary>Hint</summary>
+
+  Several cases failing at once, with `ValidationError`s: you are on the default method (§6.1,
+  first bullet).
+
+  </details>
+- **`test_the_p95_is_not_rounded`**: 1, 2, 3.0001, 7.1234567 with `min_n` 2 ⇒ p95 6.504953195.
+  <details><summary>Hint</summary>
+
+  6.505 means p95 was rounded. Rounding is for display, and printing the report is PR 8's job:
+  the summary keeps the full value.
+
+  </details>
+- **`test_every_value_is_a_float_also_for_int_samples`**: 1, 2, 3 (ints) ⇒ floats 1.0, 2.0,
+  3.0, p95 2.9, and n an int.
+  <details><summary>Hint</summary>
+
+  `LatencySummary` already turns ints into floats, so a failure here is about a value, not a type:
+  work out p95 at position 1.9 by hand (§6.1).
+
+  </details>
+- **`test_zero_is_a_valid_sample`**: 0, 1 with `min_n` 2 ⇒ n 2, min 0, median 0.5, max 1,
+  p95 0.95.
+  <details><summary>Hint</summary>
+
+  A `ValueError` here means your sample check rejects 0. The rule is "negative", and 0 is not
+  negative: look at the comparison you wrote.
+
+  </details>
+- **`test_no_samples_is_an_error`** (2 cases): an empty list or tuple ⇒ a plain `ValueError`
+  with a message of its own.
+  <details><summary>Hint</summary>
+
+  `StatisticsError`, or the message "min() iterable argument is empty" (Python 3.12; before 3.12:
+  "min() arg is an empty sequence"), means the error came from inside the computation. Check
+  first, then raise your own, with a message that names the rule (§6.1, "Check the input first").
+
+  </details>
+- **`test_a_negative_or_non_finite_sample_is_an_error`** (7 cases): a negative, NaN or infinite
+  sample anywhere in the input ⇒ a plain `ValueError`.
+  <details><summary>Hint</summary>
+
+  Only the NaN cases fail? A NaN is neither below zero nor above anything (§6.1). The `math`
+  module has a function that is false for NaN and for both infinities. A `ValidationError` means
+  the result type caught it, not your check. Only "nan that sorting leaves in place" fails, with
+  "DID NOT RAISE"? Then the type caught the other cases for you: in that input, sorting leaves
+  the NaN in place, so min, median and max never see it. Check every sample yourself.
+
+  </details>
+- **`test_the_error_message_never_contains_a_sample`**: the message names the rule, without the
+  value -1234.5.
+  <details><summary>Hint</summary>
+
+  Say what must hold, not which sample broke it: the same habit as the settings and gateway errors
+  (ADR 0007: a message names the variable or the rule, never the value).
+
+  </details>
+- **`test_min_n_below_2_is_an_error`** (3 cases): `min_n` of 1, 0 or −20 ⇒ a plain `ValueError`,
+  even with valid samples.
+  <details><summary>Hint</summary>
+
+  If this fails, nothing checks `min_n` (or the check uses the wrong bound): check it on its own,
+  up front. Why 2: a "percentile" of one sample is that sample, and `statistics.quantiles` refuses
+  fewer than two.
+
+  </details>
+
+### 6.3 Explain it back (part of acceptance)
+
+Pending (status line, §6). In your own words, without notes:
+
+- Why the inclusive method and not the default one? Give an input where the default lands above
+  the largest sample, and say why the inclusive one cannot.
+- Why are twenty runs of one prompt not twenty independent samples, and what should n count in
+  the report?
+- How do timeouts hide the slowest calls, and what does PR 8 do instead of dropping them?
+- The inclusive p95 stays inside the data from n = 2 on, so why is there still no p95 below
+  n = 20?
+- Why does the contract clamp p95, and by how much can the clamp move it?

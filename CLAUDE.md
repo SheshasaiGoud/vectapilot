@@ -133,9 +133,9 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   5: Anthropic adapter · 6: `complete()` · 7: structured output + cache hook · 8: measurement CLI +
   smoke dataset · 9: shesha's live run, "what I measured" note, quiz. Each PR's acceptance
   checks: [`docs/plans/m1-pr-checks.md`](docs/plans/m1-pr-checks.md).
-  Done: 1 (#8), A (#9), 2 (#10), 3 (#11), 4 (#12), 5 (#13), H1 (#14), H2 (#15), 6 (#16); 7 in review.
-  H1 and H2 written by Claude at shesha's request (2026-10-15); shesha's explain-backs pending.
-  Next: H3 and 8, then shesha's live run (9).
+  Done: 1 (#8), A (#9), 2 (#10), 3 (#11), 4 (#12), 5 (#13), H1 (#14), H2 (#15), 6 (#16), 7 (#17);
+  H3 in review. H1, H2 and H3 (`latency_summary`) implemented by Claude at shesha's request
+  (2026-10-15); shesha's explain-backs pending. Next: 8, then shesha's live run (9).
   Pending, shesha personally: new personal Anthropic org, dedicated workspace ($10/month limit,
   default inference geo `global`), key, price check on the day.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
