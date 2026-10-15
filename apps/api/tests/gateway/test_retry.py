@@ -1,14 +1,7 @@
 """H2 tests: `backoff_delay` and `call_with_retries` (guide: docs/learning/m1-gateway.md, H2).
 
-Both are [HAND-WRITE]: shesha writes them. Until then they raise NotImplementedError, so the
-whole module is marked `xfail(strict=True, raises=NotImplementedError)`:
-
-- not implemented yet          → "xfailed" (expected);
-- implemented, wrong behaviour → a normal failure (only NotImplementedError counts as expected);
-- implemented, right behaviour → "XPASS(strict)", a failure on purpose: that is your signal.
-
-When no test here is xfailed any more, delete the `pytestmark` line below and run again: every
-test must then simply pass. Do not edit the tests to make them pass; change the code.
+Both are implemented, so the module's `xfail(strict=True)` marker is gone and every test must
+simply pass. Do not edit the tests to make them pass; change the code.
 
 Nothing here really waits: `FakeTime.sleep` records the wait and moves a fake clock forward.
 """
@@ -30,12 +23,6 @@ from vectapilot_api.gateway.errors import (
 )
 from vectapilot_api.gateway.retry import backoff_delay, call_with_retries
 from vectapilot_api.gateway.types import RetryPolicy
-
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    raises=NotImplementedError,
-    reason="H2: shesha implements the retry — see docs/learning/m1-gateway.md, H2",
-)
 
 # 2 retries; backoff upper bounds 0.5 s, 1 s, 2 s, 4 s, then capped at 8 s.
 POLICY = RetryPolicy(max_retries=2, base_delay_s=0.5, max_delay_s=8.0)
