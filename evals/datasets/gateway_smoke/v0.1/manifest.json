@@ -1,0 +1,21 @@
+{
+  "dataset": "gateway_smoke",
+  "version": "v0.1",
+  "created": "2026-10-15",
+  "synthetic": true,
+  "authored_by": "Claude (noah-evals), M1 step 8",
+  "review": "pending",
+  "businesses": {
+    "sunrise-clinic": [
+      "en",
+      "hi"
+    ],
+    "paws-and-co": [
+      "en",
+      "te"
+    ],
+    "northwind-shop": [
+      "en"
+    ]
+  }
+}

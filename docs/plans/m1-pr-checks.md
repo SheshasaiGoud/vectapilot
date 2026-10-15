@@ -8,9 +8,9 @@ pull-request numbers. Tags: **[0006]** / **[0007]** = moved out of that ADR · *
 approved M1 plan (2026-10-14), never in an ADR · **[review]** = added by the ADR review
 (2026-10-14) · **[note]** = Maya's note, to be resolved in that PR (not a decision).
 **[step A review]**, **[step 2 review]** … **[step 5 review]** = from that step's review
-(2026-10-14); the step 2 lines are as shesha decided them. **[decided]** = a former **[note]**,
-as shesha decided it. **[step 6 review]** = from the step 6 review (2026-10-15); a line marked
-"proposed" there still needs shesha's yes.
+(2026-10-14); the step 2 lines are as shesha decided them. **[decided]** = a former **[note]** or
+open question, as shesha decided it. **[step 6 review]** = from the step 6 review (2026-10-15); a
+line marked "proposed" there still needs shesha's yes.
 When M1 closes, this file is either kept as the record of what was checked or deleted in the
 close-out PR (decided then).
 
@@ -144,7 +144,7 @@ close-out PR (decided then).
   `Authorization` (`httpx2/_client.py:530-534`), so the `x-api-key` header and the prompt would
   reach the new host. Tests swap only the transport, so they run the production client. Test: a
   3xx gives `ProviderError` after exactly 1 request.
-- **[step 5 review]** Proposed, pending shesha's yes (it extends ADR 0006's Settings list):
+- **[step 5 review]** Decided 2026-10-15 (it extends ADR 0006's Settings list):
   `ANTHROPIC_CUSTOM_HEADERS` is refused like the other SDK variables. The SDK reads it even with an
   explicit key and sends it after the key header, so it can replace the key or turn on beta
   features (`_client.py:685-692`, `_base_client.py:729-730`).
@@ -306,8 +306,40 @@ close-out PR (decided then).
 ## PR 8 — `m1/measure`
 - **[0006]** `--live` cap mechanics: before each call, reserve its worst-case cost
   (`max_output_tokens`, every retry and repair); stop before any call whose reservation would cross
-  `--max-usd`. A cost-incomplete call keeps its reservation (never counted as $0) and marks the run
-  partial; **[plan]** partial runs cannot feed the note.
+  `--max-usd`. A cost-incomplete call keeps its reservation (never counted as $0); **[plan]**
+  partial runs cannot feed the note.
+  - **[decided]** 2026-10-15 (shesha), the partial-run rule: a run is partial only if it did not
+    make every planned call (stopped early by any stop in the PR 9 runbook's list, or a kill).
+    Cost-incomplete calls do not make a run partial: they are reported as "k/n cost-incomplete"
+    and the cost is labelled a lower bound. Dry runs never feed the note; a run that fails the
+    record-count check never feeds it. So `_partial_reasons` drops its cost-incomplete reason, and
+    `PARTIAL_RULE_LABEL` (the warning that explained the old rule's collision with attempt
+    timeouts) is removed, with its paragraph in the dataset README. As built: a kill (a closed
+    terminal, a second Ctrl-C) writes no summary, so it is a failed run whose two inputs are kept
+    as evidence only; one Ctrl-C (`interrupted`) is summarised, as partial if calls remained.
+- **[decided]** 2026-10-15 (shesha), closing the three open stop questions (built in `llm_cli.py`):
+  1. A run that a stop ended never feeds the note, even after its last planned call: it made every
+     call, so it is not partial and exits 0, but `summary._not_for_note` gives "stopped by its
+     last planned call" (kept as built).
+  2. A response with `inference_geo` `us` stops the run after that call (`STOPPING_GEO`): a setup
+     error, the workspace default must be `global`. That one call keeps its reservation and can
+     still cross the cap (billed 1.1×). A missing geo (None) does not stop: the call is
+     cost-incomplete, keeps its reservation, and the run carries on.
+  3. `invalid_request` stops the run after that call, like the account errors
+     (`STOPPING_OUTCOMES`): our own request is wrong, so the rest of the plan would repeat it.
+  The stop detail (`RunInfo.stop_detail`) names the case id and the outcome name or
+  "inference_geo us", never prompt or completion text.
+- **[decided]** 2026-10-15 (shesha): Diego's five live-run rules are accepted as built (ADR 0007,
+  Measurement). (1) The whole plan's worst case may exceed the cap: the cap holds call by call,
+  and reaching it stops the run as partial. (2) A conservative prompt-token bound (1 token ≥ 1
+  byte, ≤ 200 tokens of overhead, the highest input-side price) is checked after every call; the
+  first miss stops the run. (3) The cap is typed again at a terminal: this guards against mistakes
+  only; the real control is that the key never enters an agent's environment, and the Console's
+  monthly limit is the only cap across runs. (4) The run stops on `spend_limit`, `billing` and
+  `auth_failed` (extended the same day: also `invalid_request` and a `us` geo, above). (5) A live
+  summary is committed together with its two input files (metadata only), one directory per run.
+- **[decided]** 2026-10-15 (shesha): H3 lands as its own PR before step 8; step 8 lands as one PR
+  with two commits (measurement, CLI).
 - **[review]** The summary prints cache hits separately and "k/n cost-incomplete"; an incomplete
   `cost_usd` is labelled a lower bound.
 - **[0006]** First-try validity is k/n over the non-forced structured cases only; the forced-repair
@@ -348,6 +380,7 @@ close-out PR (decided then).
   `read -s VECTAPILOT_ANTHROPIC_API_KEY && export VECTAPILOT_ANTHROPIC_API_KEY`; close that terminal
   after the run. Keychain only if `security find-generic-password … -w` prompts on every read; if it
   returns the key silently, any agent could read it too.
+- **[decided]** 2026-10-15 (shesha): no `.claude/settings.json` deny rule for the key (ADR 0007).
 - **[review]** Before the run: the workspace default inference geo is `global`; the shell has none
   of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_LOG`, and the key
   is not in `.env` (startup refuses otherwise). **[step 5 review]** Also none of
@@ -362,6 +395,130 @@ close-out PR (decided then).
   (from public reports, not the docs, unverified): a 400 `invalid_request_error` "Your credit
   balance is too low to access the Anthropic API…". A 400 lands in row 5 (`InvalidRequest`). It is
   still never retried, but the outcome label is wrong, so add that shape to row 2 and its test.
+
+### Live run (shesha only)
+The checklist that `vectapilot-llm --help` points to. Agents never make this run, never pass
+`--live` and never see the key (ADR 0007, Key handling).
+
+**When the run stops** (`llm_cli.py`: `run_calls`, `_call`, `_stop_after`; dry runs alike)
+- Before a call: `--max-calls` reached (`max_calls`), or the call's reservation would cross the
+  cap (`cost_cap`).
+- After a call, as `error`: outcome `spend_limit`, `billing` or `auth_failed` (no further call can
+  succeed) or `invalid_request` (the request was rejected as invalid); a call with no single
+  `llm_call` record; a call billed beyond its worst-case bound; a response with `inference_geo`
+  `us` (step 1); an unexpected exception (`internal_error`). Ctrl-C stops it as `interrupted`.
+- A missing geo does not stop the run: the call is cost-incomplete and keeps its reservation.
+- A stop prints `Run stopped (<kind>): <detail>` on stderr; `summary.md` shows the same in its
+  "Stopped" row (case ids, outcome and exception type names, dollar amounts; never prompt or
+  completion text). Its status line starts "PARTIAL run" if planned calls remained, else "not for
+  the note" with "stopped by its last planned call".
+
+Exit codes: 0 every planned call made · 1 failed or refused · 2 invalid arguments · 3 partial
+(stopped early, summarised). Exit 0 after a "Run stopped (…)" line: the last planned call stopped
+the run, so it is not partial, but it never feeds the note (decided by shesha, 2026-10-15, PR 8).
+Exit 0 alone never means "use it": the status line in `summary.md` decides.
+
+**Before the day**
+1. Account: a new personal organisation; in it, a dedicated workspace with a $10/month spend limit
+   and default inference geo `global` (the CLI never sets a geo, so this default applies to every
+   call; a response from `us` stops the run after that call as a setup error, and that one call,
+   billed 1.1×, can cross the cap); a key created in that workspace, kept where no agent can read
+   it (never in the repo tree, a shell profile or history; ADR 0007, Key handling).
+2. Prices re-checked on the pricing page against `apps/api/src/vectapilot_api/gateway/models.toml`
+   (both models: five token classes and the long-prompt tier). A changed price lands through a PR
+   (new `catalog_version`) before the run. Also recheck the /api/messages page (PR 7).
+3. The hi/te and code-mixed prompts reviewed, and `"review": "done"` committed through a PR in
+   `evals/datasets/gateway_smoke/v0.1/manifest.json`. Until then no run can feed the note.
+4. Optional, $0: `make llm-demo` from the repository root rehearses the run (a dry run; its
+   directory goes under the git-ignored `evals/reports/tmp/`).
+
+**On the day**
+5. A clean tree on the commit to be measured: `git status` shows nothing to commit. The CLI
+   ignores `evals/reports/` (earlier run directories), but any other change, untracked files
+   included, marks the run "uncommitted changes" and it cannot feed the note. Keep the default
+   dataset: one whose files are not byte for byte those in the commit (a `--dataset` outside the
+   repository, untracked, git-ignored or changed) is marked "dataset not as committed", likewise.
+6. A separate terminal that never runs Claude Code or Cursor; `cd` to `apps/api`. Settings still
+   needs `VECTAPILOT_DATABASE_URL` and `VECTAPILOT_REDIS_URL` (the CLI never connects to them):
+   `apps/api/.env`, copied from `.env.example`, provides both. The key never goes there (startup
+   refuses it).
+7. Enter the key (paste it, press Enter; the key is not shown and never reaches the history):
+   ```
+   read -s VECTAPILOT_ANTHROPIC_API_KEY && export VECTAPILOT_ANTHROPIC_API_KEY
+   ```
+8. Choose the provider (the exported value overrides the `fake` in `.env`):
+   ```
+   export VECTAPILOT_LLM_PROVIDER=anthropic
+   ```
+9. Check that none of the refused variables is set (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+   `ANTHROPIC_BASE_URL`, `ANTHROPIC_LOG`, `ANTHROPIC_CUSTOM_HEADERS`, `SSL_CERT_FILE`,
+   `SSL_CERT_DIR`, `SSLKEYLOGFILE`). This prints names only, never values, and must print nothing:
+   ```
+   env | cut -d= -f1 | grep -E '^(ANTHROPIC_|SSL)'
+   ```
+   A proxy is allowed: `env | cut -d= -f1 | grep -i proxy` shows none unless one is meant.
+10. Run it, with no pipe and no redirect (the plan must be read where the cap is typed):
+    ```
+    uv run vectapilot-llm --live --max-usd 1.00
+    ```
+    Read the plan: the worst case per alias and for the whole plan. Add no `--max-calls`: a run
+    it stops is partial.
+11. Type the cap exactly as given (`1.00`, not `1`) and press Enter. Anything else, an empty line
+    or Ctrl-C cancels it: nothing is called (exit 1).
+12. Wait for `Written to …`. To stop early, press Ctrl-C **once**: the call in flight is recorded
+    as `cancelled` and the run is summarised, partial (exit 3) if planned calls remained. A Ctrl-C
+    during the last planned call, or just before it (it reaches the next call as that call
+    starts), prints "Run stopped (interrupted)" and exits 0: every call made, never for the note
+    (decided by shesha, 2026-10-15). No summary at all after closing the terminal, a second
+    Ctrl-C, or a Ctrl-C after the last call has returned (asyncio's own handling, checked
+    2026-10-15 with a stand-alone probe, not through the CLI): only `calls_made.jsonl` and
+    `llm_call_log.jsonl` remain, a failed run, evidence only.
+    "Run stopped (error): <case>: outcome invalid_request, …" may mean the prepaid credit has run
+    out (the unverified 400 in PR 9's `[step 5 review]` item; step 15).
+    "Run stopped (error): <case>: inference_geo us, …" means the workspace default geo is not
+    `global`: fix it (step 1) before another live run.
+13. Close the terminal: the key goes with it.
+
+**After**
+14. Compare the run's token counts per model with the Console's usage per model for the run's
+    time window (ADR 0006: cost accuracy). The summary has per-alias figures, not totals: sum
+    the `llm_call` records in `llm_call_log.jsonl` by `model_answered`. From `apps/api`, with
+    `<UTC start>` replaced by the run's directory name (prints one line per model):
+    ```
+    uv run python -c '
+    import collections, json, sys
+    totals = collections.defaultdict(collections.Counter)
+    for line in open(sys.argv[1], encoding="utf-8"):
+        record = json.loads(line).get("llm_call")
+        if record:
+            totals[record["model_answered"]].update({k: v for k, v in record.items() if k.endswith("_tokens")})
+    for model, tokens in sorted(totals.items(), key=str):
+        print(model, dict(tokens))
+    ' ../../evals/reports/gateway_smoke/v0.1/<UTC start>-live/llm_call_log.jsonl
+    ```
+    Expect an exact match only when the summary shows 0/n cost-incomplete. Otherwise the local
+    sum is a lower bound and the Console shows at least as many tokens: a timed-out attempt's
+    tokens, or those of an answer that could not be read, are not in the record
+    (`measure/budget.py`, `bound_held`). Only a Console figure below the local sum is a gateway
+    problem.
+15. If the run stopped on `billing` (any 402) or `invalid_request` (possibly the unverified 400):
+    the CLI shows only each call's outcome, latency and cost. The request ids are in
+    `llm_call_log.jsonl` (each record's `request_ids`). Neither the CLI nor the record ever shows
+    the HTTP status, `error.type` or the provider's message (provider text stays out, ADR 0007),
+    so this run cannot settle PR 9's `[step 5 review]` open item: it
+    stays open with this CLI. Record what you can see (the outcomes, the request ids, the
+    Console's credit balance), never the key or a request body.
+16. Commit the run directory, `evals/reports/gateway_smoke/v0.1/<UTC start>-live/` (the summary and
+    its two input files, metadata only), on a branch and open a PR. A partial run, or a failed one
+    (no summary: exit 1 after calls, or a kill), is committed as evidence only or deleted before
+    the next live run.
+17. Write the "what I measured" note only from a run whose `summary.md` status line reads
+    `complete live run: may feed the "what I measured" note`. Exit 0 is not enough: a run stopped
+    by its last planned call also exits 0 and never feeds the note (decided by shesha,
+    2026-10-15). Label the note synthetic ("synthetic prompts, single home network", with commit,
+    dataset version, model ids, catalog version). A truncation triggers the rule fixed before the
+    run: raise that alias's `max_output_tokens` (new `catalog_version`) and re-run.
+18. If anything leaked, rotate the key first, then find out how.
 
 ## Handed on to M3 (step 6 review; carry into M3's plan)
 - When a business's config loads, check every alias it uses against the catalog (fail at startup,
@@ -382,4 +539,8 @@ close-out PR (decided then).
 - **[step 2 review]** Retry-After above `max_delay_s` ⇒ no retry, the error is raised (decided
   2026-10-14; alternative considered: wait it if it fits before the deadline).
 
-H1 and H3: nothing moved from the ADRs.
+H1: nothing moved from the ADRs.
+
+## H3 — latency summary
+- latency_summary (H3): implemented by Claude at shesha's request (2026-10-15); shesha's explain-back is pending
+- Nothing moved from the ADRs.

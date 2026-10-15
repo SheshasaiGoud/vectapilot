@@ -69,12 +69,16 @@ From the repository root (`make` lists everything):
 - `make down` · `make ps` · `make logs` · `make migrate` · `make reset-db` (deletes local data, asks first)
 - `make check` — lint + types + tests under coverage, as CI · `make test-integration` — tests against the real stack
 - `make coverage` — tests under coverage, then the gateway gate (combined and branch-only ≥ 95 %, ADR 0006)
+- `make llm-demo` — the M1 measurement CLI as a dry run (fake provider, $0) into the git-ignored
+  `evals/reports/tmp/`
 
 API (run inside `apps/api/`, Python 3.12 managed by uv):
 - `uv sync` — create/update the virtualenv from `uv.lock`
 - `uv run vectapilot-api` — dev server at http://127.0.0.1:8000 (needs `VECTAPILOT_DATABASE_URL`
   and `VECTAPILOT_REDIS_URL`; see `/healthz`, `/readyz`, `/docs`)
 - `uv run pytest` · `uv run mypy` · `uv run ruff check .` · `uv run ruff format .`
+- `uv run vectapilot-llm` — the measurement CLI; without `--live` always a dry run. `--live --max-usd X`
+  (a cap per run, ≤ $1.00, typed again at a terminal) is shesha's alone: agents never pass `--live`.
 - `RUN_INTEGRATION=1 uv run pytest` — also run tests against real Postgres/Redis
 - `uv run alembic upgrade head` · `uv run alembic revision -m "..." --rev-id 000N` — migrations
   (database URL comes from Settings / `apps/api/.env`, never from alembic.ini)
@@ -97,11 +101,13 @@ apps/web/            Next.js — team site now; customer widget + staff dashboar
 docs/adr/            architecture decision records
 docs/learning/       guides for [HAND-WRITE] tasks
 docs/plans/          per-PR acceptance checks for the current milestone
+evals/               datasets (synthetic) and committed live measurement runs; evals/reports/tmp/
+                     holds dry runs (git-ignored)
 .github/workflows/   ci.yml (lint, types, tests, image build) · deploy-site.yml (GitHub Pages)
 infra/               compose.yaml — the local stack
 Makefile             developer commands
 ```
-Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/`.
+Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
 
 ## Decisions
 - [ADR 0001](docs/adr/0001-virtual-team-as-claude-code-subagents.md) — virtual team as Claude Code subagents
@@ -133,9 +139,10 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   5: Anthropic adapter · 6: `complete()` · 7: structured output + cache hook · 8: measurement CLI +
   smoke dataset · 9: shesha's live run, "what I measured" note, quiz. Each PR's acceptance
   checks: [`docs/plans/m1-pr-checks.md`](docs/plans/m1-pr-checks.md).
-  Done: 1 (#8), A (#9), 2 (#10), 3 (#11), 4 (#12), 5 (#13), H1 (#14), H2 (#15), 6 (#16), 7 (#17);
-  H3 in review. H1, H2 and H3 (`latency_summary`) implemented by Claude at shesha's request
-  (2026-10-15); shesha's explain-backs pending. Next: 8, then shesha's live run (9).
+  Done: 1 (#8), A (#9), 2 (#10), 3 (#11), 4 (#12), 5 (#13), H1 (#14), H2 (#15), 6 (#16), 7 (#17),
+  H3; 8 in review. H1, H2 and H3 (`latency_summary`) implemented by Claude at shesha's request
+  (2026-10-15); shesha's explain-backs pending. Next: shesha's live run (9), runbook in
+  `docs/plans/m1-pr-checks.md`, PR 9, "Live run (shesha only)".
   Pending, shesha personally: new personal Anthropic org, dedicated workspace ($10/month limit,
   default inference geo `global`), key, price check on the day.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or

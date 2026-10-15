@@ -40,7 +40,7 @@ out/
 npm-debug.log*
 
 # ---------------------------------------------------------------
-# Eval run outputs (datasets are committed; generated reports are not)
+# Eval run outputs: dry runs are never committed; live runs (evals/reports/<dataset>/...) are
 # ---------------------------------------------------------------
 evals/reports/tmp/
 

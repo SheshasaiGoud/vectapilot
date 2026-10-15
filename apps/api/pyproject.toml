@@ -20,6 +20,8 @@ dependencies = [
 
 [project.scripts]
 vectapilot-api = "vectapilot_api.main:run"
+# The M1 measurement CLI: a dry run unless `--live` (shesha only; agents never pass it).
+vectapilot-llm = "vectapilot_api.llm_cli:main"
 
 [build-system]
 requires = ["uv_build>=0.12.24,<0.13.0"]

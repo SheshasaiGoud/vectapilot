@@ -600,8 +600,15 @@ def build_provider(settings: Settings) -> Provider:
 
 
 @asynccontextmanager
-async def build_gateway(settings: Settings) -> AsyncIterator[LLMGateway]:
+async def build_gateway(
+    settings: Settings, *, provider: Provider | None = None
+) -> AsyncIterator[LLMGateway]:
     """Yield a gateway built from Settings and the packaged catalog; close its provider on exit.
+
+    `provider`, if given, is used instead of the one Settings name, and `build_provider` is never
+    called: the measurement CLI's dry run passes its scripted fake here, so no setting can make it
+    build the Anthropic adapter (PR 8, D9). The gateway closes it on exit like a built one; if this
+    function fails before the gateway exists, the caller still owns it.
 
     No response cache: it stays off until M9 brings a store (ADR 0006).
     """
@@ -610,7 +617,7 @@ async def build_gateway(settings: Settings) -> AsyncIterator[LLMGateway]:
     catalog = load_catalog()
     retry_policy = settings.llm_retry_policy()
     gateway = LLMGateway(
-        build_provider(settings),
+        build_provider(settings) if provider is None else provider,
         catalog,
         attempt_timeout_s=settings.llm_attempt_timeout_seconds,
         deadline_s=settings.llm_deadline_seconds,
