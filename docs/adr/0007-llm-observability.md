@@ -42,6 +42,10 @@ are in India and other countries (Q4b: which), and prompts may later hold health
   never starts Claude Code or Cursor, then closes it; Keychain only if every read prompts. A
   convention, not a technical control (every agent has Bash): the key is never written where an
   agent can read it; agents never read or handle it, or pass `--live`. If it leaks: rotate first.
+- **TLS and proxy variables (2026-10-15, shesha).** With the anthropic provider, startup refuses
+  `SSL_CERT_FILE` and `SSL_CERT_DIR` (they replace the OS trust store) and `SSLKEYLOGFILE` (it
+  writes TLS session keys to a file); messages name the variable, never its value. Proxies
+  (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, the macOS system proxy) keep working.
 - **Open (optional, undecided):** a `.claude/settings.json` deny rule for the key; it needs shesha's
   own explicit yes. Until the Claude Code docs say otherwise, assume a Read deny rule does not stop
   Bash `cat` or `env`: an extra layer, not the control.

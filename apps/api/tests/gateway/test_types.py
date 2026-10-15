@@ -3,7 +3,7 @@
 import copy
 import pickle
 from decimal import Decimal
-from typing import Any, get_args
+from typing import Any, Final, get_args
 
 import pytest
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError
@@ -65,6 +65,16 @@ def request(**overrides: Any) -> LLMRequest:
     return LLMRequest.model_validate(fields | overrides)
 
 
+NO_RESPONSE: Final[dict[str, Any]] = {
+    "model_answered": None,
+    "inference_geo": None,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": Decimal("0"),
+}
+"""What a call that never got a response leaves in its record (with `cost_complete` True)."""
+
+
 def record(**overrides: Any) -> CallRecord:
     fields: dict[str, Any] = {
         "business_id": "paws-and-co",
@@ -72,6 +82,7 @@ def record(**overrides: Any) -> CallRecord:
         "model_requested": "model-a",
         "model_answered": "model-a",
         "catalog_version": "2026-10-14.1",
+        "inference_geo": "global",
         "outcome": "ok",
         "retries": 0,
         "repairs": 0,
@@ -470,7 +481,7 @@ def test_stop_reason_is_the_documented_closed_set_plus_other() -> None:
 
 
 def test_truncation_stop_reasons_are_the_two_documented_ones() -> None:
-    # `model_context_window_exceeded` as a truncation is proposed, awaiting shesha (types.py).
+    # `model_context_window_exceeded` is a truncation: decided by shesha, 2026-10-15.
     assert get_args(TruncationStopReason) == ("max_tokens", "model_context_window_exceeded")
     assert frozenset(get_args(TruncationStopReason)) == TRUNCATION_STOP_REASONS
     assert TRUNCATION_STOP_REASONS < STOP_REASONS
@@ -652,6 +663,29 @@ def test_cost_is_written_to_json_in_fixed_point(cost: Decimal, written: str) -> 
         pytest.param({"inference_geo": "x" * 129}, id="inference-geo-too-long"),
         pytest.param({"cache_hit": True}, id="cache-hit-with-a-cost"),
         pytest.param({"inference_geo": "us"}, id="non-global-geo-marked-complete"),
+        pytest.param({"inference_geo": None}, id="unknown-geo-marked-complete"),
+        pytest.param({"model_answered": None, "inference_geo": "us"}, id="a-geo-means-a-response"),
+        # Only a record of no response at all is exempt from the geo rule (step 6 review):
+        pytest.param(
+            {**NO_RESPONSE, "input_tokens": 1}, id="no-response-but-tokens-marked-complete"
+        ),
+        pytest.param(
+            {**NO_RESPONSE, "cost_usd": Decimal("0.000003")},
+            id="no-response-but-a-cost-marked-complete",
+        ),
+        pytest.param(
+            {**NO_RESPONSE, "stop_reason": "end_turn"},
+            id="no-response-but-a-stop-reason-marked-complete",
+        ),
+        # model_requested is None only for an unknown alias (invalid_request, no response):
+        pytest.param({"model_requested": None}, id="no-model-requested-on-a-response"),
+        pytest.param(
+            {**NO_RESPONSE, "model_requested": None, "outcome": "ok"}, id="no-model-requested-ok"
+        ),
+        pytest.param(
+            {"model_requested": None, "outcome": "invalid_request"},
+            id="no-model-requested-but-a-response",
+        ),
     ],
 )
 def test_call_record_rejects_invalid_fields(fields: dict[str, object]) -> None:
@@ -684,6 +718,37 @@ def test_call_record_accepts_the_cost_rules_of_adr_0006() -> None:
 
     assert (hit.cache_hit, hit.cost_usd) == (True, Decimal("0"))
     assert (us.inference_geo, us.cost_complete) == ("us", False)
+
+
+@pytest.mark.parametrize("geo", [None, "us"], ids=["unknown", "us"])
+def test_a_response_whose_geo_is_not_global_cannot_be_cost_complete(geo: str | None) -> None:
+    # ADR 0006, Cost; None fails closed (decided 2026-10-14).
+    with pytest.raises(ValidationError, match="inference_geo is not global"):
+        record(inference_geo=geo, cost_complete=True)
+
+    assert record(inference_geo=geo, cost_complete=False).inference_geo == geo
+
+
+def test_a_call_with_no_response_may_be_cost_complete() -> None:
+    # Decided 2026-10-15: a pre-call rejection writes one record with zeros and a complete $0.
+    rec = record(**NO_RESPONSE, outcome="invalid_request")
+
+    assert (rec.model_answered, rec.inference_geo, rec.cost_complete) == (None, None, True)
+
+
+def test_an_unknown_alias_is_recorded_without_a_model_requested() -> None:
+    # Proposed after the step 6 review (shesha to confirm): every call writes one record.
+    rec = record(**NO_RESPONSE, outcome="invalid_request", alias="medium", model_requested=None)
+
+    assert (rec.alias, rec.model_requested, rec.cost_complete) == ("medium", None, True)
+
+
+def test_a_cache_hit_may_be_cost_complete_without_a_geo() -> None:
+    # The rule is `not cache_hit and inference_geo != "global" and cost_complete`: a hit makes no
+    # model call (PR 7 sets its fields).
+    rec = record(cache_hit=True, cost_usd=Decimal("0"), inference_geo=None, cost_complete=True)
+
+    assert (rec.cache_hit, rec.cost_complete) == (True, True)
 
 
 @pytest.mark.parametrize("field", list(CallRecord.model_fields))

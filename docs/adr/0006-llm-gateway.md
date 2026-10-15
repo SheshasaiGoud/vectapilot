@@ -44,8 +44,10 @@ SDK's, ours, or both. Structured output: native `output_config.format`, or Pydan
   the answering model's exact id. `cost_complete=false` (and `cost_usd` is a lower bound) if that
   model is unpriced, an attempt was cancelled or timed out after sending, or `usage.inference_geo`
   is not `global`, since prices assume global routing (`us` is 1.1×, /manage-claude/data-residency,
-  2026-10-14). An unpriced configured model stops startup (never a silent $0). `cost_usd` is H1
-  (`[HAND-WRITE]`).
+  2026-10-14). List prices also assume the standard service tier: no request sets `service_tier`
+  and the adapter drops `usage.service_tier`; carry it only if a priority-tier organisation
+  becomes possible (PR 6, 2026-10-15). An unpriced configured model stops startup (never a
+  silent $0). `cost_usd` is H1 (`[HAND-WRITE]`).
 - **Caching.** A response-cache hook, off by default. Key = `business_id` prefix + sha256 over
   canonical JSON of (business_id, model id, catalog version, system, messages, schema, output
   params); the value carries `business_id`, checked on read, so two businesses never share a key or

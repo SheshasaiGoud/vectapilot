@@ -12,6 +12,11 @@ os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 os.environ.pop("ANTHROPIC_BASE_URL", None)
 os.environ.pop("ANTHROPIC_LOG", None)
 os.environ.pop("ANTHROPIC_CUSTOM_HEADERS", None)
+# Settings refuses these with the anthropic provider (config.TLS_ENV_VARS); a developer's shell may
+# set them, which would break the tests that build anthropic settings.
+os.environ.pop("SSL_CERT_FILE", None)
+os.environ.pop("SSL_CERT_DIR", None)
+os.environ.pop("SSLKEYLOGFILE", None)
 
 from collections.abc import Iterator
 from typing import Any, Final

@@ -23,6 +23,14 @@ transport logs (ADR 0007), and `ANTHROPIC_CUSTOM_HEADERS` is read even with an e
 sent after it, so it could replace the key or turn on beta features (anthropic 1.12.0
 `_client.py:685-692`, `_base_client.py:729-730`)."""
 
+TLS_ENV_VARS: Final = ("SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE")
+"""TLS variables the HTTP client reads (decided 2026-10-15, ADR 0007). With the anthropic provider,
+none may be set: `SSL_CERT_FILE` and `SSL_CERT_DIR` replace the OS trust store (a proxy that holds
+a planted certificate could read the key and the prompts; `httpx2/_config.py:35-38`), and only on
+that path `SSLKEYLOGFILE` writes the TLS session keys to a file. Proxies (`HTTP_PROXY`,
+`HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, the macOS system proxy) are not refused: they keep
+working."""
+
 # With PYDANTIC_SETTINGS_DEBUG set, pydantic-settings logs every raw source value (the API key and
 # the DSN passwords included) at DEBUG on this logger, before any validator runs. Pinned at WARNING
 # when this module is imported, so no logging setup (ours, pytest's, uvicorn's) turns it on.
@@ -134,6 +142,11 @@ class Settings(BaseSettings):
                 problems.append(
                     f"{', '.join(found)} must not be set when llm_provider is 'anthropic'"
                     " (the SDK would read them): unset them"
+                )
+            if found := [name for name in TLS_ENV_VARS if name in os.environ]:
+                problems.append(
+                    f"{', '.join(found)} must not be set when llm_provider is 'anthropic'"
+                    " (they replace the OS trust store or write TLS session keys): unset them"
                 )
         if self.llm_deadline_seconds < self.llm_attempt_timeout_seconds:
             problems.append("llm_deadline_seconds must be >= llm_attempt_timeout_seconds")
