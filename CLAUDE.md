@@ -133,7 +133,7 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   5: Anthropic adapter · 6: `complete()` · 7: structured output + cache hook · 8: measurement CLI +
   smoke dataset · 9: shesha's live run, "what I measured" note, quiz. Each PR's acceptance
   checks: [`docs/plans/m1-pr-checks.md`](docs/plans/m1-pr-checks.md).
-  Done: 1 (#8), A (#9), 2 (#10), 3 (#11); 4 in review. Next: shesha's H1 and H2, then 5.
+  Done: 1 (#8), A (#9), 2 (#10), 3 (#11), 4 (#12); 5 in review. Next: shesha's H1 and H2, then 6.
   Pending, shesha personally: new personal Anthropic org, dedicated workspace ($10/month limit,
   default inference geo `global`), key, price check on the day.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
@@ -154,13 +154,15 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
 - In the Claude desktop browser pane, animation frames are heavily throttled and plain screenshots
   can be stale: verify with DOM checks and the `zoom` capture instead.
 - System Python is 3.9.6; the API uses uv-managed Python 3.12 (never the system one).
-- `httpx2` — No on 2026-10-12, **reversed 2026-10-14** with `anthropic` 1.x (ADR 0006); takes
-  effect in PR 5. Until then Starlette 1.x's `TestClient` falls back to `httpx` with a deprecation
-  warning that pytest ignores (`apps/api/pyproject.toml`).
+- `httpx2` — No on 2026-10-12, **reversed 2026-10-14** with `anthropic` 1.x (ADR 0006), in effect
+  since step 5: `TestClient` uses `httpx2`, pytest runs with plain warnings-as-errors, classic `httpx`
+  is gone (Langfuse's SDK would bring it back, ADR 0007), and TLS uses the OS trust store
+  (`truststore`) instead of `certifi`.
 - Docker Desktop must be running for `make up` / `make test-integration`.
 - `Secret[...]` masks the DSNs in `Settings` (step A), not the plain string handed to SQLAlchemy and
   redis-py: pytest's default traceback can print it if those libraries fail. Tests only ever use
   dev/CI DSNs; when M9 adds an error tracker, turn off frame-variable capture and add a canary test.
+  Never run pytest with `-l`/`--showlocals` in CI: frame locals can hold prompts, and CI logs are public.
 - Keep exactly one working copy (`~/Developer/vectapilot`) open in Cursor. A second clone in
   `~/Documents` caused edits to land in the wrong copy (moved to the Trash, 2026-10-13).
 - The Docker healthcheck calls `/healthz` every 10 s, so API access logs contain those requests.
@@ -198,3 +200,5 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   `Exception` but never `BaseException` (cancellation), and why the checks are keyed by name.
 - Why third-party GitHub Actions are pinned to a commit SHA, and how PR 1's first CI run failed
   (`setup-uv@v10` did not exist — verify refs with `gh api repos/<owner>/<repo>/commits/<ref>`).
+- Why the gateway error is raised after the `except` block (`__context__` vs `__cause__`), and why
+  the Anthropic client never follows redirects (`x-api-key` survives a cross-origin redirect).

@@ -7,8 +7,8 @@ decisions; each PR copies its section into its own acceptance check and ticks it
 pull-request numbers. Tags: **[0006]** / **[0007]** = moved out of that ADR · **[plan]** = from the
 approved M1 plan (2026-10-14), never in an ADR · **[review]** = added by the ADR review
 (2026-10-14) · **[note]** = Maya's note, to be resolved in that PR (not a decision).
-**[step A review]** / **[step 2 review]** = from that step's review (2026-10-14); the step 2 lines
-are as shesha decided them.
+**[step A review]**, **[step 2 review]** … **[step 5 review]** = from that step's review
+(2026-10-14); the step 2 lines are as shesha decided them.
 When M1 closes, this file is either kept as the record of what was checked or deleted in the
 close-out PR (decided then).
 
@@ -137,6 +137,15 @@ close-out PR (decided then).
   shared types at its boundary: a mismatch becomes a `ProviderError` that does not echo the value,
   and an unknown stop reason maps to `other`. A `ValidationError` from a gateway model is never
   logged, chained or turned into a string.
+- **[step 5 review]** The client never follows redirects. The SDK's default client does
+  (anthropic 1.12.0 `_base_client.py:1630`), and on a cross-origin redirect httpx2 strips only
+  `Authorization` (`httpx2/_client.py:530-534`), so the `x-api-key` header and the prompt would
+  reach the new host. Tests swap only the transport, so they run the production client. Test: a
+  3xx gives `ProviderError` after exactly 1 request.
+- **[step 5 review]** Proposed, pending shesha's yes (it extends ADR 0006's Settings list):
+  `ANTHROPIC_CUSTOM_HEADERS` is refused like the other SDK variables. The SDK reads it even with an
+  explicit key and sends it after the key header, so it can replace the key or turn on beta
+  features (`_client.py:685-692`, `_base_client.py:729-730`).
 
 ## PR 6 — `m1/gateway-complete`
 - **[0006]** Nested time limits: each attempt under `asyncio.timeout(attempt)`, the whole call under
@@ -188,6 +197,25 @@ close-out PR (decided then).
   Maya's proposal: fail closed, a typed error that is never cached.
 - **[note]** Open: calls with no model call (a pre-call `max_tokens` rejection; a cache hit, PR 7).
   Is a record emitted, and what do `retries`, `repairs` and `attempt_timeouts` hold?
+- **[step 5 review]** Decided 2026-10-15: add `aclose()` to the `Provider` Protocol (a no-op on the
+  fake), and the gateway closes the provider it was given. One factory builds the provider from
+  Settings.
+- **[step 5 review]** Proposed (ADR 0006, Cost): an attempt that ends in `ProviderError` with
+  `status_code` None was billed with unknown tokens: a 2xx the adapter could not read or validate,
+  or a status outside 100–599. So it sets `cost_complete=false` (fail closed). Test: a fake step
+  `ProviderError()` gives `cost_complete=False`. Decided 2026-10-15: a status-less `Transient` (the
+  connection was lost, possibly after sending) also makes the cost incomplete; test it too.
+- **[step 5 review]** Decided 2026-10-15: with the anthropic provider, refuse `SSLKEYLOGFILE`,
+  `SSL_CERT_FILE` and `SSL_CERT_DIR` at startup (one test and canary each) and keep honouring
+  proxies; record it in ADR 0007. The variables the production client reads:
+  - Proxies: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and the macOS system proxy
+    (`httpx2/_utils.py:30-37`). The SDK mounts them itself (`_base_client.py:1651`), so
+    `trust_env=False` does not turn them off.
+  - TLS: `SSL_CERT_FILE` and `SSL_CERT_DIR` replace the OS trust store (`httpx2/_config.py:35-38`).
+    Only on that path, `SSLKEYLOGFILE` writes the TLS session keys to a file.
+- **[step 5 review]** For ADR 0006, Cost (Noah): list prices assume the standard service tier. The
+  adapter drops `usage.service_tier`; no request sets it. A non-standard tier would make the cost
+  incomplete, so carry `service_tier` only if a priority-tier organisation becomes possible.
 
 ## PR 7 — `m1/gateway-structured-and-cache`
 - **[0006]** The repair is a fresh request: the original messages plus feedback; it replays no
@@ -238,9 +266,17 @@ close-out PR (decided then).
   returns the key silently, any agent could read it too.
 - **[review]** Before the run: the workspace default inference geo is `global`; the shell has none
   of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_LOG`, and the key
-  is not in `.env` (startup refuses otherwise).
+  is not in `.env` (startup refuses otherwise). **[step 5 review]** Also none of
+  `ANTHROPIC_CUSTOM_HEADERS`, and (until PR 6 decides the proxy/TLS item) none of `HTTPS_PROXY`,
+  `ALL_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `SSLKEYLOGFILE`.
 - **[0006]** Measure the output-token cost of adaptive thinking at effort `low`, and check cost
   accuracy against the Console's token counts per model.
+- **[step 5 review]** Open, shesha observes it (agents never make live calls): what the API
+  returns when the prepaid credit runs out. Record the status, `error.type` and message, never the
+  key or a request body. The adapter maps any 402 to `BillingError` (row 2). Candidate to compare
+  (from public reports, not the docs, unverified): a 400 `invalid_request_error` "Your credit
+  balance is too low to access the Anthropic API…". A 400 lands in row 5 (`InvalidRequest`). It is
+  still never retried, but the outcome label is wrong, so add that shape to row 2 and its test.
 
 ## H2 — retry with backoff (shesha, `[HAND-WRITE]`)
 - **[0006]** H2 receives the deadline and a clock (see PR 2). Tests: a backoff or Retry-After delay
