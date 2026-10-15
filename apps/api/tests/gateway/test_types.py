@@ -74,6 +74,18 @@ NO_RESPONSE: Final[dict[str, Any]] = {
 }
 """What a call that never got a response leaves in its record (with `cost_complete` True)."""
 
+CACHE_HIT: Final[dict[str, Any]] = {
+    "cache_hit": True,
+    "attempts": 0,
+    "inference_geo": None,
+    "stop_reason": "end_turn",
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cost_usd": Decimal("0"),
+}
+"""A cache hit's record, exactly (decided 2026-10-15): with `record()`'s outcome `ok`,
+`model_answered`, zero counters and `cost_complete` True."""
+
 
 def record(**overrides: Any) -> CallRecord:
     fields: dict[str, Any] = {
@@ -84,6 +96,7 @@ def record(**overrides: Any) -> CallRecord:
         "catalog_version": "2026-10-14.1",
         "inference_geo": "global",
         "outcome": "ok",
+        "attempts": 1,
         "retries": 0,
         "repairs": 0,
         "attempt_timeouts": 0,
@@ -419,6 +432,7 @@ def test_call_record_has_exactly_the_contract_fields() -> None:
         "inference_geo",
         "outcome",
         "stop_reason",
+        "attempts",
         "retries",
         "repairs",
         "attempt_timeouts",
@@ -461,6 +475,7 @@ def test_call_outcome_is_the_closed_list_from_the_contract() -> None:
         "auth_failed",
         "invalid_request",
         "provider_error",
+        "internal_error",
     ]
 
 
@@ -524,6 +539,18 @@ def test_a_stop_reason_outside_the_set_is_rejected_by_record_and_result(value: s
     assert CANARY not in str(as_result.value)
 
 
+def counts(retries: int, repairs: int, attempt_timeouts: int) -> dict[str, Any]:
+    """The counters of a call that reached the provider: attempts = 1 + repairs + retries, and a
+    repair means the first answer was invalid."""
+    return {
+        "attempts": 1 + repairs + retries,
+        "retries": retries,
+        "repairs": repairs,
+        "attempt_timeouts": attempt_timeouts,
+        "first_try_valid": False if repairs else None,
+    }
+
+
 @pytest.mark.parametrize(
     ("retries", "repairs", "attempt_timeouts"),
     [
@@ -536,15 +563,9 @@ def test_a_stop_reason_outside_the_set_is_rejected_by_record_and_result(value: s
 def test_attempt_timeouts_may_reach_the_number_of_attempts(
     retries: int, repairs: int, attempt_timeouts: int
 ) -> None:
-    # attempts = 1 + repairs + retries (decided 2026-10-14)
-    rec = record(
-        outcome="transient_exhausted",
-        retries=retries,
-        repairs=repairs,
-        attempt_timeouts=attempt_timeouts,
-    )
+    rec = record(outcome="transient_exhausted", **counts(retries, repairs, attempt_timeouts))
 
-    assert rec.attempt_timeouts == attempt_timeouts
+    assert (rec.attempts, rec.attempt_timeouts) == (1 + repairs + retries, attempt_timeouts)
 
 
 @pytest.mark.parametrize(
@@ -559,12 +580,7 @@ def test_attempt_timeouts_cannot_exceed_the_number_of_attempts(
     retries: int, repairs: int, attempt_timeouts: int
 ) -> None:
     with pytest.raises(ValidationError, match="exceed the attempts"):
-        record(
-            outcome="transient_exhausted",
-            retries=retries,
-            repairs=repairs,
-            attempt_timeouts=attempt_timeouts,
-        )
+        record(outcome="transient_exhausted", **counts(retries, repairs, attempt_timeouts))
 
 
 @pytest.mark.parametrize(
@@ -577,7 +593,7 @@ def test_attempt_timeouts_cannot_exceed_the_number_of_attempts(
 def test_an_ok_call_may_have_timeouts_before_its_last_attempt(
     retries: int, repairs: int, attempt_timeouts: int
 ) -> None:
-    rec = record(retries=retries, repairs=repairs, attempt_timeouts=attempt_timeouts)
+    rec = record(**counts(retries, repairs, attempt_timeouts))
 
     assert (rec.outcome, rec.attempt_timeouts) == (CallOutcome.OK, attempt_timeouts)
 
@@ -595,13 +611,120 @@ def test_an_ok_call_cannot_have_timed_out_on_its_last_attempt(
 ) -> None:
     # `ok` means the last attempt answered; the same counts are valid for a failed call (above).
     with pytest.raises(ValidationError, match="ok call"):
-        record(retries=retries, repairs=repairs, attempt_timeouts=attempt_timeouts)
+        record(**counts(retries, repairs, attempt_timeouts))
 
 
-def test_a_cache_hit_cannot_have_attempt_timeouts() -> None:
-    # retries=1 keeps the ok rule satisfied, so only the cache-hit rule can reject this record.
-    with pytest.raises(ValidationError, match="cache hit"):
-        record(cache_hit=True, cost_usd=Decimal("0"), retries=1, attempt_timeouts=1)
+@pytest.mark.parametrize(
+    ("fields", "message"),
+    [
+        pytest.param({"attempts": 2}, "1 \\+ repairs \\+ retries", id="one-attempt-too-many"),
+        pytest.param({"attempts": 2, "retries": 2}, "1 \\+ repairs", id="one-attempt-too-few"),
+        pytest.param({**NO_RESPONSE, "attempts": 0, "retries": 1}, "no retries", id="0-retried"),
+        pytest.param(
+            {**NO_RESPONSE, "attempts": 0, "repairs": 1, "first_try_valid": False},
+            "no repairs",
+            id="0-repaired",
+        ),
+        pytest.param({"attempts": 0}, "no response", id="0-attempts-with-a-response"),
+        pytest.param(
+            {**NO_RESPONSE, "attempts": 0, "outcome": "ok"}, "not ok", id="0-attempts-but-ok"
+        ),
+        pytest.param(
+            {**NO_RESPONSE, "attempts": 0, "outcome": "invalid_request", "first_try_valid": True},
+            "first_try_valid",
+            id="0-attempts-but-valid",
+        ),
+        pytest.param(
+            {**NO_RESPONSE, "attempts": 0, "outcome": "cancelled", "first_try_valid": False},
+            "first_try_valid",
+            id="0-attempts-but-invalid",
+        ),
+        pytest.param({"request_ids": ["req_1", "req_2"]}, "outnumber", id="2-ids-1-attempt"),
+        pytest.param({"repairs": 2, "attempts": 3}, "less than or equal", id="two-repairs"),
+        pytest.param(
+            {"repairs": 1, "attempts": 2, "first_try_valid": True}, "first_try_valid", id="r-true"
+        ),
+        pytest.param({"repairs": 1, "attempts": 2}, "first_try_valid", id="repaired-unknown"),
+        pytest.param(
+            {"outcome": "validation_failed", "first_try_valid": None},
+            "first_try_valid",
+            id="validation-failed-unknown",
+        ),
+        pytest.param(
+            {"outcome": "validation_failed", "first_try_valid": True},
+            "first_try_valid",
+            id="validation-failed-but-valid",
+        ),
+    ],
+)
+def test_the_counters_must_agree(fields: dict[str, object], message: str) -> None:
+    with pytest.raises(ValidationError, match=message):
+        record(**fields)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        pytest.param({**NO_RESPONSE, "attempts": 0, "outcome": "invalid_request"}, id="rejected"),
+        pytest.param({**NO_RESPONSE, "attempts": 0, "outcome": "cancelled"}, id="cancel-first"),
+        pytest.param({**NO_RESPONSE, "attempts": 0, "outcome": "internal_error"}, id="bug-first"),
+        pytest.param({**NO_RESPONSE, "outcome": "invalid_request"}, id="a-400-without-an-id"),
+        pytest.param(
+            {"attempts": 2, "repairs": 1, "first_try_valid": False, "request_ids": ["r1", "r2"]},
+            id="repaired",
+        ),
+        pytest.param(
+            {"outcome": "validation_failed", "first_try_valid": False}, id="repairs-off-invalid"
+        ),
+        pytest.param({"first_try_valid": True}, id="structured-first-try"),
+    ],
+)
+def test_counters_that_agree_are_accepted(fields: dict[str, object]) -> None:
+    rec = record(**fields)
+
+    assert rec.attempts == fields.get("attempts", 1)
+
+
+def test_a_cache_hit_record_is_accepted_exactly_as_proposed() -> None:
+    # Decided 2026-10-15: ok, no attempt, nothing billed but complete, the
+    # cached model and stop reason, no geo, no request ids, no first_try_valid.
+    rec = record(**CACHE_HIT)
+
+    assert (rec.outcome, rec.attempts, rec.retries, rec.repairs, rec.attempt_timeouts) == (
+        CallOutcome.OK,
+        0,
+        0,
+        0,
+        0,
+    )
+    assert (rec.model_answered, rec.stop_reason, rec.inference_geo) == ("model-a", "end_turn", None)
+    assert (rec.cost_usd, rec.cost_complete, rec.first_try_valid) == (Decimal(0), True, None)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        pytest.param({"outcome": "cancelled"}, id="not-ok"),
+        pytest.param({"attempts": 1}, id="an-attempt"),
+        pytest.param({"attempts": 1, "attempt_timeouts": 1, "retries": 0}, id="a-timeout"),
+        pytest.param({"output_tokens": 1}, id="tokens"),
+        pytest.param({"cache_read_tokens": 1}, id="cache-read-tokens"),
+        pytest.param({"cost_usd": Decimal("0.000001")}, id="a-cost"),
+        pytest.param({"cost_complete": False}, id="cost-incomplete"),
+        pytest.param({"inference_geo": "global"}, id="a-geo"),
+        pytest.param({"request_ids": ["req_1"]}, id="a-request-id"),
+        pytest.param({"model_answered": None}, id="no-model"),
+        pytest.param({"stop_reason": None}, id="no-stop-reason"),
+        pytest.param({"stop_reason": "tool_use"}, id="other-stop-reason"),
+        pytest.param({"first_try_valid": True}, id="first-try-valid"),
+        pytest.param({"first_try_valid": False}, id="first-try-invalid"),
+    ],
+)
+def test_a_cache_hit_record_accepts_nothing_looser(fields: dict[str, object]) -> None:
+    with pytest.raises(ValidationError) as caught:
+        record(**(CACHE_HIT | fields))
+
+    assert CANARY not in str(caught.value)
 
 
 def test_call_record_serialises_to_json_with_an_exact_cost() -> None:
@@ -686,6 +809,10 @@ def test_cost_is_written_to_json_in_fixed_point(cost: Decimal, written: str) -> 
             {"model_requested": None, "outcome": "invalid_request"},
             id="no-model-requested-but-a-response",
         ),
+        pytest.param(
+            {**NO_RESPONSE, "model_requested": None, "outcome": "invalid_request"},
+            id="no-model-requested-but-an-attempt",
+        ),
     ],
 )
 def test_call_record_rejects_invalid_fields(fields: dict[str, object]) -> None:
@@ -703,6 +830,8 @@ def test_call_record_accepts_metadata_shaped_values() -> None:
         inference_geo="global",
         outcome="truncated",
         stop_reason="max_tokens",
+        attempts=2,
+        retries=1,
         request_ids=["req_011abc", "req_011abd"],
         latency_ms=812,
     )
@@ -713,7 +842,7 @@ def test_call_record_accepts_metadata_shaped_values() -> None:
 
 
 def test_call_record_accepts_the_cost_rules_of_adr_0006() -> None:
-    hit = record(cache_hit=True, cost_usd=Decimal("0"))
+    hit = record(**CACHE_HIT)
     us = record(inference_geo="us", cost_complete=False)
 
     assert (hit.cache_hit, hit.cost_usd) == (True, Decimal("0"))
@@ -737,16 +866,18 @@ def test_a_call_with_no_response_may_be_cost_complete() -> None:
 
 
 def test_an_unknown_alias_is_recorded_without_a_model_requested() -> None:
-    # Proposed after the step 6 review (shesha to confirm): every call writes one record.
-    rec = record(**NO_RESPONSE, outcome="invalid_request", alias="medium", model_requested=None)
+    # Decided 2026-10-15 (after the step 6 review): every call writes one record.
+    rec = record(
+        **NO_RESPONSE, outcome="invalid_request", alias="medium", model_requested=None, attempts=0
+    )
 
     assert (rec.alias, rec.model_requested, rec.cost_complete) == ("medium", None, True)
 
 
 def test_a_cache_hit_may_be_cost_complete_without_a_geo() -> None:
     # The rule is `not cache_hit and inference_geo != "global" and cost_complete`: a hit makes no
-    # model call (PR 7 sets its fields).
-    rec = record(cache_hit=True, cost_usd=Decimal("0"), inference_geo=None, cost_complete=True)
+    # model call, so it has no geo (PR 7).
+    rec = record(**CACHE_HIT, cost_complete=True)
 
     assert (rec.cache_hit, rec.cost_complete) == (True, True)
 

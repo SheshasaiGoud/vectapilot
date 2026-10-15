@@ -414,6 +414,9 @@ class CallOutcome(StrEnum):
     AUTH_FAILED = "auth_failed"
     INVALID_REQUEST = "invalid_request"
     PROVIDER_ERROR = "provider_error"
+    INTERNAL_ERROR = "internal_error"
+    """An exception that is not a `GatewayError`: a bug in a provider or in the gateway, which
+    propagates unchanged (decided 2026-10-15, before any record was emitted: version 1 holds)."""
 
 
 class CallRecord(GatewayModel):
@@ -427,8 +430,9 @@ class CallRecord(GatewayModel):
     result or exception (PR 6).
     """
 
-    # Version 1 is the first release of the contract: `attempt_timeouts` was added (2026-10-14)
-    # before any record was emitted, so it did not need a bump.
+    # Version 1 is the first release of the contract: `attempt_timeouts` (2026-10-14), `attempts`
+    # and the `internal_error` outcome (2026-10-15) were added before any record was emitted, so
+    # they did not need a bump.
     record_version: Literal[1] = 1
     business_id: BusinessId
     alias: Slug
@@ -437,33 +441,43 @@ class CallRecord(GatewayModel):
     `invalid_request`, no model call (decided 2026-10-15; made optional before any record was
     emitted, so no `record_version` bump)."""
     model_answered: OpaqueId | None = None
-    """None when no attempt got an answer (for example the first call hit the spend limit)."""
+    """The last response's model (after a repair, the repair's). None when no attempt got an answer
+    (for example the first call hit the spend limit)."""
     catalog_version: OpaqueId
     inference_geo: OpaqueId | None = None
-    """As reported in the response's usage (`global`, `us`); None when there was no response."""
+    """As reported in the last response's usage (`global`, `us`); None when there was no response.
+    An earlier attempt's geo can make `cost_complete` False even when this one is `global`."""
     outcome: CallOutcome
     stop_reason: StopReason | None = None
-    """None when there was no response; an unknown provider value is recorded as `other` (PR 5)."""
-    retries: Count
-    """Retried attempts over the whole call, a repair's retries included.
+    """The last response's, so a deadline during a repair still shows the first answer's. None when
+    there was no response; an unknown provider value is recorded as `other` (PR 5)."""
+    attempts: Count
+    """Provider requests made: `1 + repairs + retries` for a call that reached the provider, 0 for
+    one that did not (a pre-call rejection, an unknown alias, a cache hit; decided 2026-10-15).
 
-    So a call that reached the provider made `1 + repairs + retries` attempts (decided 2026-10-14).
-    That formula holds only for calls that reached the provider. A call with no model call still
-    writes its one record (decided 2026-10-15) and made 0 attempts: a pre-call rejection is outcome
+    A call with no attempt writes its one record too: a pre-call rejection is outcome
     `invalid_request` with 0 retries, repairs and attempt timeouts, no model answered, no request
-    ids, zero tokens and $0 with `cost_complete` True. A provider 400 that came without a request
-    id looks the same apart from `latency_ms`. A cache hit (PR 7) is outcome `ok`, `cache_hit` True.
+    ids, zero tokens and $0 with `cost_complete` True. `attempts` tells it from a provider 400 that
+    came without a request id (1 attempt).
     """
-    repairs: Count
+    retries: Count
+    """Retried attempts over the whole call, a repair's retries included (decided 2026-10-14)."""
+    repairs: Annotated[int, Field(ge=0, le=1, strict=True)]
+    """Structured-output repairs: 0 or 1 (ADR 0006: at most one)."""
     attempt_timeouts: Count
     """Attempts that hit the per-attempt timeout (not the call's deadline).
 
-    At most the attempts; for an `ok` call at most `repairs + retries` (its last attempt answered);
-    0 on a cache hit. PR 8's timeout rate counts a call whose `attempt_timeouts` > 0 or whose
-    outcome is `deadline_exceeded`.
+    At most the attempts; for an `ok` call at most `attempts - 1` (its last attempt answered). PR
+    8's timeout rate counts a call whose `attempt_timeouts` > 0 or whose outcome is
+    `deadline_exceeded`.
     """
     first_try_valid: StrictBool | None = None
-    """None when the call was not structured."""
+    """Whether a structured call's first `end_turn` answer validated against its schema. None when
+    the call was not structured, or its first answer was never validated: a refusal, a truncation
+    or another stop reason came back instead, or no answer (an error, the deadline, a cancel, no
+    attempt), or a cache hit (decided 2026-10-15). So null alone cannot tell structured
+    from unstructured: PR 8 counts first-try validity from its own case metadata. False whenever a
+    repair was made or the outcome is `validation_failed`; None whenever `attempts` is 0."""
     input_tokens: Count
     output_tokens: Count
     cache_read_tokens: Count
@@ -472,7 +486,16 @@ class CallRecord(GatewayModel):
     cost_usd: Usd
     """Every billed attempt, repairs included; a lower bound when `cost_complete` is False."""
     cost_complete: StrictBool
+    """Over every attempt: once one attempt makes it False, it stays False for the call."""
     cache_hit: StrictBool
+    """The answer came from the response cache (ADR 0006, Caching): no model call was made.
+
+    A hit is exactly this (decided 2026-10-15; `_a_cache_hit_is_exactly`):
+    outcome `ok`; `attempts`, `retries`, `repairs` and `attempt_timeouts` 0; zero tokens and
+    `cost_usd` 0 with `cost_complete` True; `model_answered` and `stop_reason` (`end_turn`, the only
+    one ever cached) from the cached response; no `inference_geo` and no request ids (no inference
+    happened); `first_try_valid` None.
+    """
     latency_ms: float = Field(ge=0, allow_inf_nan=False, strict=True)
     """Monotonic clock, the whole call: backoff waits and repair included."""
     request_ids: tuple[RequestId, ...] = ()
@@ -482,9 +505,6 @@ class CallRecord(GatewayModel):
 
     @model_validator(mode="after")
     def _cost_rules(self) -> Self:
-        # ADR 0006, Caching: a response-cache hit makes no model call, so it costs $0.
-        if self.cache_hit and not self.cost_usd.is_zero():
-            raise ValueError("a cache hit costs 0 (ADR 0006)")
         # ADR 0006, Cost: list prices assume global routing, so a response from anywhere else, or
         # from an unknown place (None: fail closed, decided 2026-10-14), makes the cost incomplete.
         # Exempt: a cache hit (no model call, $0), and a record of no response at all, so no geo:
@@ -498,7 +518,9 @@ class CallRecord(GatewayModel):
     @model_validator(mode="after")
     def _model_requested_only_missing_for_an_unknown_alias(self) -> Self:
         if self.model_requested is None and not (
-            self.outcome == CallOutcome.INVALID_REQUEST and _no_response(self)
+            self.outcome == CallOutcome.INVALID_REQUEST
+            and self.attempts == 0
+            and _no_response(self)
         ):
             raise ValueError(
                 "model_requested may be None only for an unknown alias (invalid_request, no call)"
@@ -506,16 +528,54 @@ class CallRecord(GatewayModel):
         return self
 
     @model_validator(mode="after")
-    def _timeouts_within_attempts(self) -> Self:
-        if self.attempt_timeouts > 1 + self.repairs + self.retries:
-            raise ValueError("attempt_timeouts must not exceed the attempts, 1 + repairs + retries")
+    def _counts(self) -> Self:
+        if self.attempts == 0:
+            if self.retries or self.repairs:
+                raise ValueError("a call with no attempt has no retries and no repairs")
+            if not self.cache_hit and (self.outcome == CallOutcome.OK or not _no_response(self)):
+                raise ValueError("a call with no attempt and no cache hit has no response, not ok")
+            if self.first_try_valid is not None:
+                raise ValueError("a call with no attempt validated nothing: first_try_valid None")
+        elif self.attempts != 1 + self.repairs + self.retries:
+            raise ValueError("attempts must be 1 + repairs + retries for a call that made any")
+        if self.attempt_timeouts > self.attempts:
+            raise ValueError("attempt_timeouts must not exceed the attempts")
         # An `ok` call's last attempt got the answer, so that attempt did not time out.
-        if self.outcome == CallOutcome.OK and self.attempt_timeouts > self.repairs + self.retries:
-            raise ValueError("attempt_timeouts must be <= repairs + retries for an ok call")
-        # ADR 0006, Caching: a response-cache hit makes no model call, so nothing can time out.
-        if self.cache_hit and self.attempt_timeouts > 0:
-            raise ValueError("a cache hit makes no model call: attempt_timeouts must be 0")
+        if self.outcome == CallOutcome.OK and 0 < self.attempts <= self.attempt_timeouts:
+            raise ValueError("attempt_timeouts must be < attempts for an ok call")
+        if len(self.request_ids) > self.attempts:
+            raise ValueError("request_ids must not outnumber the attempts")
+        repaired_or_failed = self.repairs or self.outcome == CallOutcome.VALIDATION_FAILED
+        if repaired_or_failed and self.first_try_valid is not False:
+            raise ValueError("first_try_valid must be False after a repair or a validation failure")
         return self
+
+    @model_validator(mode="after")
+    def _a_cache_hit_is_exactly(self) -> Self:
+        # ADR 0006, Caching: a hit makes no model call and costs $0. The rest is the decided shape
+        # (2026-10-15), accepted exactly: nothing looser.
+        if self.cache_hit and not (
+            self.outcome == CallOutcome.OK
+            and self.attempts == 0
+            and self.model_answered is not None
+            and self.stop_reason == "end_turn"
+            and self.inference_geo is None
+            and self.first_try_valid is None
+            and self.cost_complete
+            and _nothing_billed(self)
+        ):
+            raise ValueError(
+                "a cache hit is ok with no attempt, nothing billed (cost complete), the cached"
+                " model and end_turn, and no geo, request ids or first_try_valid"
+            )
+        return self
+
+
+def _nothing_billed(record: CallRecord) -> bool:
+    """Zero tokens in every class and $0."""
+    return record.cost_usd.is_zero() and all(
+        getattr(record, name) == 0 for name in Usage.model_fields
+    )
 
 
 def _no_response(record: CallRecord) -> bool:
@@ -526,6 +586,5 @@ def _no_response(record: CallRecord) -> bool:
         record.model_answered is None
         and record.inference_geo is None
         and record.stop_reason is None
-        and record.cost_usd.is_zero()
-        and all(getattr(record, name) == 0 for name in Usage.model_fields)
+        and _nothing_billed(record)
     )

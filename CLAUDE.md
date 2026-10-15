@@ -133,8 +133,9 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   5: Anthropic adapter · 6: `complete()` · 7: structured output + cache hook · 8: measurement CLI +
   smoke dataset · 9: shesha's live run, "what I measured" note, quiz. Each PR's acceptance
   checks: [`docs/plans/m1-pr-checks.md`](docs/plans/m1-pr-checks.md).
-  Done: 1 (#8), A (#9), 2 (#10), 3 (#11), 4 (#12), 5 (#13), H1 (#14), H2 (#15); 6 in review. H1 and
-  H2 written by Claude at shesha's request (2026-10-15); shesha's explain-backs pending. Next: 7.
+  Done: 1 (#8), A (#9), 2 (#10), 3 (#11), 4 (#12), 5 (#13), H1 (#14), H2 (#15), 6 (#16); 7 in review.
+  H1 and H2 written by Claude at shesha's request (2026-10-15); shesha's explain-backs pending.
+  Next: H3 and 8, then shesha's live run (9).
   Pending, shesha personally: new personal Anthropic org, dedicated workspace ($10/month limit,
   default inference geo `global`), key, price check on the day.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
@@ -207,3 +208,6 @@ Planned: `packages/mcp_server/`, `evals/`, `data/` (sample data only), `scripts/
   scope's own `TimeoutError` from one the provider raised; why a caller's cancel always wins.
 - Why every logical call writes exactly one `llm_call` record (pre-call rejections included), why
   the gateway logger is pinned at INFO, and why 100 % coverage did not prove the cost sum.
+- Structured-output repair: a fresh request whose feedback names only schema locations and
+  Pydantic's own error types (a closed list) — how a model-written key or error type could leak.
+- Response cache: why it fails open, why both the key and the stored value carry `business_id`.

@@ -52,7 +52,11 @@ SDK's, ours, or both. Structured output: native `output_config.format`, or Pydan
   canonical JSON of (business_id, model id, catalog version, system, messages, schema, output
   params); the value carries `business_id`, checked on read, so two businesses never share a key or
   a hit. Fails open (an error is a miss). Refusals, truncations and errors are never cached; a hit
-  costs $0 and is re-validated. The Redis store (M9) needs a TTL and a per-business purge.
+  costs $0 and is re-validated. The Redis store (M9) needs a TTL, a per-business purge, and short
+  I/O timeouts (the gateway treats a cache error as a miss, but a hung `get` uses up the call's
+  deadline and a hung `set` holds the answer until it); M9 also decides an additive `cache_error`
+  record field (proposed), since cache errors are invisible in M1, and whether `set` gets its own
+  short bound or runs after the answer is returned.
 - **Not in M1.** ⚠ Hands-on streaming moves to M8, concept only. ⚠ Temperature is never sent,
   concept only (approved 2026-10-14): SDK 1.x removed it and current models reject non-default
   values (migration guide). Cross-model fallback is M4 router work (`[HAND-WRITE]`); server-side fallbacks stay off.
