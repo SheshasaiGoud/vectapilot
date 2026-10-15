@@ -78,6 +78,12 @@ class FakeProvider:
     def __init__(self, script: Iterable[FakeStep] = ()) -> None:
         self._script = deque(script)
         self.calls: list[ProviderRequest] = []
+        self.closed = False
+        """Set by `aclose`, so a test can see that the gateway closed its provider."""
+
+    async def aclose(self) -> None:
+        """Nothing to release (no network); only records that it was called."""
+        self.closed = True
 
     async def send(self, request: ProviderRequest) -> ProviderResponse:
         self.calls.append(request)

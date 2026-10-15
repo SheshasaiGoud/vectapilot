@@ -54,7 +54,13 @@ class ProviderResponse(GatewayModel):
 
 
 class Provider(Protocol):
-    """A model provider: one `send` per attempt; failures raise a typed `GatewayError`."""
+    """A model provider: one `send` per attempt; failures raise a typed `GatewayError`.
+
+    The gateway closes the provider it was given (`LLMGateway.aclose`, decided 2026-10-15).
+    """
 
     async def send(self, request: ProviderRequest) -> ProviderResponse:
         """Make one attempt. Never retries, never logs request or response text."""
+
+    async def aclose(self) -> None:
+        """Release what the provider holds (HTTP connections); a no-op on the fake."""

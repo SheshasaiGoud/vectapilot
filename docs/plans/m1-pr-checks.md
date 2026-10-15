@@ -8,7 +8,9 @@ pull-request numbers. Tags: **[0006]** / **[0007]** = moved out of that ADR · *
 approved M1 plan (2026-10-14), never in an ADR · **[review]** = added by the ADR review
 (2026-10-14) · **[note]** = Maya's note, to be resolved in that PR (not a decision).
 **[step A review]**, **[step 2 review]** … **[step 5 review]** = from that step's review
-(2026-10-14); the step 2 lines are as shesha decided them.
+(2026-10-14); the step 2 lines are as shesha decided them. **[decided]** = a former **[note]**,
+as shesha decided it. **[step 6 review]** = from the step 6 review (2026-10-15); a line marked
+"proposed" there still needs shesha's yes.
 When M1 closes, this file is either kept as the record of what was checked or deleted in the
 close-out PR (decided then).
 
@@ -155,6 +157,14 @@ close-out PR (decided then).
   `.expired()`. **[review]** Test: a deadline that fires mid-attempt is recorded as
   `deadline_exceeded`, not `cancelled`. An external cancel propagates and still writes exactly one
   `llm_call` line.
+- **[step 6 review]** Precisely: a scope turns the cancel into its `TimeoutError` only when no
+  other cancel is pending (asyncio's cancel count), so a caller's cancel always wins, even in the
+  same loop tick as the deadline (tested). `.expired()` then tells a scope's own `TimeoutError`
+  from one that code raised itself, at both levels: a provider that raises `TimeoutError` is a bug
+  (outcome `provider_error`, never retried, not counted in `attempt_timeouts`; tested). A caller's
+  own timeout around `complete()` is recorded as `cancelled`; only the gateway's deadline is
+  `deadline_exceeded`. Tested too: a deadline or a cancel during a backoff wait (the cost stays
+  complete) and a deadline after an attempt timeout (both counted).
 - **[0006]** `cost_complete=false` when the answering model is unpriced, an attempt was cancelled or
   timed out after sending, or `usage.inference_geo` is not `global`. Cost is priced by the answering
   model's exact id and sums every billed attempt, repairs included.
@@ -162,8 +172,10 @@ close-out PR (decided then).
   `global`" ⇒ `cost_complete=false` (fail closed; decided 2026-10-14). Test:
   `FakeReply(inference_geo=None)` gives `cost_complete=False`.
 - **[step 4 review]** Enforce that rule in `CallRecord._cost_rules` too: reject
-  `not cache_hit and inference_geo != "global" and cost_complete` (today `inference_geo=None` with
-  `cost_complete=True` is accepted), with a test for `None`.
+  `not cache_hit and inference_geo != "global" and cost_complete`, with a test for `None`. Done in
+  PR 6: a response whose geo is not `global` (None included) cannot be cost-complete. Exempt: a
+  cache hit, and a record of no response at all (no model answered, no geo, no stop reason, zero
+  tokens, $0; narrowed in the step 6 review, so a record that kept billed tokens is never exempt).
 - **[0007]** Exact `llm_call` record, emitted once in `finally` (also on error, deadline and
   cancel), metadata only:
   - `record_version`, `business_id`, alias, model requested and model answered, `catalog_version`,
@@ -188,23 +200,51 @@ close-out PR (decided then).
   - For a call that reached the provider, attempts = 1 + `repairs` + `retries`; a repair's retries
     count in `retries`.
   - `attempt_timeouts` counts the attempts that hit the per-attempt timeout, at most the attempts.
-- **[note]** Proposed by Diego (step 2), pending shesha: `model_context_window_exceeded` is a
-  truncation ⇒ `OutputTruncated` (ADR 0006: truncation is a typed error; the stop-reasons page says
-  "Treat the response as truncated", checked 2026-10-14). If reversed, remove it from
-  `TruncationStopReason` and its tests.
-- **[note]** Open, shesha decides: do `other` and the stop reasons M1 never asks for (`tool_use`,
-  `pause_turn`, `stop_sequence`) become a result or a typed error? `LLMResult` accepts them today.
-  Maya's proposal: fail closed, a typed error that is never cached.
-- **[note]** Open: calls with no model call (a pre-call `max_tokens` rejection; a cache hit, PR 7).
-  Is a record emitted, and what do `retries`, `repairs` and `attempt_timeouts` hold?
+- **[decided]** 2026-10-15: `model_context_window_exceeded` is a truncation ⇒ `OutputTruncated`,
+  outcome `truncated`; never repaired or cached (the stop-reasons page: "Treat the response as
+  truncated", checked 2026-10-14).
+- **[decided]** 2026-10-15: `tool_use`, `pause_turn`, `stop_sequence` (M1 never asks for them) and
+  our `other` make `complete()` raise a non-retryable `ProviderError`, outcome `provider_error`,
+  never cached; the record contract does not change. That response's usage is known, so it does
+  not by itself make the cost incomplete (as for a refusal or a truncation; the unpriced-model and
+  geo rules still apply): the gateway raises it after reading the response, unlike the status-less
+  `ProviderError` from the adapter below. `LLMResult` itself still
+  accepts these stop reasons (M5's tools will need `tool_use`); the gateway never builds one.
+- **[decided]** 2026-10-15 (shesha): every logical call writes exactly one `llm_call` record,
+  calls that never reach the model included. A pre-call `max_tokens` rejection (`InvalidRequest`,
+  outcome `invalid_request`) records `retries`, `repairs` and `attempt_timeouts` 0, no model
+  answered, no `inference_geo`, zero tokens, `cost_usd` 0 with `cost_complete` true. A cache hit
+  (PR 7) will be outcome `ok` with `cache_hit` true.
+  - Decided 2026-10-15: a call whose attempts all ended in errors with a status
+    (no response, so no geo) falls under the same geo exemption, because its $0 is known.
+    `CallRecord._cost_rules` exempts exactly a record of no response at all (no model answered,
+    no geo, no stop reason, zero tokens, $0).
+  - Decided 2026-10-15: an unknown alias writes its record too,
+    with `model_requested` null (outcome `invalid_request`, the zeros above). `model_requested` is
+    optional for this one case only (a validator rejects null anywhere else); no `record_version`
+    bump, because no record has been emitted yet (the `attempt_timeouts` precedent). M3 checks a
+    business's aliases against the catalog when its config loads.
+  - A pre-call rejection made 0 attempts: attempts = 1 + `repairs` + `retries` holds only for
+    calls that reached the provider. Today a pre-call rejection and a provider 400 without a
+    request id differ only in `latency_ms` (an `attempts` field comes in PR 7, below).
+- **[step 6 review]** Accepted risk (decided 2026-10-15): if building or logging the record ever
+  fails, `complete()` still returns its result or raises its own error, and that call has no
+  record and no other signal (the gateway logs nothing else). Today no validated tally can fail a
+  validator; recheck in PR 7 (repair, cache hit). PR 8's count check makes a dropped record visible.
+- **[step 6 review]** The gateway's logger is pinned at INFO, so a `log_level` of WARNING or ERROR
+  never drops a record (tested with the app's `configure_logging`).
+- **[step 6 review]** An unexpected exception that is not a `GatewayError` (a bug in a provider or
+  in the gateway) is recorded as `provider_error` and propagates unchanged for now; PR 7 adds
+  `internal_error` (decided 2026-10-15, see PR 7).
 - **[step 5 review]** Decided 2026-10-15: add `aclose()` to the `Provider` Protocol (a no-op on the
   fake), and the gateway closes the provider it was given. One factory builds the provider from
   Settings.
-- **[step 5 review]** Proposed (ADR 0006, Cost): an attempt that ends in `ProviderError` with
-  `status_code` None was billed with unknown tokens: a 2xx the adapter could not read or validate,
-  or a status outside 100–599. So it sets `cost_complete=false` (fail closed). Test: a fake step
-  `ProviderError()` gives `cost_complete=False`. Decided 2026-10-15: a status-less `Transient` (the
-  connection was lost, possibly after sending) also makes the cost incomplete; test it too.
+- **[step 5 review]** Decided 2026-10-15 (ADR 0006, Cost): an attempt that ends in a
+  `ProviderError` from the adapter with `status_code` None was billed with unknown tokens: a 2xx
+  the adapter could not read or validate, or a status outside 100–599. So it sets
+  `cost_complete=false` (fail closed). Test: a fake step `ProviderError()` gives
+  `cost_complete=False`. A status-less `Transient` (the connection was lost, possibly after
+  sending) also makes the cost incomplete; tested too.
 - **[step 5 review]** Decided 2026-10-15: with the anthropic provider, refuse `SSLKEYLOGFILE`,
   `SSL_CERT_FILE` and `SSL_CERT_DIR` at startup (one test and canary each) and keep honouring
   proxies; record it in ADR 0007. The variables the production client reads:
@@ -218,6 +258,11 @@ close-out PR (decided then).
   incomplete, so carry `service_tier` only if a priority-tier organisation becomes possible.
 
 ## PR 7 — `m1/gateway-structured-and-cache`
+- **[step 6 review]** Decided 2026-10-15, record contract (free until the first real record, PR 9;
+  `record_version` stays 1): add `internal_error` to `CallOutcome`, for an exception that is not a
+  `GatewayError` (a bug in a provider or the gateway), so it is never counted as `provider_error`;
+  and add an `attempts` count (0 for a pre-call rejection or a cache hit; otherwise
+  1 + `repairs` + `retries`), validated against `attempt_timeouts`. Update the pinned field list.
 - **[0006]** The repair is a fresh request: the original messages plus feedback; it replays no
   assistant or thinking blocks. Feedback names only schema fields (locations) and error types.
 - **[0007]** Structured-output errors carry only locations and error types, never the invalid
@@ -230,8 +275,14 @@ close-out PR (decided then).
   two schemas → two keys; a stored value whose `business_id` differs is never served). Refusals,
   truncations and errors are never cached. A hit records $0 and `cache_hit=True` and is
   re-validated.
-- **[note]** A cache hit makes no model call: see PR 6's open note on records for calls with no
-  model call (`CallRecord` already requires `attempt_timeouts` = 0 on a hit).
+- **[step 6 review]** The usage and cost sum is first reached through the gateway by a repair
+  (PR 6 tests `_Tally` directly): test two billed attempts, each priced by its own answering model.
+  Recheck that every record the new paths build (repair, cache hit) validates.
+- **[note]** A cache hit makes no model call. Decided in PR 6 (2026-10-15): it still writes its
+  one record, outcome `ok`, `cache_hit` true, `cost_usd` 0 (`CallRecord` already requires
+  `attempt_timeouts` = 0 on a hit and exempts a hit from the geo rule). To settle here: what
+  `retries`, `model_answered`, `inference_geo` and `stop_reason` hold on a hit (proposed: 0, and
+  the cached response's values or null), and that `cost_complete` is true.
 
 ## PR 8 — `m1/measure`
 - **[0006]** `--live` cap mechanics: before each call, reserve its worst-case cost
@@ -249,6 +300,10 @@ close-out PR (decided then).
   6 s, message to reply).
 - **[0007]** The summary file is committed so the numbers last; this PR sets its location.
 - **[0007]** The CLI adds case metadata to its own output; the gateway never does.
+- **[step 6 review]** The line PR 8 parses: one JSON object per line, `"message": "llm_call"` and
+  the whole `CallRecord` under the `"llm_call"` key (nested, so it can never clash with the
+  formatter's own keys). The CLI counts the calls it made and fails the run unless it read exactly
+  that many `llm_call` records.
 - **[step 2 review]** Timeout rate (decided 2026-10-14) = calls whose outcome is
   `deadline_exceeded` or whose `attempt_timeouts` > 0, as k/n; `deadline_exceeded` is also reported
   on its own. The worst-case reservation uses the effective `max_tokens` (the request's, else the
@@ -267,8 +322,9 @@ close-out PR (decided then).
 - **[review]** Before the run: the workspace default inference geo is `global`; the shell has none
   of `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_LOG`, and the key
   is not in `.env` (startup refuses otherwise). **[step 5 review]** Also none of
-  `ANTHROPIC_CUSTOM_HEADERS`, and (until PR 6 decides the proxy/TLS item) none of `HTTPS_PROXY`,
-  `ALL_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `SSLKEYLOGFILE`.
+  `ANTHROPIC_CUSTOM_HEADERS`. Since PR 6 (decided 2026-10-15) startup refuses `SSL_CERT_FILE`,
+  `SSL_CERT_DIR` and `SSLKEYLOGFILE`; a proxy (`HTTPS_PROXY`, `ALL_PROXY`) is allowed, but check
+  that none is set unless one is meant to be used.
 - **[0006]** Measure the output-token cost of adaptive thinking at effort `low`, and check cost
   accuracy against the Console's token counts per model.
 - **[step 5 review]** Open, shesha observes it (agents never make live calls): what the API
@@ -277,6 +333,14 @@ close-out PR (decided then).
   (from public reports, not the docs, unverified): a 400 `invalid_request_error` "Your credit
   balance is too low to access the Anthropic API…". A 400 lands in row 5 (`InvalidRequest`). It is
   still never retried, but the outcome label is wrong, so add that shape to row 2 and its test.
+
+## Handed on to M3 (step 6 review; carry into M3's plan)
+- When a business's config loads, check every alias it uses against the catalog (fail at startup,
+  not at the first call).
+- For gateway calls, the route's exception handler logs only `type(exc).__name__` and relies on
+  the `llm_call` record, never `str(exc)` or the traceback text (a provider bug's message could
+  hold text).
+- A route-level timeout around `complete()` is recorded as `cancelled`, not `deadline_exceeded`.
 
 ## H2 — retry with backoff (shesha, `[HAND-WRITE]`)
 - **[0006]** H2 receives the deadline and a clock (see PR 2). Tests: a backoff or Retry-After delay

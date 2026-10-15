@@ -156,9 +156,9 @@ stop reasons), so the set is defined once."""
 TruncationStopReason = Literal["max_tokens", "model_context_window_exceeded"]
 """The output was cut off: the only values `errors.OutputTruncated` takes. A subset of `StopReason`.
 
-`max_tokens` is ADR 0006. `model_context_window_exceeded` is proposed (Diego, 2026-10-14), awaiting
-shesha: the stop-reasons page says of it "Treat the response as truncated" (checked 2026-10-14).
-If shesha reverses it, remove it here and from its tests.
+`max_tokens` is ADR 0006. `model_context_window_exceeded` is a truncation too (decided by shesha,
+2026-10-15): the stop-reasons page says of it "Treat the response as truncated" (checked
+2026-10-14). Neither is ever repaired or cached.
 """
 
 TRUNCATION_STOP_REASONS: Final[frozenset[str]] = frozenset(get_args(TruncationStopReason))
@@ -432,7 +432,10 @@ class CallRecord(GatewayModel):
     record_version: Literal[1] = 1
     business_id: BusinessId
     alias: Slug
-    model_requested: OpaqueId
+    model_requested: OpaqueId | None
+    """The alias's catalog model. None only for an alias the catalog does not have: outcome
+    `invalid_request`, no model call (decided 2026-10-15; made optional before any record was
+    emitted, so no `record_version` bump)."""
     model_answered: OpaqueId | None = None
     """None when no attempt got an answer (for example the first call hit the spend limit)."""
     catalog_version: OpaqueId
@@ -445,7 +448,11 @@ class CallRecord(GatewayModel):
     """Retried attempts over the whole call, a repair's retries included.
 
     So a call that reached the provider made `1 + repairs + retries` attempts (decided 2026-10-14).
-    Calls with no model call (a cache hit, a pre-call `max_tokens` rejection): open, PR 6/7.
+    That formula holds only for calls that reached the provider. A call with no model call still
+    writes its one record (decided 2026-10-15) and made 0 attempts: a pre-call rejection is outcome
+    `invalid_request` with 0 retries, repairs and attempt timeouts, no model answered, no request
+    ids, zero tokens and $0 with `cost_complete` True. A provider 400 that came without a request
+    id looks the same apart from `latency_ms`. A cache hit (PR 7) is outcome `ok`, `cache_hit` True.
     """
     repairs: Count
     attempt_timeouts: Count
@@ -478,9 +485,24 @@ class CallRecord(GatewayModel):
         # ADR 0006, Caching: a response-cache hit makes no model call, so it costs $0.
         if self.cache_hit and not self.cost_usd.is_zero():
             raise ValueError("a cache hit costs 0 (ADR 0006)")
-        # ADR 0006, Cost: list prices assume global routing, so any other geo is incomplete.
-        if self.inference_geo not in (None, "global") and self.cost_complete:
+        # ADR 0006, Cost: list prices assume global routing, so a response from anywhere else, or
+        # from an unknown place (None: fail closed, decided 2026-10-14), makes the cost incomplete.
+        # Exempt: a cache hit (no model call, $0), and a record of no response at all, so no geo:
+        # a pre-call rejection and a call whose attempts all ended in errors, whose $0 is known
+        # (both decided 2026-10-15).
+        exempt = self.cache_hit or _no_response(self)
+        if not exempt and self.inference_geo != "global" and self.cost_complete:
             raise ValueError("cost_complete must be False when inference_geo is not global")
+        return self
+
+    @model_validator(mode="after")
+    def _model_requested_only_missing_for_an_unknown_alias(self) -> Self:
+        if self.model_requested is None and not (
+            self.outcome == CallOutcome.INVALID_REQUEST and _no_response(self)
+        ):
+            raise ValueError(
+                "model_requested may be None only for an unknown alias (invalid_request, no call)"
+            )
         return self
 
     @model_validator(mode="after")
@@ -494,3 +516,16 @@ class CallRecord(GatewayModel):
         if self.cache_hit and self.attempt_timeouts > 0:
             raise ValueError("a cache hit makes no model call: attempt_timeouts must be 0")
         return self
+
+
+def _no_response(record: CallRecord) -> bool:
+    """The record shows no response at all: no model answered, no geo, no stop reason, no tokens
+    and $0. Exactly what a call that never got an answer leaves (step 6 review: anything wider
+    would let a record that lost its response but kept billed tokens pass as cost-complete)."""
+    return (
+        record.model_answered is None
+        and record.inference_geo is None
+        and record.stop_reason is None
+        and record.cost_usd.is_zero()
+        and all(getattr(record, name) == 0 for name in Usage.model_fields)
+    )

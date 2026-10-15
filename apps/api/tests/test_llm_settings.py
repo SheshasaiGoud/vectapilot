@@ -14,7 +14,7 @@ import pytest
 from pydantic import ValidationError
 
 from tests.conftest import TEST_SETTINGS_FIELDS, make_settings
-from vectapilot_api.config import ANTHROPIC_SDK_ENV_VARS, Settings
+from vectapilot_api.config import ANTHROPIC_SDK_ENV_VARS, TLS_ENV_VARS, Settings
 from vectapilot_api.gateway.types import RetryPolicy
 
 CANARY = "canary-key-7f3a"  # fake on purpose: never shaped like a real API key
@@ -49,7 +49,7 @@ def test_the_test_settings_set_every_field_explicitly() -> None:
 def test_conftest_pins_the_test_environment() -> None:
     assert os.environ["VECTAPILOT_ENVIRONMENT"] == "test"
     assert os.environ["VECTAPILOT_LLM_PROVIDER"] == "fake"
-    for name in ("VECTAPILOT_ANTHROPIC_API_KEY", *ANTHROPIC_SDK_ENV_VARS):
+    for name in ("VECTAPILOT_ANTHROPIC_API_KEY", *ANTHROPIC_SDK_ENV_VARS, *TLS_ENV_VARS):
         assert name not in os.environ
 
 
@@ -134,6 +134,41 @@ def test_the_anthropic_provider_refuses_sdk_variables(
     )
     # The rule is about the anthropic provider: the fake ignores these variables.
     assert make_settings().llm_provider == "fake"
+
+
+def test_the_refused_tls_variables_are_the_decided_list() -> None:
+    # Decided 2026-10-15 (ADR 0007). Pinned, so dropping one is a visible change.
+    assert TLS_ENV_VARS == ("SSL_CERT_FILE", "SSL_CERT_DIR", "SSLKEYLOGFILE")
+
+
+@pytest.mark.parametrize("name", TLS_ENV_VARS)
+def test_the_anthropic_provider_refuses_tls_variables(
+    name: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(name, f"/tmp/{CANARY}-tls")  # noqa: S108 - a value only, nothing is written
+
+    message = refused(
+        f"{CANARY}-tls", environment="local", llm_provider="anthropic", anthropic_api_key=CANARY
+    )
+
+    assert message == (
+        f"Value error, {name} must not be set when llm_provider is 'anthropic'"
+        " (they replace the OS trust store or write TLS session keys): unset them"
+    )
+    # The fake makes no HTTP call, so it ignores them.
+    assert make_settings().llm_provider == "fake"
+
+
+def test_the_anthropic_provider_keeps_honouring_proxies(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Decided 2026-10-15: proxies keep working (the SDK mounts them itself).
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"):
+        monkeypatch.setenv(name, "http://proxy.example:3128")
+
+    settings = make_settings(
+        environment="local", llm_provider="anthropic", anthropic_api_key=CANARY
+    )
+
+    assert settings.llm_provider == "anthropic"
 
 
 def test_a_deadline_below_the_attempt_timeout_is_refused() -> None:

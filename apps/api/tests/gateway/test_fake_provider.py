@@ -32,10 +32,15 @@ def request(**overrides: Any) -> ProviderRequest:
     return ProviderRequest.model_validate(fields | overrides)
 
 
-def test_the_fake_implements_the_provider_protocol() -> None:
-    provider: Provider = FakeProvider()  # mypy checks this assignment against the Protocol
+@pytest.mark.anyio
+async def test_the_fake_implements_the_provider_protocol() -> None:
+    fake = FakeProvider()
+    provider: Provider = fake  # mypy checks this assignment against the Protocol (aclose included)
 
-    assert provider.send is not None
+    await provider.aclose()
+
+    assert fake.closed is True  # it closes nothing; it only records the call
+    assert fake.calls == []
 
 
 def test_a_provider_request_has_no_temperature() -> None:
