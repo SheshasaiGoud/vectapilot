@@ -1,12 +1,14 @@
-"""H1 — the cost of one model response. [HAND-WRITE]: shesha writes the body.
+"""H1 — the cost of one model response. [HAND-WRITE] piece, written by Claude at shesha's request
+(2026-10-15); shesha's explain-back is still part of its acceptance.
 
-Guide: docs/learning/m1-gateway.md · Tests: tests/gateway/test_pricing.py (marked
-`xfail(strict=True)` until this works; then delete their `pytestmark` line).
+Guide: docs/learning/m1-gateway.md · Tests: tests/gateway/test_pricing.py.
 """
 
 from decimal import Decimal
 
 from vectapilot_api.gateway.types import ModelPricing, Usage
+
+TOKENS_PER_MTOK = 1_000_000  # prices are per million tokens; an int, so the division stays Decimal
 
 
 def cost_usd(usage: Usage, pricing: ModelPricing) -> Decimal:
@@ -39,4 +41,25 @@ def cost_usd(usage: Usage, pricing: ModelPricing) -> Decimal:
     own: a request over the threshold pays the higher prices even when part of its prompt is a
     cache hit, and earlier requests keep the prices they were billed at."
     """
-    raise NotImplementedError("H1: shesha implements cost_usd — see docs/learning/m1-gateway.md")
+    # 1. Which price list? Prompt length counts every input-side class; output is not prompt.
+    prompt_tokens = (
+        usage.input_tokens
+        + usage.cache_read_tokens
+        + usage.cache_write_5m_tokens
+        + usage.cache_write_1h_tokens
+    )
+    tier = pricing.long_prompt
+    if tier is not None and prompt_tokens > tier.threshold_tokens:  # "over" = strictly greater
+        prices = tier.prices
+    else:
+        prices = pricing.standard
+
+    # 2. Each class at its own price. int x Decimal is exact; no float is ever involved.
+    per_million = (
+        usage.input_tokens * prices.input
+        + usage.output_tokens * prices.output
+        + usage.cache_read_tokens * prices.cache_read
+        + usage.cache_write_5m_tokens * prices.cache_write_5m
+        + usage.cache_write_1h_tokens * prices.cache_write_1h
+    )
+    return per_million / TOKENS_PER_MTOK

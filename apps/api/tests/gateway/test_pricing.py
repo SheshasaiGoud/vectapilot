@@ -1,14 +1,7 @@
 """H1 tests: `cost_usd` (guide: docs/learning/m1-gateway.md, section H1).
 
-`cost_usd` is [HAND-WRITE]: shesha writes it. Until then it raises NotImplementedError, so the
-whole module is marked `xfail(strict=True, raises=NotImplementedError)`:
-
-- not implemented yet          → "xfailed" (expected);
-- implemented, wrong answer    → a normal failure (only NotImplementedError counts as expected);
-- implemented, right answer    → "XPASS(strict)", a failure on purpose: that is your signal.
-
-When no test here is xfailed any more, delete the `pytestmark` line below and run again: every
-test must then simply pass. Do not edit the tests to make them pass; change the code.
+`cost_usd` is implemented, so the module's `xfail(strict=True)` marker is gone and every test must
+simply pass. Do not edit the tests to make them pass; change the code.
 
 All prices are made up (never real list prices, so these tests never go stale). Every expected
 value is worked out by hand; the working is in the comment next to it.
@@ -20,12 +13,6 @@ import pytest
 
 from vectapilot_api.gateway.pricing import cost_usd
 from vectapilot_api.gateway.types import LongPromptTier, ModelPricing, TokenPrices, Usage
-
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    raises=NotImplementedError,
-    reason="H1: shesha implements cost_usd — see docs/learning/m1-gateway.md, H1",
-)
 
 STANDARD = TokenPrices(  # USD per million tokens
     input=Decimal("3"),
