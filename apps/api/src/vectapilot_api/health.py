@@ -4,7 +4,8 @@
   database is down, restarting the API would not fix it, so liveness must stay green.
 - `/readyz` — readiness: "should traffic be sent here right now?" It checks Postgres and Redis.
 
-The readiness logic is [HAND-WRITE]: implemented by the human lead.
+The readiness logic is [HAND-WRITE]: `check_redis` was written by shesha; the rest was completed
+by Claude at shesha's request (M0, PR #4), explained line by line.
 Guide: docs/learning/m0-readiness.md · Tests: tests/test_readyz.py
 """
 
