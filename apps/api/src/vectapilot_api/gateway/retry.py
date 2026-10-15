@@ -1,7 +1,7 @@
-"""H2 — retry with capped, full-jitter backoff. [HAND-WRITE]: shesha writes the bodies.
+"""H2 — retry with capped, full-jitter backoff. [HAND-WRITE] piece, written by Claude at shesha's
+request (2026-10-15); shesha's explain-back is still part of its acceptance.
 
-Guide: docs/learning/m1-gateway.md · Tests: tests/gateway/test_retry.py (marked
-`xfail(strict=True)` until this works; then delete their `pytestmark` line).
+Guide: docs/learning/m1-gateway.md · Tests: tests/gateway/test_retry.py.
 
 The gateway (PR 6) is the only retry layer: the SDK's own retries are off (ADR 0006). It passes
 `time.monotonic`, `asyncio.sleep` and `random.random` in; tests pass fakes, so nothing waits.
@@ -11,6 +11,7 @@ Per-attempt accounting (usage, request ids, attempt timeouts, the retry count) h
 
 from collections.abc import Awaitable, Callable
 
+from vectapilot_api.gateway.errors import GatewayError, Transient
 from vectapilot_api.gateway.types import RetryPolicy
 
 
@@ -31,9 +32,14 @@ def backoff_delay(attempt: int, policy: RetryPolicy, rand: float) -> float:
     The bounds the tests assume, for base 0.5 s and cap 8 s: attempt 0 → 0.5, 1 → 1.0, 2 → 2.0,
     3 → 4.0, 4 and above → 8.0. For base 1 s and cap 3 s: attempt 2 → 3.0.
     """
-    raise NotImplementedError(
-        "H2: shesha implements backoff_delay — see docs/learning/m1-gateway.md"
-    )
+    # Double the bound once per earlier retry, but stop as soon as it reaches the cap: computing
+    # `base * 2**attempt` directly would overflow a float for a huge `attempt`.
+    bound = policy.base_delay_s
+    for _ in range(attempt):
+        if bound >= policy.max_delay_s:
+            break
+        bound *= 2
+    return float(min(bound, policy.max_delay_s) * rand)  # full jitter: anywhere in [0, bound]
 
 
 async def call_with_retries[T](
@@ -74,6 +80,27 @@ async def call_with_retries[T](
        `call()` or from `sleep()` — so cancellation and the gateway's `asyncio.timeout` keep
        working.
     """
-    raise NotImplementedError(
-        "H2: shesha implements call_with_retries — see docs/learning/m1-gateway.md"
-    )
+    retries = 0
+    while True:
+        try:
+            return await call()
+        except GatewayError as error:  # CancelledError is a BaseException: never caught here
+            if not error.retryable or retries == policy.max_retries:
+                raise  # the same object, unchanged
+            failed = error
+        # Outside the `except` block on purpose: nothing below can chain onto `failed`.
+        wait = _wait_before_retry(failed, retries, policy, rand)
+        if wait is None or clock() + wait >= deadline:  # the wait must end strictly before it
+            raise failed
+        await sleep(wait)
+        retries += 1
+
+
+def _wait_before_retry(
+    error: GatewayError, retries: int, policy: RetryPolicy, rand: Callable[[], float]
+) -> float | None:
+    """Seconds to wait before retry number `retries`, or None if this error must not be retried."""
+    if isinstance(error, Transient) and error.retry_after is not None:
+        # The server said when to come back. Longer than our cap means give up (fail fast).
+        return error.retry_after if error.retry_after <= policy.max_delay_s else None
+    return backoff_delay(retries, policy, rand())
