@@ -161,7 +161,8 @@ close-out PR (decided then).
   other cancel is pending (asyncio's cancel count), so a caller's cancel always wins, even in the
   same loop tick as the deadline (tested). `.expired()` then tells a scope's own `TimeoutError`
   from one that code raised itself, at both levels: a provider that raises `TimeoutError` is a bug
-  (outcome `provider_error`, never retried, not counted in `attempt_timeouts`; tested). A caller's
+  (outcome `provider_error`, `internal_error` since PR 7; never retried, not counted in
+  `attempt_timeouts`; tested). A caller's
   own timeout around `complete()` is recorded as `cancelled`; only the gateway's deadline is
   `deadline_exceeded`. Tested too: a deadline or a cancel during a backoff wait (the cost stays
   complete) and a deadline after an attempt timeout (both counted).
@@ -182,9 +183,15 @@ close-out PR (decided then).
     `inference_geo`
   - `outcome`, a closed enum: `ok`, `refusal`, `truncated`, `validation_failed`,
     `transient_exhausted`, `deadline_exceeded`, `cancelled`, `spend_limit`, `billing`,
-    `auth_failed`, `invalid_request`, `provider_error`
-  - `stop_reason`, `retries`, `repairs`, `attempt_timeouts` (**[step 2 review]**),
-    `first_try_valid` (null if unstructured)
+    `auth_failed`, `invalid_request`, `provider_error`, `internal_error` (since PR 7)
+  - `stop_reason`, `attempts` (since PR 7: 1 + `repairs` + `retries` for a call that reached the
+    provider; 0 for a pre-call rejection, an unknown alias or a cache hit), `retries`, `repairs`,
+    `attempt_timeouts` (**[step 2 review]**), `first_try_valid`: true/false = whether a structured
+    call's first `end_turn` answer validated; null if unstructured, or if that first answer was
+    never validated (a refusal, truncation or other stop reason came back, or no answer: error,
+    deadline, cancel), or on a cache hit (since PR 7)
+  - `model_answered`, `inference_geo` and `stop_reason` are the last response's; `cost_complete`
+    covers every attempt (since PR 7)
   - five token classes, `cost_usd`, `cost_complete`, `cache_hit`
   - `latency_ms`: monotonic clock, the whole call, backoff and repair included
   - provider request ids
@@ -235,7 +242,7 @@ close-out PR (decided then).
   never drops a record (tested with the app's `configure_logging`).
 - **[step 6 review]** An unexpected exception that is not a `GatewayError` (a bug in a provider or
   in the gateway) is recorded as `provider_error` and propagates unchanged for now; PR 7 adds
-  `internal_error` (decided 2026-10-15, see PR 7).
+  `internal_error` (decided 2026-10-15, see PR 7; done in PR 7).
 - **[step 5 review]** Decided 2026-10-15: add `aclose()` to the `Provider` Protocol (a no-op on the
   fake), and the gateway closes the provider it was given. One factory builds the provider from
   Settings.
@@ -265,6 +272,14 @@ close-out PR (decided then).
   1 + `repairs` + `retries`), validated against `attempt_timeouts`. Update the pinned field list.
 - **[0006]** The repair is a fresh request: the original messages plus feedback; it replays no
   assistant or thinking blocks. Feedback names only schema fields (locations) and error types.
+  - **[step 7 review]** The repair therefore ends with two `user` turns. The API merges
+    consecutive `user` turns into one (anthropic 1.12.0's Messages docstring, generated from the
+    API reference: `resources/messages/messages.py` and `types/message_create_params.py`, checked
+    2026-10-15). Recheck the current /api/messages page before PR 9; its live run confirms it.
+  - **[step 7 review]** Error types come from Pydantic's closed list (pydantic-core's
+    `ErrorType`); any other, such as a schema's custom type, is `invalid`. An unexpected key is
+    reported at its parent object. A dict key equal to a schema field name can still appear in a
+    location (schema vocabulary only).
 - **[0007]** Structured-output errors carry only locations and error types, never the invalid
   input.
 - **[review]** The canary sits in a JSON key as well as a value of the invalid output; it never
@@ -280,9 +295,13 @@ close-out PR (decided then).
   Recheck that every record the new paths build (repair, cache hit) validates.
 - **[note]** A cache hit makes no model call. Decided in PR 6 (2026-10-15): it still writes its
   one record, outcome `ok`, `cache_hit` true, `cost_usd` 0 (`CallRecord` already requires
-  `attempt_timeouts` = 0 on a hit and exempts a hit from the geo rule). To settle here: what
-  `retries`, `model_answered`, `inference_geo` and `stop_reason` hold on a hit (proposed: 0, and
-  the cached response's values or null), and that `cost_complete` is true.
+  `attempt_timeouts` = 0 on a hit and exempts a hit from the geo rule).
+  - **Decided 2026-10-15** (built in PR 7): a hit record is exactly
+    outcome `ok`, `cache_hit` true; `attempts`, `retries`, `repairs`, `attempt_timeouts` 0; zero
+    tokens; `cost_usd` 0 with `cost_complete` true; `model_answered` and `stop_reason` (`end_turn`,
+    the only one cached) from the cached response; `inference_geo` null and no request ids (no
+    inference happened); `first_try_valid` null (no answer was tried).
+    `CallRecord._a_cache_hit_is_exactly` accepts exactly this and nothing looser.
 
 ## PR 8 — `m1/measure`
 - **[0006]** `--live` cap mechanics: before each call, reserve its worst-case cost
@@ -294,6 +313,16 @@ close-out PR (decided then).
 - **[0006]** First-try validity is k/n over the non-forced structured cases only; the forced-repair
   case is reported on its own ("repair worked"). The rule (any non-forced first-try failure ⇒
   revisit native `output_config.format` in M3) is fixed before the live run.
+  - **[step 7 review]** Decided 2026-10-15 (Maya's variant): n = the non-forced structured cases
+    the CLI ran (from its own case metadata: a null `first_try_valid` alone cannot tell
+    structured from unstructured) whose first answer was validated (`first_try_valid` true or
+    false); k = those with `first_try_valid` true. Cases with null (a refusal, truncation or other
+    stop reason, or an error or the deadline before the first answer was validated) are not in
+    n: they are reported next to k/n as their own counts, by outcome, never dropped. Why: the
+    number decides whether native `output_config.format` is needed, and native format cannot
+    fix a refusal or a truncation (a truncation has its own rule: raise the alias's cap).
+    Cache hits cannot occur (cache off). Code-fenced JSON counts as invalid: the gateway never
+    strips fences, so the first-try number stays honest.
 - **[0007]** Measurement rules: p95 uses the inclusive method and appears only when n ≥ 20 distinct
   prompts; no p95 per language or business; timed-out calls count in the timeout rate and are never
   dropped; cache off in the live run; per-call latency is never compared with the §6 target (p95 <
@@ -341,6 +370,10 @@ close-out PR (decided then).
   the `llm_call` record, never `str(exc)` or the traceback text (a provider bug's message could
   hold text).
 - A route-level timeout around `complete()` is recorded as `cancelled`, not `deadline_exceeded`.
+- **[step 7 review]** For every schema passed to `complete_structured` (M3 citations, M4, M6; M7
+  reviews them): its docstring and field descriptions are prompt text and part of the cache key;
+  validators raise only `ValueError`, `AssertionError` or `PydanticCustomError` (any other
+  exception propagates as `internal_error` and must never carry the input in its message).
 
 ## H2 — retry with backoff (shesha, `[HAND-WRITE]`)
 - **[0006]** H2 receives the deadline and a clock (see PR 2). Tests: a backoff or Retry-After delay

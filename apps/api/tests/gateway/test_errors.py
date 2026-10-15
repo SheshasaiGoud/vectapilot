@@ -14,6 +14,7 @@ from vectapilot_api.gateway.errors import (
     OutputTruncated,
     ProviderError,
     SpendLimitReached,
+    StructuredOutputInvalid,
     Transient,
 )
 from vectapilot_api.gateway.types import (
@@ -37,6 +38,12 @@ ERROR_TABLE = [
     pytest.param(ModelRefused(), CallOutcome.REFUSAL, False, id="refusal"),
     pytest.param(
         OutputTruncated(stop_reason="max_tokens"), CallOutcome.TRUNCATED, False, id="truncated"
+    ),
+    pytest.param(
+        StructuredOutputInvalid(problems=(("answer", "missing"),)),
+        CallOutcome.VALIDATION_FAILED,
+        False,
+        id="validation",
     ),
 ]
 
@@ -71,15 +78,15 @@ def test_status_and_request_id_are_optional_and_kept(cls: type[GatewayError]) ->
     assert (full.status_code, full.request_id) == (503, "req_011CVabc")
 
 
-def test_every_outcome_except_ok_validation_and_cancel_has_an_error_class() -> None:
-    # `ok` is not an error; `cancelled` is asyncio.CancelledError (never wrapped);
-    # `validation_failed` gets its error with structured output (PR 7).
+def test_every_outcome_except_ok_cancel_and_internal_error_has_an_error_class() -> None:
+    # `ok` is not an error; `cancelled` is asyncio.CancelledError and `internal_error` any other
+    # exception that is not a GatewayError (a bug): both propagate unchanged, never wrapped.
     outcomes = {GatewayError.outcome} | {cls.outcome for cls in GatewayError.__subclasses__()}
 
     assert set(CallOutcome) - outcomes == {
         CallOutcome.OK,
         CallOutcome.CANCELLED,
-        CallOutcome.VALIDATION_FAILED,
+        CallOutcome.INTERNAL_ERROR,
     }
 
 
@@ -108,6 +115,7 @@ def test_never_retried_classes_do_not_accept_retryable(cls: type[GatewayError]) 
         pytest.param(Transient(retry_after=1.0), "retry_after", id="retry-after"),
         pytest.param(DeadlineExceeded(deadline_s=30), "deadline_s", id="deadline"),
         pytest.param(OutputTruncated(stop_reason="max_tokens"), "stop_reason", id="stop-reason"),
+        pytest.param(StructuredOutputInvalid(problems=()), "problems", id="problems"),
     ],
 )
 def test_every_public_field_is_read_only(error: GatewayError, field: str) -> None:
@@ -153,6 +161,11 @@ def test_str_and_repr_show_only_metadata() -> None:
     )
     assert str(OutputTruncated(stop_reason="max_tokens", request_id="req_1")) == (
         "status_code=None, request_id='req_1', retryable=False, stop_reason='max_tokens'"
+    )
+    invalid = StructuredOutputInvalid(problems=(("citations.url", "string_type"),))
+    assert str(invalid) == (
+        "status_code=None, request_id=None, retryable=False,"
+        " problems=(('citations.url', 'string_type'),)"
     )
 
 

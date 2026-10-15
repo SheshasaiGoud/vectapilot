@@ -4,7 +4,8 @@ The provider adapter (PR 5) maps a response to one of these classes, first match
 spend limit → `SpendLimitReached`; 402 → `BillingError`; connection errors, timeouts, 408, 409,
 429, 5xx, 529 → `Transient`; 401/403 → `AuthenticationFailed`; 400/404/413/422 →
 `InvalidRequest`; anything else → `ProviderError`. The gateway adds `DeadlineExceeded`,
-`ModelRefused` and `OutputTruncated`.
+`ModelRefused`, `OutputTruncated` and `StructuredOutputInvalid`. An exception that is not a
+`GatewayError` is a bug: it propagates unchanged and is recorded as `internal_error`.
 
 **Metadata only.** No constructor takes a free-text message: `str(error)` is built from the typed
 fields below, and the request id must pass the opaque-id rule (`types.check_opaque_id`). So an
@@ -213,3 +214,33 @@ class OutputTruncated(GatewayError):
 
     def _metadata(self) -> dict[str, object]:
         return {**super()._metadata(), "stop_reason": self.stop_reason}
+
+
+class StructuredOutputInvalid(GatewayError):
+    """A structured answer did not validate against its schema, after the repair if one was made.
+
+    `problems` holds at most 5 `(location, error type)` pairs, built by the gateway from the
+    schema's own field names and Pydantic's own error types only (`gateway._problems`): never the
+    invalid output or a value from it (ADR 0007). A key the model wrote appears only if it equals a
+    schema field name (schema vocabulary, nothing else). Only the gateway builds this error.
+    """
+
+    outcome = CallOutcome.VALIDATION_FAILED
+
+    def __init__(
+        self,
+        *,
+        problems: tuple[tuple[str, str], ...],
+        status_code: int | None = None,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(status_code=status_code, request_id=request_id)
+        self._problems = problems
+
+    @property
+    def problems(self) -> tuple[tuple[str, str], ...]:
+        """`(location, error type)` pairs, e.g. `("citations.url", "string_type")`. Read-only."""
+        return self._problems
+
+    def _metadata(self) -> dict[str, object]:
+        return {**super()._metadata(), "problems": self.problems}
