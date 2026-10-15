@@ -14,7 +14,7 @@ self-harm or poisoning (ADR 0007, Data handling).
 | Cases | 24 distinct prompts: 12 on `small`, 12 on `large`; 13 plain, 11 structured (five non-forced on each alias, plus one forced repair on `small`) |
 | Businesses | `sunrise-clinic` (en, hi) · `paws-and-co` (en, te) · `northwind-shop` (en): each only in the languages §7 lists for it |
 | Languages | en 14 · hi 3 + 2 Hinglish · te 3 + 2 Tenglish (code-mixed cases are in Latin script); every non-English group is on both aliases (see "Comparing groups") |
-| Review | `manifest.json` → `"review": "pending"` until shesha has reviewed the hi, te and code-mixed prompts |
+| Review | `manifest.json` → `"review": "done"`: shesha reviewed the hi, te and code-mixed prompts on 2026-10-15 (a new version starts at `"pending"` again) |
 
 What it measures is the gateway, not answer quality: latency, timeouts, refusals, truncation,
 first-try validity of structured output, the one repair, tokens and cost. There are no expected
