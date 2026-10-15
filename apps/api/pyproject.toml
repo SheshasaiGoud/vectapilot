@@ -8,6 +8,8 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
+    # Exact pin (ADR 0006): the newest release at least 7 days old on install day (2026-10-14).
+    "anthropic==1.12.0",
     "asyncpg>=0.32.0",
     "fastapi>=0.143.0",
     "pydantic-settings>=2.15.0",
@@ -26,7 +28,9 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "coverage>=7.16.2",
-    "httpx>=0.28.1",
+    # Tests import `httpx2.MockTransport` (ADR 0006). The major version `anthropic` itself allows
+    # (`httpx2>=2,<3`); uv.lock pins the exact version it resolves.
+    "httpx2>=2.13.1,<3",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
@@ -37,11 +41,22 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-# pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify, async pitfalls, ruff-specific, bandit (security)
-select = ["E", "W", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "S"]
+# pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify, async pitfalls, ruff-specific, bandit
+# (security), banned imports (TID251, below)
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "S", "TID251"]
+
+# ADR 0006, One entry point: only the adapter imports the SDK, so SDK types and exceptions (an SDK
+# request holds the key header) never leave it. Banning `anthropic` also bans every submodule
+# (`from anthropic.types import …`); tests/gateway/test_anthropic_provider.py proves it.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"anthropic".msg = "only gateway/providers/anthropic.py may import the Anthropic SDK (ADR 0006)"
+# The same SDK objects, re-exported by the adapter's own imports.
+"vectapilot_api.gateway.providers.anthropic.anthropic".msg = "the Anthropic SDK stays in the adapter (ADR 0006)"
+"vectapilot_api.gateway.providers.anthropic.Message".msg = "the Anthropic SDK stays in the adapter (ADR 0006)"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"] # `assert` is how pytest works
+"src/vectapilot_api/gateway/providers/anthropic.py" = ["TID251"] # the one allowed importer
 
 [tool.mypy]
 strict = true
@@ -54,12 +69,7 @@ addopts = "-ra --strict-markers"
 markers = ["integration: needs real Postgres and Redis (set RUN_INTEGRATION=1)"]
 # An xfail test that unexpectedly passes is reported as a failure (see tests/test_readyz.py).
 xfail_strict = true
-filterwarnings = [
-    "error",
-    # Starlette 1.x prefers `httpx2` for TestClient; the human decided to stay on `httpx` for now
-    # (2026-10-12, see CLAUDE.md, Known issues), so this one deprecation warning is ignored.
-    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
-]
+filterwarnings = ["error"]
 
 # Coverage gate for gateway/ (ADR 0006): `make coverage` runs scripts/coverage_gate.py, which holds
 # the thresholds. tests/test_coverage_gate.py pins these settings, so change both together.

@@ -64,7 +64,8 @@ SDK's, ours, or both. Structured output: native `output_config.format`, or Pydan
 - **Settings.** Flat `VECTAPILOT_LLM_*`; the key is `VECTAPILOT_ANTHROPIC_API_KEY` (`SecretStr`),
   from the process environment only (in `.env` it stops startup). Fail fast: `test`/`ci` ⇒ fake
   only; `production` ⇒ not fake; anthropic ⇒ key required and none of `ANTHROPIC_API_KEY`,
-  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_LOG` set (the SDK reads them); deadline
+  `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_LOG`, `ANTHROPIC_CUSTOM_HEADERS` set
+  (the SDK reads them; the last one even overrides an explicit key, added in PR 5); deadline
   ≥ attempt timeout; bad catalog ⇒ stop.
 - **Exposure.** No HTTP route in M1. Paid calls are human-only: the CLI is fake unless `--live`,
   which needs `--max-usd` (≤ $1.00) and a typed confirmation; it stops before any call whose worst

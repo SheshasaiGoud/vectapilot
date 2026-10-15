@@ -107,6 +107,17 @@ def test_the_anthropic_provider_requires_an_api_key(key: str | None) -> None:
     )
 
 
+def test_the_refused_sdk_variables_are_adr_0006s_list() -> None:
+    # Pinned, so dropping one is a visible change (the parametrized test below reads this tuple).
+    assert ANTHROPIC_SDK_ENV_VARS == (
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_LOG",
+        "ANTHROPIC_CUSTOM_HEADERS",
+    )
+
+
 @pytest.mark.parametrize("name", ANTHROPIC_SDK_ENV_VARS)
 def test_the_anthropic_provider_refuses_sdk_variables(
     name: str, monkeypatch: pytest.MonkeyPatch

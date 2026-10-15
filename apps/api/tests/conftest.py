@@ -11,6 +11,7 @@ os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 os.environ.pop("ANTHROPIC_BASE_URL", None)
 os.environ.pop("ANTHROPIC_LOG", None)
+os.environ.pop("ANTHROPIC_CUSTOM_HEADERS", None)
 
 from collections.abc import Iterator
 from typing import Any, Final

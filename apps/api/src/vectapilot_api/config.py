@@ -15,10 +15,13 @@ ANTHROPIC_SDK_ENV_VARS: Final = (
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_LOG",
+    "ANTHROPIC_CUSTOM_HEADERS",
 )
 """Variables the Anthropic SDK reads by itself (ADR 0006). With the anthropic provider, none may be
-set: the key and the URL reach the client only from `Settings`, and `ANTHROPIC_LOG` could turn on
-transport logs (ADR 0007)."""
+set: the key and the URL reach the client only from `Settings`, `ANTHROPIC_LOG` could turn on
+transport logs (ADR 0007), and `ANTHROPIC_CUSTOM_HEADERS` is read even with an explicit key and
+sent after it, so it could replace the key or turn on beta features (anthropic 1.12.0
+`_client.py:685-692`, `_base_client.py:729-730`)."""
 
 # With PYDANTIC_SETTINGS_DEBUG set, pydantic-settings logs every raw source value (the API key and
 # the DSN passwords included) at DEBUG on this logger, before any validator runs. Pinned at WARNING
