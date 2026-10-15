@@ -1005,6 +1005,29 @@ async def test_build_gateway_closes_the_provider_when_the_body_fails(
 
 
 @pytest.mark.anyio
+async def test_build_gateway_uses_a_given_provider_and_never_builds_one(
+    monkeypatch: pytest.MonkeyPatch, read_records: ReadRecords
+) -> None:
+    # PR 8, D9: the measurement CLI's dry run hands in its scripted fake. Even with Settings that
+    # name the anthropic provider (and a key), no provider is built from them.
+    built: list[object] = []
+    monkeypatch.setattr(gateway_module, "build_provider", built.append)
+    monkeypatch.setattr(gateway_module, "AnthropicProvider", SpyAnthropicProvider)
+    settings = make_settings(
+        environment="local", llm_provider="anthropic", anthropic_api_key=CANARY_KEY
+    )
+    fake = FakeProvider([FakeReply()])
+
+    async with build_gateway(settings, provider=fake) as gateway:
+        await gateway.complete(request(alias="small"))
+
+    assert built == []
+    assert len(fake.calls) == 1
+    assert fake.closed is True  # closed on exit, like a provider it built
+    assert [r.outcome for r in read_records()] == [CallOutcome.OK]
+
+
+@pytest.mark.anyio
 async def test_build_gateway_builds_the_provider_last(monkeypatch: pytest.MonkeyPatch) -> None:
     # A retry policy that fails must not leave an HTTP client behind that nobody closes.
     built: list[FakeProvider] = []

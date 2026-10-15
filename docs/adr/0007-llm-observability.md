@@ -22,6 +22,40 @@ are in India and other countries (Q4b: which), and prompts may later hold health
   n ≥ 20, not per language or business; cache off. Labelled "synthetic prompts, single home network"
   with commit, dataset version, model ids, catalog version. Per-call latency is not compared with
   §6's message-to-reply p95 target; no target is claimed as met.
+  - **Where runs go (2026-10-15, shesha; `llm_cli.py`).** One directory per run. Live:
+    `evals/reports/<dataset>/<version>/<UTC start>-live/`, committed. Dry:
+    `evals/reports/tmp/<dataset>/<version>/<UTC start>-fake/`, git-ignored, never committed. Each
+    holds `summary.md`, `summary.json` and the summary's two inputs, `calls_made.jsonl` and
+    `llm_call_log.jsonl` (metadata only); a live summary is committed with both. The inputs are
+    written and flushed line by line as the run goes, each call listed before it is sent, so a run
+    cut short still shows every call that may have been billed.
+  - **Partial runs and the note (2026-10-15, shesha).** A run is partial only if it did not make
+    every planned call (stopped by the cost cap, `--max-calls`, an account error such as
+    `spend_limit`, `billing` or `auth_failed`, a bound miss, an error, or a kill). Cost-incomplete
+    calls do not make a run partial: they are reported as "k/n cost-incomplete" and the cost is
+    labelled a lower bound. Only a complete live run feeds the "what I measured" note: never a dry
+    run, a partial run, or a run that fails the record-count check (it writes no summary). As
+    built, also not with unreviewed prompts, uncommitted changes, or a dataset whose files are not
+    byte for byte those in the commit (outside the repository, untracked, git-ignored or changed).
+    A kill (a closed terminal, a second Ctrl-C) writes no summary: a failed run, its two inputs
+    kept as evidence only. One Ctrl-C (`interrupted`) is summarised, as partial if calls remained.
+    Decided 2026-10-15 (shesha): a run stopped by its last planned call (an account
+    error, a bound miss, an error or an interrupt on call n/n) made every call, so it is not
+    partial and exits 0, but it does not feed the note either.
+  - **Live-run stops (2026-10-15, shesha; `llm_cli.py`).** The `--max-usd` cap (≤ $1.00)
+    holds call by call: each call's worst case is reserved first and the run stops, partial,
+    before a call that would cross it, so the whole plan's worst case may exceed the cap. The worst
+    case uses a conservative prompt-token bound (1 token ≥ 1 byte, ≤ 200 tokens of overhead, the
+    highest input-side price), checked after every call; the first miss stops the run. The run
+    also stops after a call that ends in `spend_limit`, `billing` or `auth_failed` (no further call
+    can succeed) or `invalid_request` (our own request is wrong; the unverified prepaid-credit 400
+    lands here too), or that was answered from the `us` geo (billed 1.1×: a setup error, the
+    workspace default must be `global`; that one call can still cross the cap). A missing geo does
+    not stop the run: the call is cost-incomplete and keeps its reservation. The stop detail is
+    metadata only, never prompt or completion text. Full stop list: the PR 9 runbook in
+    `docs/plans/m1-pr-checks.md`. The cap is typed again at a terminal: this guards against
+    mistakes only. The real control is that the key never enters an agent's environment, and the
+    Console's monthly limit is the only cap across runs.
 - ⚠ **Trace span deferred to M3** (playbook deviation: due with the gateway); it may slip, at the
   latest to M9, only if the exporter or region (Q4b) is still open when M3 closes, recorded here.
   `trace_id` is the seam: a later exporter links records to spans without changing callers.
@@ -46,9 +80,10 @@ are in India and other countries (Q4b: which), and prompts may later hold health
   `SSL_CERT_FILE` and `SSL_CERT_DIR` (they replace the OS trust store) and `SSLKEYLOGFILE` (it
   writes TLS session keys to a file); messages name the variable, never its value. Proxies
   (`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, the macOS system proxy) keep working.
-- **Open (optional, undecided):** a `.claude/settings.json` deny rule for the key; it needs shesha's
-  own explicit yes. Until the Claude Code docs say otherwise, assume a Read deny rule does not stop
-  Bash `cat` or `env`: an extra layer, not the control.
+- **No `.claude/settings.json` deny rule for the key** (decided 2026-10-15, shesha). Until the
+  Claude Code docs say otherwise, assume a Read deny rule would not stop Bash `cat` or `env`; the
+  control stays that the key never enters an agent's environment (Key handling).
 
-**Consequences.** No dashboard in M1: stdout JSON lines and a committed summary. No Langfuse
-dependencies yet; OTLP stays vendor-neutral. Summaries rely on the record contract; span due in M3.
+**Consequences.** No dashboard in M1: stdout JSON lines and, per live run, one committed directory
+(the summary and its two inputs). No Langfuse dependencies yet; OTLP stays vendor-neutral.
+Summaries rely on the record contract; span due in M3.
