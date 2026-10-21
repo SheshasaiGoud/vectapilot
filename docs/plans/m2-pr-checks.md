@@ -127,6 +127,16 @@ live run, including every red proof, happens in CI or once Docker works).** Suit
   Telugu support; API region and data residency; whether a spend limit exists; limits without a
   payment method; the training opt-out is done (it needs a payment method and cannot be undone
   in the dashboard). Price and model id re-checked on the day.
+- **[PR 4 build] Also verify on the first live call:** the statuses Voyage sends match
+  `embeddings/voyage.py`'s table; whether a request-id header exists (none is read); the reported
+  `usage.total_tokens` stays under `base.token_upper_bound` (UTF-8 bytes + 8 per text, an assumed
+  bound used for batching).
+
+- **[decided 2026-10-21]** (shesha) Retrying failed embedding batches (via H2's
+  `call_with_retries`; every error carries `retryable` and `retry_after`) and the metadata-only
+  record per embedding call move to PR 5. Each chunk stores the model id Voyage returns (two ids
+  in one response are refused; search refuses mixed models). The token bound "UTF-8 bytes + 8
+  per text" is unverified: compare it with Voyage's reported tokens on the first live call.
 
 ## PR 5 — `m2/kb-endpoints` (diego)
 - `POST /v1/kb/documents` and `POST /v1/kb/reindex`, synchronous (background workers are M9),

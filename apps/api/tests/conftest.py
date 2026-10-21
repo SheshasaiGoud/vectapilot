@@ -6,7 +6,9 @@ import os
 # above imports.)
 os.environ["VECTAPILOT_ENVIRONMENT"] = "test"
 os.environ["VECTAPILOT_LLM_PROVIDER"] = "fake"
+os.environ["VECTAPILOT_EMBEDDINGS_PROVIDER"] = "fake"  # ADR 0008: tests never embed for real
 os.environ.pop("VECTAPILOT_ANTHROPIC_API_KEY", None)
+os.environ.pop("VECTAPILOT_VOYAGE_API_KEY", None)
 os.environ.pop("ANTHROPIC_API_KEY", None)
 os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 os.environ.pop("ANTHROPIC_BASE_URL", None)
@@ -43,6 +45,11 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "llm_backoff_cap_seconds": 8.0,
     "llm_max_repairs": 1,
     "anthropic_api_key": None,
+    "embeddings_provider": "fake",
+    "embeddings_model": None,
+    "embeddings_dimension": 1024,
+    "embeddings_timeout_seconds": 30.0,
+    "voyage_api_key": None,
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 
