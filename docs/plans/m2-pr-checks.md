@@ -109,6 +109,13 @@ live run, including every red proof, happens in CI or once Docker works).** Suit
 - Configurable, heading-aware chunking; the size comes from the business config and is tuned on
   the dev split only. Golden files per format, including PDF page numbers.
 
+- **[decided 2026-10-21]** (shesha) `documents.source_type` is the file format (markdown, html,
+  csv, pdf); the content kind from business-context §3.4 (faq, pricing, policy …) becomes its own
+  field when business configs list their sources (PR 5). Non-UTF-8 text and encrypted PDFs are
+  refused; DOCX later. Limits (10 MiB, 500 pages, 2M characters) and chunk defaults (1,200
+  characters, 150 overlap) are unmeasured starting values, tuned on the dev split only (PR 8).
+  No ADR for chunking: configuration, documented here and in the code.
+
 ## PR 4 — `m2/embeddings`
 - **[0008]** One embeddings module; only its adapter knows the Voyage URL. `httpx2` declared as a
   direct runtime dependency (`uv.lock` diff reviewed). Requests send `input_type` and

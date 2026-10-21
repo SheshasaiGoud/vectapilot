@@ -1,0 +1,135 @@
+{
+  "title": "Sunrise Paws Clinic FAQ",
+  "source_type": "markdown",
+  "page_count": null,
+  "content_sha256": "736878d74cd40642da41c1b4f10abf959c28051a44a0395c0d57240b8abeff74",
+  "sections": [
+    {
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ"
+      ],
+      "page": null,
+      "row": null,
+      "start": 0,
+      "end": 152
+    },
+    {
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Appointments",
+        "Booking"
+      ],
+      "page": null,
+      "row": null,
+      "start": 154,
+      "end": 532
+    },
+    {
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Appointments",
+        "Cancelling"
+      ],
+      "page": null,
+      "row": null,
+      "start": 534,
+      "end": 617
+    },
+    {
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Payments"
+      ],
+      "page": null,
+      "row": null,
+      "start": 619,
+      "end": 754
+    },
+    {
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Emergencies"
+      ],
+      "page": null,
+      "row": null,
+      "start": 756,
+      "end": 835
+    }
+  ],
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "content": "# Sunrise Paws Clinic FAQ\n\n> Synthetic test fixture: a fictional business, not real data.\n\nFrequently asked questions for a fictional veterinary clinic.",
+      "char_start": 0,
+      "char_end": 152,
+      "page": null,
+      "row": null,
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ"
+      ]
+    },
+    {
+      "chunk_index": 1,
+      "content": "## Appointments\n\n### Booking\n\nYou can book an appointment by phone or on the website. Same-day appointments are available for urgent cases when a slot is free. Please arrive ten minutes early so the front desk can update your pet's record and confirm the reason for the visit.",
+      "char_start": 154,
+      "char_end": 430,
+      "page": null,
+      "row": null,
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Appointments",
+        "Booking"
+      ]
+    },
+    {
+      "chunk_index": 2,
+      "content": "your pet's record and confirm the reason for the visit. Bring previous medical records, a list of current medicines and the vaccination card if you have one.",
+      "char_start": 375,
+      "char_end": 532,
+      "page": null,
+      "row": null,
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Appointments",
+        "Booking"
+      ]
+    },
+    {
+      "chunk_index": 3,
+      "content": "### Cancelling ###\n\nCancel at least 24 hours before the appointment to avoid a fee.",
+      "char_start": 534,
+      "char_end": 617,
+      "page": null,
+      "row": null,
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Appointments",
+        "Cancelling"
+      ]
+    },
+    {
+      "chunk_index": 4,
+      "content": "## Payments\n\nWe accept cards and UPI.\n\n```text\n# This line is inside a code block, not a heading\n```\n\n#hashtag is not a heading either.",
+      "char_start": 619,
+      "char_end": 754,
+      "page": null,
+      "row": null,
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Payments"
+      ]
+    },
+    {
+      "chunk_index": 5,
+      "content": "## Emergencies\n\nIf your pet has trouble breathing, call the emergency line now.",
+      "char_start": 756,
+      "char_end": 835,
+      "page": null,
+      "row": null,
+      "heading_path": [
+        "Sunrise Paws Clinic FAQ",
+        "Emergencies"
+      ]
+    }
+  ]
+}
