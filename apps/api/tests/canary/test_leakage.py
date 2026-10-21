@@ -14,11 +14,12 @@ leaks runs as the app role.
 """
 
 import secrets
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import Final
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -34,9 +35,11 @@ from tests.canary.catalog import (
 )
 from tests.canary.checks import Planted
 from tests.canary.read_paths import READ_PATHS, sql_on_every_business_table
+from tests.canary.write_paths import WRITE_PATHS
 from tests.conftest import integration
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import APP_ROLE, business_transaction
+from vectapilot_api.main import create_app
 
 pytestmark = [integration, pytest.mark.anyio]
 
@@ -49,9 +52,10 @@ BACKEND_PID = text("SELECT pg_backend_pid()")
 
 PLANT: Final = (
     text(
-        "INSERT INTO documents (business_id, source_id, version, title, source_type, language,"
-        " status, audience, content_sha256)"
-        " VALUES (:b, 'canary', '1', :canary, 'faq', 'en', 'approved', 'public', repeat('c', 64))"
+        "INSERT INTO documents (business_id, source_id, version, title, source_type,"
+        " content_kind, language, status, audience, content_sha256)"
+        " VALUES (:b, 'canary', '1', :canary, 'markdown', 'faq', 'en', 'approved', 'public',"
+        " repeat('c', 64))"
     ),
     text(
         "INSERT INTO chunks (business_id, document_id, chunk_index, content, embedding,"
@@ -279,6 +283,66 @@ async def test_no_read_path_shows_another_businesss_canary(
     outputs = await READ_PATHS[path](fresh_engine, mine)
 
     assert checks.canary_leaks(outputs, mine, other) == []
+
+
+# ── Writes through the API: never another business's rows, never without a business ────────
+
+
+@pytest.fixture
+def api() -> Iterator[TestClient]:
+    """The real app, as the app role (Settings from the environment, as in CI)."""
+    with TestClient(create_app(Settings())) as client:
+        yield client
+
+
+@pytest.mark.parametrize("path", sorted(WRITE_PATHS))
+@pytest.mark.parametrize("me", [0, 1], ids=["as a", "as b"])
+async def test_no_write_path_changes_another_businesss_rows(
+    fresh_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    api: TestClient,
+    me: int,
+    path: str,
+) -> None:
+    mine, other = planted[me], planted[1 - me]
+    other_before = await sql_on_every_business_table(fresh_engine, other)
+    mine_before = await sql_on_every_business_table(fresh_engine, mine)
+
+    response = WRITE_PATHS[path](api, mine.business_id)
+
+    assert response.is_success, response.text
+    assert await sql_on_every_business_table(fresh_engine, other) == other_before
+    # The positive control: the path really wrote, for its own business.
+    assert await sql_on_every_business_table(fresh_engine, mine) != mine_before
+
+
+@pytest.mark.parametrize("path", sorted(WRITE_PATHS))
+async def test_a_write_path_without_a_business_is_refused(
+    fresh_engine: AsyncEngine, planted: tuple[Planted, Planted], api: TestClient, path: str
+) -> None:
+    before = [await sql_on_every_business_table(fresh_engine, b) for b in planted]
+
+    response = WRITE_PATHS[path](api, None)
+
+    assert response.status_code == 400, response.text
+    assert [await sql_on_every_business_table(fresh_engine, b) for b in planted] == before
+
+
+async def test_red_proof_a_write_into_another_business_is_caught(
+    owner_engine: AsyncEngine, fresh_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    a, b = planted
+    before = await sql_on_every_business_table(fresh_engine, b)
+    # Acting as a through a role that skips RLS (the owner, a superuser here), with a filter that
+    # reaches b too: the write the protections exist to stop.
+    async with business_transaction(owner_engine, a.business_id) as connection:
+        assert await owner_is_superuser(connection), "needs an owner that skips RLS"
+        await connection.execute(
+            text("UPDATE chunks SET embedding_model = 'red-proof' WHERE business_id IN (:a, :b)"),
+            {"a": a.business_id, "b": b.business_id},
+        )
+
+    assert await sql_on_every_business_table(fresh_engine, b) != before
 
 
 @pytest.mark.xfail(

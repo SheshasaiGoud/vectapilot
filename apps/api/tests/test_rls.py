@@ -55,9 +55,10 @@ VISIBLE: Final = {
 }
 INSERT_BUSINESS = text("INSERT INTO businesses (business_id) VALUES (:b)")
 INSERT_DOCUMENT = text(
-    "INSERT INTO documents (business_id, source_id, version, title, source_type, language,"
-    " status, audience, content_sha256)"
-    " VALUES (:b, 'faq', '1', :title, 'faq', 'en', 'approved', 'public', repeat('a', 64))"
+    "INSERT INTO documents (business_id, source_id, version, title, source_type, content_kind,"
+    " language, status, audience, content_sha256)"
+    " VALUES (:b, 'faq', '1', :title, 'markdown', 'faq', 'en', 'approved', 'public',"
+    " repeat('a', 64))"
     " RETURNING id"
 )
 INSERT_CHUNK = text(

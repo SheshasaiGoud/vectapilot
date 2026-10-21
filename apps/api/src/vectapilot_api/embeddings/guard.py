@@ -6,7 +6,8 @@ over mixed vectors returns confident garbage. So each chunk stores the model id 
 
 - search (PR 6) calls `require_one_model` with the business's stored model ids and the query's
   `Embeddings.model` before it compares anything; H1's SQL also filters on `embedding_model`;
-- reindexing (PR 5) calls `needs_reindex` to decide whether a business must be re-embedded.
+- reindexing (PR 5, `kb/service.py`) re-embeds every chunk whose stored model id is not the
+  configured one (its SQL selects them; `needs_reindex` answers the same question for a set).
 
 A model change (a new `VECTAPILOT_EMBEDDINGS_MODEL`) therefore means a full reindex of the business,
 never mixed vectors. The dimension needs no check of its own: the column is `vector(1024)` and the

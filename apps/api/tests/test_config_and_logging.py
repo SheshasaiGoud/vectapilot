@@ -1,6 +1,8 @@
+import io
 import json
 import logging
 import os
+import sys
 from collections.abc import Callable
 
 import pytest
@@ -8,7 +10,7 @@ from fastapi import FastAPI
 from pydantic import ValidationError
 
 from vectapilot_api.config import Settings
-from vectapilot_api.log import JsonFormatter
+from vectapilot_api.log import DropQueryString, JsonFormatter, configure_logging
 
 CANARY = "canary-pw-7f3a"  # fake on purpose: a recognisable marker, not a real credential
 CANARY_DATABASE_URL = f"postgresql+asyncpg://u:{CANARY}-db@db.example:5432/app"
@@ -128,3 +130,35 @@ def test_json_formatter_writes_one_json_object_including_extras() -> None:
     assert data["logger"] == "vectapilot_api"
     assert data["request_id"] == "req-123"
     assert "\n" not in line
+
+
+def test_access_log_drops_the_query_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [])  # configure_logging fills this list; restored after
+    monkeypatch.setattr(root, "level", root.level)
+    stdout = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    configure_logging("INFO")
+    configure_logging("INFO")  # once per app: the filter must not stack up
+    access = logging.getLogger("uvicorn.access")
+    assert sum(isinstance(f, DropQueryString) for f in access.filters) == 1
+
+    # The same call uvicorn makes for every request.
+    path = "/v1/kb/documents?title=canary-title&content_kind=faq"
+    access.info('%s - "%s %s HTTP/%s" %d', "127.0.0.1:5123", "POST", path, "1.1", 201)
+
+    assert json.loads(stdout.getvalue())["message"] == (
+        '127.0.0.1:5123 - "POST /v1/kb/documents HTTP/1.1" 201'
+    )
+    assert "canary" not in stdout.getvalue()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [("127.0.0.1:5123", "GET", "/healthz", "1.1", 200), ("only", "two"), None],
+)
+def test_drop_query_string_leaves_other_records_alone(args: tuple[object, ...] | None) -> None:
+    record = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, "msg", args, None)
+
+    assert DropQueryString().filter(record) is True
+    assert record.args == args

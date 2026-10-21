@@ -142,6 +142,22 @@ live run, including every red proof, happens in CI or once Docker works).** Suit
 - `POST /v1/kb/documents` and `POST /v1/kb/reindex`, synchronous (background workers are M9),
   scoped by `X-Business-Id`. Re-ingesting the same document version is idempotent (test).
 
+**Built (2026-10-21, Diego; Postgres parts not yet run: Docker is unreachable, they run in CI).**
+- Request format: the file is the raw body, `Content-Type` = its format, metadata in query
+  parameters (`kb/router.py` says why: no `python-multipart`, no base64, size checked while
+  streaming). Same bytes under a stored version ⇒ 200 and no embedding; other bytes ⇒ 409.
+- Migration 0003: `documents.content_kind` (§3.4 list, CHECK constraint, no default).
+- `embeddings/runner.py`: per-batch retries through H2's `call_with_retries` (the gateway's
+  retry policy) and one `embedding_call` log record per batch, metadata only.
+- Canary: `tests/canary/write_paths.py` (`WRITE_PATHS`) with
+  `test_no_write_path_changes_another_businesss_rows`, `test_a_write_path_without_a_business_is_refused`
+  and `test_red_proof_a_write_into_another_business_is_caught`.
+- **[decided 2026-10-21]** (shesha) Content kinds accepted as built (faq, service_list,
+  product_catalogue, pricing, appointment_policy, other). Same-bytes re-upload is a no-op,
+  embedding retries reuse the `llm_*` retry settings, and reindex holds a document's chunks in
+  memory (fine at pilot sizes). Query strings carry customer text, so `log.py` strips them from
+  uvicorn's access log (`DropQueryString`, tested).
+
 ## H1 — `m2/retrieval` (`[HAND-WRITE]`, shesha)
 - ananya provides the interface, tests and a short guide; shesha writes top-k exact vector search
   with the `business_id` filter inside the SQL (vector only; fusion is M3). The canary suite
