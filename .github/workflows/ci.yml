@@ -25,7 +25,10 @@ jobs:
     # Real Postgres (with pgvector) and Redis for the integration tests.
     services:
       postgres:
-        image: pgvector/pgvector:pg18
+        # Pinned by digest (ADR 0009, M2 PR 2): a tag can be re-pointed, a digest cannot. The
+        # multi-arch index digest of pgvector/pgvector:pg18 (pushed 2026-10-01), read 2026-10-21
+        # from Docker Hub's tag API and the registry's manifest endpoint (they agree). Bump by hand.
+        image: pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
         env:
           POSTGRES_USER: vectapilot
           POSTGRES_PASSWORD: vectapilot-ci # throwaway database that lives only inside this job
@@ -70,7 +73,11 @@ jobs:
         run: uv run vectapilot-db-provision
       # Every test, integration included (RUN_INTEGRATION=1 above), recording coverage.
       - name: Tests (under coverage)
-        run: uv run coverage run -m pytest
+        run: uv run coverage run -m pytest --junit-xml="$RUNNER_TEMP/pytest.xml"
+      # The canary leakage suite (tests/canary/, ADR 0009) is a hard gate: fail if none of it ran
+      # or any of it was skipped, read from pytest's own report.
+      - name: Canary gate (cross-business isolation suite ran)
+        run: uv run python scripts/canary_gate.py "$RUNNER_TEMP/pytest.xml"
       # Same script as `make coverage` (ADR 0006): gateway/ combined >= 95.00 %, branches >= 95 %.
       - name: Gateway coverage gate
         run: uv run python scripts/coverage_gate.py

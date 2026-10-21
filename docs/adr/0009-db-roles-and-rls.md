@@ -61,3 +61,14 @@ canary suite grows to cover them as they arrive.
   ADR 0005's `POSTGRES_PASSWORD`). CI: a throwaway `vectapilot-app-ci`. Production: M10.
 - Limit: locally and in CI the owner is the bootstrap superuser, which skips RLS even with FORCE.
   A non-superuser owner, and an owner allowed to create roles on managed Postgres, are M10 work.
+
+**Canary suite (M2 PR 2, 2026-10-21; Zara; the key exception is a proposal for shesha).**
+- `apps/api/tests/canary/`: the business tables are read from `pg_catalog`, never listed. Beyond
+  RLS + FORCE it checks what RLS does not cover: unique/exclusion keys and foreign keys are
+  enforced across all rows, so they must lead with or pair `business_id`; a view must use
+  `security_invoker`; a materialized view cannot be protected at all.
+- Proposal: a primary key on one `uuid` column defaulting to `gen_random_uuid()` is allowed
+  without `business_id` (no caller can guess a value to collide with), only while no API accepts
+  a client-chosen id.
+- Each check breaks its protection once per CI run in a rolled-back transaction and must turn
+  red; `scripts/canary_gate.py` fails CI when the suite did not run.

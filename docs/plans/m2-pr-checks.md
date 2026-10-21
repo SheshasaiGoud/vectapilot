@@ -63,6 +63,45 @@ eval set · real customer data · the admin screen.
   migration 0002's downgrade must not drop an app role that existed before it; `RESET
   app.business_id` when a connection returns to the pool.
 
+**Built (2026-10-21, Zara; not yet run against Postgres: Docker is unreachable on the Mac, so the
+live run, including every red proof, happens in CI or once Docker works).** Suite:
+`apps/api/tests/canary/` (`test_leakage.py`; decisions in `checks.py`, queries in `catalog.py`).
+- Postgres service pinned to `pgvector/pgvector:pg18@sha256:2358fcba…bc11` (read 2026-10-21).
+  CI fails if no canary test passed or one was skipped: `scripts/canary_gate.py` reads pytest's
+  JUnit report (xfail allowed).
+- Tables come from `pg_catalog` (every relation with `business_id`; `information_schema` hides
+  what the reader may not see): `test_the_catalog_finds_the_business_tables`. RLS + FORCE:
+  `test_every_business_table_has_rls_enabled_and_forced` (views need `security_invoker`;
+  materialized views fail). Policy exactly ADR 0009's, no looser permissive one:
+  `test_every_policy_is_exactly_the_business_policy`. Unique/exclusion keys:
+  `test_every_unique_key_starts_with_business_id`. Foreign keys into business tables pair
+  `business_id`: `test_foreign_keys_into_business_tables_keep_the_business`. App role:
+  `test_the_suite_runs_as_an_app_role_that_cannot_skip_rls`.
+- Reads (SQL): `test_no_business_means_no_rows_on_a_{fresh,reused_pooled}_connection`,
+  `test_a_business_sees_only_its_own_rows_on_a_{fresh,reused_pooled}_connection`. **Extension
+  point:** vector search (H1) and API routes (PR 5/6) are not built yet; each adds its path to
+  `READ_PATHS` in `tests/canary/read_paths.py`, which
+  `test_no_read_path_shows_another_businesss_canary` runs for both businesses.
+- Proved on purpose, live in CI (each breaks one thing in a rolled-back transaction):
+  `test_red_proof_dropping_force`, `…_a_unique_key_without_business_id`, `…_an_open_extra_policy`,
+  `…_an_app_role_that_owns_a_table`, `…_a_role_that_skips_rls_leaks_the_canary` (connecting as
+  the owner). Without Postgres: `tests/test_canary_checks.py`.
+- Nit 2: migration 0002 marks the role it creates (a role comment) and the downgrade drops only a
+  marked role: `test_the_downgrade_drops_only_a_role_the_upgrade_created`. 0002 was edited after
+  merge (no deployed database; an older local one keeps its role on downgrade).
+- Nit 3, **not done, for shesha:** a pool `RESET` must run *after* the pool's rollback (a RESET
+  inside the rolled-back transaction is undone) and inside SQLAlchemy's async greenlet; it can't be
+  verified here. `business_transaction` never sets a session value. The gap is pinned by
+  `test_a_session_level_business_does_not_survive_the_pool` (`xfail(strict=True)`).
+- Exception for shesha to confirm: a primary key on one `uuid` column defaulting to
+  `gen_random_uuid()` passes the key check (unguessable), valid only while no API accepts a
+  client-chosen id. Alternative: `PRIMARY KEY (business_id, id)` in a new migration.
+
+- **[decided 2026-10-21]** (shesha) The pool-return `RESET app.business_id` waits until it can be
+  proven against Postgres (pinned by a strict-xfail test); random-uuid primary keys stay exempt
+  from the unique-key rule; Redis and the `compose.yaml` images get pinned by digest in a later
+  small PR (with M10's deployment hardening at the latest).
+
 ## PR 3 — `m2/ingestion` (ananya)
 - Loaders for Markdown, HTML and CSV (standard library) and PDF (`pypdf`, page by page; needs
   shesha's rule-11 yes on install day). Every chunk carries document, version, page (if any) and

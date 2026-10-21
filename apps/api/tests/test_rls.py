@@ -1,7 +1,7 @@
 """Row-level security and the database roles, against real Postgres (ADR 0009). Integration only.
 
 Two fictional businesses are seeded per test, each with its own random canary string, and removed
-afterwards. The full canary suite (every read path, a catalog-wide RLS check) is M2 PR 2.
+afterwards. The catalog-wide canary suite (every business table and read path) is tests/canary/.
 
 The owner (VECTAPILOT_MIGRATION_DATABASE_URL) is the stack's bootstrap superuser, locally and in
 CI: it seeds the registry and creates throwaway roles. Everything under test runs as the app role.
