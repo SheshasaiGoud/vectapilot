@@ -205,9 +205,14 @@ async def test_a_business_cannot_write_another_businesss_rows(
     assert "violates foreign key constraint" in await refused(
         app_engine, me, INSERT_CHUNK, b=me, document_id=b.document_id, content="x", embedding=VECTOR
     )
-    # Moving A's row to B: refused by WITH CHECK.
-    move = text("UPDATE llm_calls SET business_id = :other WHERE business_id = :b")
+    # Moving A's row to B: refused by WITH CHECK (documents: the app role may UPDATE them).
+    move = text("UPDATE documents SET business_id = :other WHERE business_id = :b")
     assert RLS_REFUSED in await refused(app_engine, me, move, other=b.business_id, b=me)
+    # llm_calls is append-only: the app role has no UPDATE on it at all, checked before RLS.
+    rewrite = text("UPDATE llm_calls SET business_id = :other WHERE business_id = :b")
+    assert "permission denied for table llm_calls" in await refused(
+        app_engine, me, rewrite, other=b.business_id, b=me
+    )
 
     # Changing or deleting B's rows: they are invisible, so nothing matches.
     async with business_transaction(app_engine, me) as connection:
