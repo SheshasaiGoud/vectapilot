@@ -43,7 +43,9 @@ jobs:
     env:
       # alembic runs as ci; pytest's conftest pins test + fake before importing the app (ADR 0006)
       VECTAPILOT_ENVIRONMENT: ci
-      VECTAPILOT_DATABASE_URL: postgresql+asyncpg://vectapilot:vectapilot-ci@localhost:5432/vectapilot
+      # ADR 0009: the API and the tests log in as vectapilot_app; migrations run as the owner.
+      VECTAPILOT_DATABASE_URL: postgresql+asyncpg://vectapilot_app:vectapilot-app-ci@localhost:5432/vectapilot
+      VECTAPILOT_MIGRATION_DATABASE_URL: postgresql+asyncpg://vectapilot:vectapilot-ci@localhost:5432/vectapilot
       VECTAPILOT_REDIS_URL: redis://localhost:6379/0
       RUN_INTEGRATION: "1"
     steps:
@@ -63,6 +65,9 @@ jobs:
       - run: uv run mypy
       - name: Apply database migrations
         run: uv run alembic upgrade head
+      # Migration 0002 creates vectapilot_app without a password; this sets it from the URL above.
+      - name: Give the app role its login
+        run: uv run vectapilot-db-provision
       # Every test, integration included (RUN_INTEGRATION=1 above), recording coverage.
       - name: Tests (under coverage)
         run: uv run coverage run -m pytest

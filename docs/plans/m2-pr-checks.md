@@ -40,11 +40,14 @@ eval set · real customer data · the admin screen.
 - The business registry table (ids validated as `BusinessId`) and `llm_calls` with RLS, carried
   over from ADR 0006 ("Deferred: `llm_calls` table + RLS, registry check (M2)").
 - **[0009]** API and Alembic use different database URLs; startup fails if the app role is a
-  superuser or has `BYPASSRLS` (one test each). No password in git.
+  superuser, has `BYPASSRLS` or can act as a relation's owner (one test each). No password in git.
+- CI fails the session when `GITHUB_ACTIONS=true` and `RUN_INTEGRATION` is not `1` (Zara).
 - **[note]** How the role and its password are created (init script or migration) is settled here.
 - **[0009]** One helper opens a transaction and runs `set_config(..., true)` first; the
   `X-Business-Id` dependency validates with `BusinessId`, gives the same error for unknown and
-  malformed ids, and returns 400 in `production`.
+  malformed ids, and returns 400 outside the `local`/`test`/`ci` allowlist.
+- **Before M10** (Zara): `db_provision.py` builds the SCRAM-SHA-256 verifier client-side (stdlib
+  `hashlib`/`hmac`) and sends that instead of the plaintext password.
 
 ## PR 2 — `m2/canary-suite-ci`
 - **[0009]** CI `api` job gains a Postgres service (pgvector image pinned by digest) and runs the
@@ -52,6 +55,13 @@ eval set · real customer data · the admin screen.
   business ⇒ 0 rows (fresh connection and reused pooled connection); app role attributes; catalog
   check that every table with `business_id` has RLS and `FORCE`.
 - Proved on purpose: dropping `FORCE`, or connecting as the owner, turns the suite red.
+- **[PR 1 CI]** Catalog check: every UNIQUE constraint and unique index on a business-owned table
+  starts with `business_id`. Uniqueness is enforced across all rows, ignoring RLS, so a key
+  without it lets one business learn from an error that another's row exists (found in PR 1's
+  first CI run on `chunks`, fixed 2026-10-21).
+- Recheck Zara's PR 1 nits: find the tables from `information_schema` (not a hard-coded list);
+  migration 0002's downgrade must not drop an app role that existed before it; `RESET
+  app.business_id` when a connection returns to the pool.
 
 ## PR 3 — `m2/ingestion` (ananya)
 - Loaders for Markdown, HTML and CSV (standard library) and PDF (`pypdf`, page by page; needs

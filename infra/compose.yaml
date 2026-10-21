@@ -2,12 +2,18 @@
 # Start it from the repository root with `make up`.
 #
 # Ports are published on 127.0.0.1 only, so nothing here is reachable from other devices on
-# your network. The default password is for this local stack only; override it in infra/.env.
+# your network. The default passwords are for this local stack only; override them in infra/.env.
+#
+# Two database roles (ADR 0009): `vectapilot` owns the schema and runs migrations; the API logs in
+# as `vectapilot_app` (no superuser, no BYPASSRLS, owns nothing). Migration 0002 creates that role
+# without a password; `vectapilot-db-provision` then sets it from the API's URL below.
 name: vectapilot
+
+x-app-database-url: &app-database-url postgresql+asyncpg://vectapilot_app:${VECTAPILOT_APP_DB_PASSWORD:-vectapilot-app-dev}@postgres:5432/vectapilot
 
 x-api-environment: &api-environment
   VECTAPILOT_ENVIRONMENT: local
-  VECTAPILOT_DATABASE_URL: postgresql+asyncpg://vectapilot:${POSTGRES_PASSWORD:-vectapilot-dev}@postgres:5432/vectapilot
+  VECTAPILOT_DATABASE_URL: *app-database-url
   VECTAPILOT_REDIS_URL: redis://redis:6379/0
   VECTAPILOT_LOG_LEVEL: ${VECTAPILOT_LOG_LEVEL:-INFO}
 
@@ -37,13 +43,16 @@ services:
       timeout: 3s
       retries: 10
 
-  # Applies database migrations once, then exits. The API only starts if this succeeds.
+  # Applies database migrations as the owner, gives the app role its login, then exits. The API
+  # only starts if this succeeds. Only this job holds the owner's URL; the API never gets it.
   migrate:
     # Reuses the image built by the `api` service; building it here too would race.
     image: vectapilot-api:dev
     pull_policy: never
-    command: ["alembic", "upgrade", "head"]
-    environment: *api-environment
+    command: ["sh", "-c", "alembic upgrade head && vectapilot-db-provision"]
+    environment:
+      VECTAPILOT_MIGRATION_DATABASE_URL: postgresql+asyncpg://vectapilot:${POSTGRES_PASSWORD:-vectapilot-dev}@postgres:5432/vectapilot
+      VECTAPILOT_DATABASE_URL: *app-database-url
     depends_on:
       postgres:
         condition: service_healthy

@@ -81,7 +81,8 @@ API (run inside `apps/api/`, Python 3.12 managed by uv):
   (a cap per run, ≤ $1.00, typed again at a terminal) is shesha's alone: agents never pass `--live`.
 - `RUN_INTEGRATION=1 uv run pytest` — also run tests against real Postgres/Redis
 - `uv run alembic upgrade head` · `uv run alembic revision -m "..." --rev-id 000N` — migrations
-  (database URL comes from Settings / `apps/api/.env`, never from alembic.ini)
+  (as the owner role, from `VECTAPILOT_MIGRATION_DATABASE_URL` in Settings / `apps/api/.env`, never
+  from alembic.ini); the API itself connects as `vectapilot_app` (ADR 0009)
 
 Team site (run inside `apps/web/`):
 - `npm run dev` — local dev server at http://localhost:3000

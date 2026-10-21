@@ -18,7 +18,7 @@ os.environ.pop("SSL_CERT_FILE", None)
 os.environ.pop("SSL_CERT_DIR", None)
 os.environ.pop("SSLKEYLOGFILE", None)
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any, Final
 
 import pytest
@@ -54,11 +54,32 @@ def make_settings(**overrides: Any) -> Settings:
 
 UNREACHABLE_SETTINGS = make_settings()
 
+
+def runs_integration(environ: Mapping[str, str]) -> bool:
+    return environ.get("RUN_INTEGRATION") == "1"
+
+
 # Integration tests talk to real Postgres/Redis: CI provides them; locally run `make up` first.
 integration = pytest.mark.skipif(
-    os.environ.get("RUN_INTEGRATION") != "1",
+    not runs_integration(os.environ),
     reason="needs real Postgres + Redis; set RUN_INTEGRATION=1",
 )
+
+CI_WITHOUT_INTEGRATION: Final = (
+    "GITHUB_ACTIONS=true but RUN_INTEGRATION is not 1: CI would pass with every database test"
+    " skipped. Set RUN_INTEGRATION=1 in the workflow."
+)
+
+
+def integration_skipped_in_ci(environ: Mapping[str, str]) -> bool:
+    """On GitHub Actions the integration tests must run: a skip there would look like a pass."""
+    return environ.get("GITHUB_ACTIONS") == "true" and not runs_integration(environ)
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """Stop the whole run, before collection, when CI would skip the integration tests."""
+    if integration_skipped_in_ci(os.environ):
+        pytest.exit(CI_WITHOUT_INTEGRATION, returncode=pytest.ExitCode.USAGE_ERROR)
 
 
 @pytest.fixture
