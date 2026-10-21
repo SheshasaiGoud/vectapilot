@@ -13,8 +13,11 @@ ADR 0009 (roles and RLS), ADR 0004 (isolation), ADR 0008 (one embedding model id
 - `businesses` is the registry: its key *is* the business id, so it is filtered like the rest and
   the app can only see the business it named.
 
-Roles belong to the whole Postgres server, not one database: the downgrade drops the role, which
-fails loudly if another database on the same server still grants it anything.
+Roles belong to the whole Postgres server, not one database. The upgrade marks a role it creates
+(a comment, `CREATED_HERE`); the downgrade drops the role only when it carries that mark, so a role
+that existed before this migration is left as it was found (M2 PR 2). Dropping fails loudly if
+another database on the same server still grants it anything. A database migrated before the mark
+existed (2026-10-21) keeps its role on downgrade: the safe direction.
 
 Revision ID: 0002
 Revises: 0001
@@ -35,6 +38,7 @@ APP_ROLE: Final = "vectapilot_app"
 """Written out here (migrations are frozen in time); tests check it equals `db.APP_ROLE`."""
 
 BUSINESS_TABLES: Final = ("businesses", "documents", "chunks", "llm_calls")
+CREATED_HERE: Final = "created by vectapilot migration 0002"
 CURRENT_BUSINESS: Final = "nullif(current_setting('app.business_id', true), '')"
 
 # One statement per op.execute: asyncpg sends each through the extended protocol, which takes one.
@@ -144,26 +148,48 @@ GRANTS: Final = (
 )
 
 
-def upgrade() -> None:
-    # Created only if missing (roles are server-wide); an existing one must already be safe: this
-    # refuses instead of altering it, since only a superuser may change SUPERUSER or BYPASSRLS.
-    # S608: the only value formatted in is the constant APP_ROLE, never input.
-    op.execute(
-        f"""
+def create_role_sql(role: str) -> str:
+    """Create `role` NOLOGIN if missing, marked `CREATED_HERE`; refuse an existing unsafe one.
+
+    Created only if missing (roles are server-wide); an existing one must already be safe: this
+    refuses instead of altering it, since only a superuser may change SUPERUSER or BYPASSRLS.
+    A function of the role name so a test can run it on a throwaway role. S608: `role` is the
+    constant APP_ROLE (or a test's generated name), never input.
+    """
+    return f"""
         DO $$
         BEGIN
-            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{APP_ROLE}') THEN
-                CREATE ROLE {APP_ROLE} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{role}') THEN
+                CREATE ROLE {role} NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE
                     NOREPLICATION NOINHERIT;
+                COMMENT ON ROLE {role} IS '{CREATED_HERE}';
             END IF;
             IF EXISTS (SELECT FROM pg_catalog.pg_roles
-                       WHERE rolname = '{APP_ROLE}' AND (rolsuper OR rolbypassrls)) THEN
-                RAISE EXCEPTION 'role {APP_ROLE} exists with SUPERUSER or BYPASSRLS';
+                       WHERE rolname = '{role}' AND (rolsuper OR rolbypassrls)) THEN
+                RAISE EXCEPTION 'role {role} exists with SUPERUSER or BYPASSRLS';
             END IF;
         END
         $$
         """  # noqa: S608
-    )
+
+
+def drop_role_sql(role: str) -> str:
+    """Drop `role` only if `create_role_sql` created it (it carries the `CREATED_HERE` mark)."""
+    return f"""
+        DO $$
+        BEGIN
+            IF shobj_description(
+                   (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = '{role}'), 'pg_authid'
+               ) = '{CREATED_HERE}' THEN
+                DROP ROLE {role};
+            END IF;
+        END
+        $$
+        """  # noqa: S608
+
+
+def upgrade() -> None:
+    op.execute(create_role_sql(APP_ROLE))
     for statement in CREATE_TABLES:
         op.execute(statement)
     for table in BUSINESS_TABLES:
@@ -181,4 +207,4 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP TABLE llm_calls, chunks, documents, businesses")
     op.execute(f"REVOKE USAGE ON SCHEMA public FROM {APP_ROLE}")
-    op.execute(f"DROP ROLE IF EXISTS {APP_ROLE}")
+    op.execute(drop_role_sql(APP_ROLE))
