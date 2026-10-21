@@ -24,7 +24,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from vectapilot_api.config import MigrationSettings
 from vectapilot_api.db import APP_ROLE
 
-_ALTER_ROLE: Final = text("SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :role, :password)")
+# format() takes arguments of any type, so Postgres cannot infer a bind parameter's type there:
+# without the casts it refuses the query ("could not determine data type of parameter $1").
+_ALTER_ROLE: Final = text(
+    "SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L',"
+    " CAST(:role AS text), CAST(:password AS text))"
+)
 
 
 class ProvisionError(RuntimeError):
@@ -56,7 +61,9 @@ async def set_login_password(engine: AsyncEngine, role: str, password: str) -> N
             # bind parameter.
             await connection.exec_driver_sql(result.scalar_one())
     except (OSError, SQLAlchemyError) as error:
-        reason = type(error).__name__
+        # The SQLSTATE is a five-character code from Postgres: safe to show, never the statement.
+        sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
+        reason = type(error).__name__ + (f", SQLSTATE {sqlstate}" if sqlstate else "")
         raise ProvisionError(f"could not set the password of {role} ({reason})") from None
 
 
