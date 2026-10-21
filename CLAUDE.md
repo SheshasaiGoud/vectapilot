@@ -96,11 +96,12 @@ Team site (run inside `apps/web/`):
 ```
 .claude/agents/      virtual teammates (Claude Code subagents)
 apps/api/            FastAPI service (uv project): config, JSON logging, /healthz, /readyz,
-                     Alembic migrations, Dockerfile
+                     Alembic migrations, Dockerfile, LLM gateway, measurement CLI
 apps/web/            Next.js — team site now; customer widget + staff dashboard later
 docs/adr/            architecture decision records
 docs/learning/       guides for [HAND-WRITE] tasks
 docs/plans/          per-PR acceptance checks for the current milestone
+docs/notes/          shesha's own write-ups (e.g. M1's "what I measured")
 evals/               datasets (synthetic) and committed live measurement runs; evals/reports/tmp/
                      holds dry runs (git-ignored)
 .github/workflows/   ci.yml (lint, types, tests, image build) · deploy-site.yml (GitHub Pages)
@@ -130,25 +131,19 @@ Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
   now (all eval data labelled synthetic), row-level-security isolation, config files via PRs (admin
   screen later), regions India + other countries. Still open: `docs/business-context.md` §9.
   Recommended: start looking for one real pilot business now (needed for credible M11 results).
-- **M1 (LLM gateway) — plan approved 2026-10-14** (ADR 0006, 0007), ~18 h / ~1.5 weeks.
-  `[HAND-WRITE]` by shesha, each with an explain-back: H1 `cost_usd`, H2 retry with backoff,
-  H3 `latency_summary`. Stuck protocol: time-box H1 2 h, H2 3 h → hint ladder (guide, per-test hint,
-  pseudo-code, pairing) → extend M1 or cut PR 8's scope; never quiet delegation.
-  Order: A ∥ 1 → 2 → (H1 ∥ H2 ∥ 3 → {4, 5}) → 6 → 7 → (H3 ∥ 8) → 9. A: hide secrets in config
-  errors · 1: ADRs · 2: types, stubs, guide · 3: settings, catalog, fake provider · 4: coverage gate ·
-  5: Anthropic adapter · 6: `complete()` · 7: structured output + cache hook · 8: measurement CLI +
-  smoke dataset · 9: shesha's live run, "what I measured" note, quiz. Each PR's acceptance
-  checks: [`docs/plans/m1-pr-checks.md`](docs/plans/m1-pr-checks.md).
-  Done: 1 (#8), A (#9), 2 (#10), 3 (#11), 4 (#12), 5 (#13), H1 (#14), H2 (#15), 6 (#16), 7 (#17),
-  H3; 8 in review. H1, H2 and H3 (`latency_summary`) implemented by Claude at shesha's request
-  (2026-10-15); shesha's explain-backs pending. Next: shesha's live run (9), runbook in
-  `docs/plans/m1-pr-checks.md`, PR 9, "Live run (shesha only)".
-  Pending, shesha personally: new personal Anthropic org, dedicated workspace ($10/month limit,
-  default inference geo `global`), key, price check on the day.
+- **M1 (LLM gateway) — code complete, 2026-10-21** (ADR 0006, 0007). PRs #8 ADRs · #9 config
+  secrets · #10 types + stubs · #11 settings, catalog, fake provider · #12 coverage gate ·
+  #13 Anthropic adapter · #14 H1 `cost_usd` · #15 H2 retry · #16 `complete()` · #17 structured
+  output + cache hook · #18 H3 `latency_summary` · #19 measurement CLI + smoke dataset ·
+  #20 `/readyz` note · #21 smoke prompt review. H1–H3 implemented by Claude at shesha's request
+  (2026-10-15); H1 explain-back passed 2026-10-21 (one correction: Decimal vs float).
+- **M1 remaining, shesha only:** the live run (runbook: `docs/plans/m1-pr-checks.md`, PR 9, "Live
+  run (shesha only)", incl. account, workspace and price check); the "what I measured" note
+  (skeleton: `docs/notes/m1-what-i-measured.md`); H2 and H3 explain-backs; close-out quiz.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
-  handle the Anthropic key. The key (`VECTAPILOT_ANTHROPIC_API_KEY`) never sits anywhere in the repo
-  tree (including `apps/api/.env`), a shell profile or history: shesha enters it with `read -s` in a
-  separate terminal that never runs Claude Code or Cursor, and closes that terminal after the run.
+  handle the key. It never sits in the repo tree (`.env` included), a shell profile or history:
+  shesha enters it with `read -s` in a separate terminal without Claude Code or Cursor, then closes it.
+- **Next: M2 planning after close-out** (`ananya-rag`, planned with `maya-tech-lead`).
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -209,12 +204,19 @@ Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
   `Exception` but never `BaseException` (cancellation), and why the checks are keyed by name.
 - Why third-party GitHub Actions are pinned to a commit SHA, and how PR 1's first CI run failed
   (`setup-uv@v10` did not exist — verify refs with `gh api repos/<owner>/<repo>/commits/<ref>`).
-- Why the gateway error is raised after the `except` block (`__context__` vs `__cause__`), and why
-  the Anthropic client never follows redirects (`x-api-key` survives a cross-origin redirect).
-- Gateway time limits: an attempt timeout nested in the whole-call deadline; `.expired()` tells a
-  scope's own `TimeoutError` from one the provider raised; why a caller's cancel always wins.
-- Why every logical call writes exactly one `llm_call` record (pre-call rejections included), why
-  the gateway logger is pinned at INFO, and why 100 % coverage did not prove the cost sum.
-- Structured-output repair: a fresh request whose feedback names only schema locations and
-  Pydantic's own error types (a closed list) — how a model-written key or error type could leak.
-- Response cache: why it fails open, why both the key and the stored value carry `business_id`.
+- M1 · H1 `cost_usd`: why `Decimal`, never float; why priced by the *answering* model; which
+  tokens decide the long-prompt tier.
+- M1 · H2 retry: capped full-jitter backoff; only `retryable` errors retried; a Retry-After above
+  the cap or a wait past the deadline raises; why `CancelledError` is never caught.
+- M1 · time limits: attempt timeout inside the whole-call deadline; `.expired()` tells a scope's own
+  `TimeoutError` from a raised one; why a caller's cancel always wins.
+- M1 · adapter: errors raised outside `except` (`__context__` vs `__cause__`); redirects never
+  followed (`x-api-key` survives a cross-origin redirect); SDK retries off (one retry layer).
+- M1 · one metadata-only `llm_call` record per logical call (pre-call rejections included); logger
+  pinned at INFO; why 100 % coverage did not prove the cost sum.
+- M1 · structured repair names only schema locations and Pydantic's own error types (how output
+  text could leak otherwise); the cache fails open and carries `business_id` in key and value.
+- M1 · H3 + measurement: inclusive p95 only at n ≥ 20 distinct prompts; timed-out calls kept;
+  per-call latency never compared with the §6 target.
+- M1 · live cap: worst-case reservation before each call; the typed cap only catches mistakes (the
+  real control is the key never reaching an agent); `summary.md`'s status line, not exit 0, decides.

@@ -1,9 +1,14 @@
 # M1 — acceptance checks per PR
 
+> **Status (2026-10-21):** steps A, 1–8 and H1–H3 are merged (GitHub PRs #8–#21, listed in CLAUDE.md,
+> Current status). Only PR 9 remains, and it is shesha's alone: the live run below, the
+> "what I measured" note (`docs/notes/m1-what-i-measured.md`) and the H2/H3 explain-backs.
+> This file stays after M1 as the record of what each PR had to prove (shesha, 2026-10-21).
+
 ADRs 0006 (LLM gateway) and 0007 (LLM observability) record only decisions, reasons, playbook
 deviations and dated sources. This file holds how each M1 PR must implement or prove those
 decisions; each PR copies its section into its own acceptance check and ticks it off.
-"PR A, 2–9" are the M1 plan's step numbers (order in CLAUDE.md, Current status), not GitHub
+"PR A, 2–9" are the M1 plan's step numbers (the headings below), not GitHub
 pull-request numbers. Tags: **[0006]** / **[0007]** = moved out of that ADR · **[plan]** = from the
 approved M1 plan (2026-10-14), never in an ADR · **[review]** = added by the ADR review
 (2026-10-14) · **[note]** = Maya's note, to be resolved in that PR (not a decision).
