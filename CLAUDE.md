@@ -118,6 +118,8 @@ Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
 - [ADR 0005](docs/adr/0005-local-stack-docker-compose.md) — local stack with Docker Compose; no Langfuse in M0
 - [ADR 0006](docs/adr/0006-llm-gateway.md) — LLM gateway: the only path to a model; `anthropic` 1.x, gateway-owned retries and deadlines, Decimal cost by answering model, 95 % combined + branch-only coverage gate
 - [ADR 0007](docs/adr/0007-llm-observability.md) — LLM observability: metadata-only `llm_call` record; trace span in M3; no India API region; key never in the repo
+- [ADR 0008](docs/adr/0008-embeddings.md) — embeddings: Voyage AI over REST (`voyage-4`, 1024 dims), model id per chunk, exact search, fake embedder in CI
+- [ADR 0009](docs/adr/0009-db-roles-and-rls.md) — app role without `BYPASSRLS`, `FORCE` RLS, business set per transaction, `X-Business-Id` until M8, canary suite as hard gate
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
@@ -143,7 +145,7 @@ Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
   handle the key. It never sits in the repo tree (`.env` included), a shell profile or history:
   shesha enters it with `read -s` in a separate terminal without Claude Code or Cursor, then closes it.
-- **Next: M2 planning after close-out** (`ananya-rag`, planned with `maya-tech-lead`).
+- **M2 planned 2026-10-21** (`docs/plans/m2-pr-checks.md`); PR 0 in review.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
