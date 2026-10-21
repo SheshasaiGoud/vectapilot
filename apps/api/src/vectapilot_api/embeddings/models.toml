@@ -1,0 +1,46 @@
+# The embedding model catalog (ADR 0008): model ids, dimensions and request limits. Model ids live
+# only here; Settings picks one (`VECTAPILOT_EMBEDDINGS_MODEL`, default: the provider's
+# `default_model`). Loaded and validated by `embeddings/catalog.py`.
+#
+# Voyage facts: https://docs.voyageai.com/docs/embeddings, checked 2026-10-21 (ADR 0008, Facts):
+# 32,000-token context; 1024 dimensions by default, 256/512/2048 optional; per request at most
+# 1,000 texts and 320K tokens in total for voyage-4 (1M for voyage-4-lite). Re-check the model id
+# on the day of the first live call (docs/plans/m2-pr-checks.md, PR 4).
+#
+# A model change means a full reindex of the business (embeddings/guard.py), never mixed vectors.
+
+[providers.voyage]
+default_model = "voyage-4"
+
+[providers.fake]
+default_model = "fake-embedding-1024"
+
+[models.voyage-4]
+provider = "voyage"
+dimensions = [256, 512, 1024, 2048]
+max_texts_per_request = 1_000
+max_tokens_per_request = 320_000
+context_tokens = 32_000
+source_url = "https://docs.voyageai.com/docs/embeddings"
+checked = 2026-10-21
+
+# The cheaper fallback, if eval v0 shows no quality loss (ADR 0008).
+[models.voyage-4-lite]
+provider = "voyage"
+dimensions = [256, 512, 1024, 2048]
+max_texts_per_request = 1_000
+max_tokens_per_request = 1_000_000
+context_tokens = 32_000
+source_url = "https://docs.voyageai.com/docs/embeddings"
+checked = 2026-10-21
+
+# The offline test double (embeddings/fake.py). Same limits as voyage-4, so CI refuses what
+# production would. Its vectors mean nothing: no quality number is ever reported from it.
+[models.fake-embedding-1024]
+provider = "fake"
+dimensions = [1024]
+max_texts_per_request = 1_000
+max_tokens_per_request = 320_000
+context_tokens = 32_000
+source_url = "https://github.com/SheshasaiGoud/vectapilot/blob/main/docs/adr/0008-embeddings.md"
+checked = 2026-10-21

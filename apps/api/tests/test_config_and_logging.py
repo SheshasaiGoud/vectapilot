@@ -67,6 +67,7 @@ def _settings_with_canary_passwords() -> Settings:
         database_url=CANARY_DATABASE_URL,
         redis_url=CANARY_REDIS_URL,
         anthropic_api_key=f"{CANARY}-key",
+        voyage_api_key=f"{CANARY}-voyage-key",
     )
 
 

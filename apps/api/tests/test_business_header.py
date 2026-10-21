@@ -111,7 +111,11 @@ REFUSED = {"detail": REFUSED_ENVIRONMENT}
 def test_production_refuses_the_header(header: str, monkeypatch: pytest.MonkeyPatch) -> None:
     registry_says(monkeypatch, exists=True)  # even a registered business is refused
     settings = make_settings(
-        environment="production", llm_provider="anthropic", anthropic_api_key="not-a-real-key"
+        environment="production",
+        llm_provider="anthropic",
+        anthropic_api_key="not-a-real-key",
+        embeddings_provider="voyage",
+        voyage_api_key="not-a-real-key",
     )
 
     with TestClient(probe_app(settings)) as client:

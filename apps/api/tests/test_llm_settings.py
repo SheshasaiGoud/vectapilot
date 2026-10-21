@@ -90,7 +90,13 @@ def test_test_and_ci_allow_only_the_fake_provider(environment: str) -> None:
 
 
 def test_production_refuses_the_fake_provider() -> None:
-    message = refused(environment="production", llm_provider="fake", anthropic_api_key=CANARY)
+    message = refused(
+        environment="production",
+        llm_provider="fake",
+        anthropic_api_key=CANARY,
+        embeddings_provider="voyage",  # so only the LLM rule breaks (ADR 0008 has its own test)
+        voyage_api_key=CANARY,
+    )
 
     assert (
         message == "Value error, llm_provider must not be 'fake' when environment is 'production'"
