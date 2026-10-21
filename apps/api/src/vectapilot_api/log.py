@@ -28,6 +28,22 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
+class DropQueryString(logging.Filter):
+    """Cut the query string off uvicorn's access-log line.
+
+    Query parameters can carry customer text (an uploaded document's title, for example), and
+    access logs are kept longer and read more widely than the data itself. Uvicorn logs
+    `(client, method, path, http_version, status)` with the path percent-encoded, so the first
+    `?` is always where the query string starts.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) == 5 and isinstance(args[2], str):
+            record.args = (*args[:2], args[2].split("?", 1)[0], *args[3:])
+        return True
+
+
 def configure_logging(level: str) -> None:
     """Send every log line — ours and uvicorn's — to stdout as JSON."""
     handler = logging.StreamHandler(sys.stdout)
@@ -40,3 +56,6 @@ def configure_logging(level: str) -> None:
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.propagate = True
+    access = logging.getLogger("uvicorn.access")
+    if not any(isinstance(f, DropQueryString) for f in access.filters):  # one per process
+        access.addFilter(DropQueryString())
