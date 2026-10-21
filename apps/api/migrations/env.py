@@ -1,7 +1,9 @@
 """Alembic migration environment.
 
-The database URL comes from the app's typed `Settings` (`VECTAPILOT_DATABASE_URL`), never from
-alembic.ini, so no credentials are ever written to a committed file.
+The database URL is the owner's, from `MigrationSettings` (`VECTAPILOT_MIGRATION_DATABASE_URL`),
+never from alembic.ini, so no credentials are ever written to a committed file. It is not the API's
+URL: the API logs in as `vectapilot_app`, which owns nothing and cannot change the schema
+(ADR 0009).
 """
 
 import asyncio
@@ -12,7 +14,7 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from vectapilot_api.config import Settings
+from vectapilot_api.config import MigrationSettings
 
 config = context.config
 if config.config_file_name is not None:
@@ -24,7 +26,8 @@ target_metadata = None
 
 
 def database_url() -> str:
-    return str(Settings().database_url.get_secret_value())  # passed to SQLAlchemy, never logged
+    # Passed to SQLAlchemy, never logged.
+    return str(MigrationSettings().migration_database_url.get_secret_value())
 
 
 def run_migrations_offline() -> None:

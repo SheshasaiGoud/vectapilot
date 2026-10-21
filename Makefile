@@ -2,7 +2,9 @@
 
 COMPOSE := docker compose -f infra/compose.yaml
 API     := cd apps/api &&
-LOCAL_DB_URL    := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapilot-dev}@127.0.0.1:5432/vectapilot
+# The API's role and the owner's (ADR 0009); the passwords default like infra/compose.yaml's.
+LOCAL_DB_URL    := postgresql+asyncpg://vectapilot_app:$${VECTAPILOT_APP_DB_PASSWORD:-vectapilot-app-dev}@127.0.0.1:5432/vectapilot
+LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapilot-dev}@127.0.0.1:5432/vectapilot
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
@@ -24,7 +26,7 @@ logs: ## Follow the logs of every service
 ps: ## Show the status of every service
 	$(COMPOSE) ps --all
 
-migrate: ## Apply database migrations
+migrate: ## Apply database migrations (as the owner) and set the app role's login
 	$(COMPOSE) run --rm migrate
 
 reset-db: ## DELETE all local database data (asks for confirmation)
@@ -50,6 +52,7 @@ coverage: ## API tests under coverage, then the gateway gate (>= 95 %, ADR 0006)
 
 test-integration: up ## API tests including real Postgres + Redis (starts the stack)
 	$(API) RUN_INTEGRATION=1 VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" \
+		VECTAPILOT_MIGRATION_DATABASE_URL="$(LOCAL_OWNER_URL)" \
 		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run pytest
 
 check: lint typecheck coverage ## Everything CI checks, locally

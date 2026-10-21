@@ -163,3 +163,24 @@ class Settings(BaseSettings):
             base_delay_s=self.llm_backoff_base_seconds,
             max_delay_s=self.llm_backoff_cap_seconds,
         )
+
+
+class MigrationSettings(BaseSettings):
+    """What Alembic and `vectapilot-db-provision` read; the API never does (ADR 0009).
+
+    The owner's URL is a separate variable from the API's, so the API process can be started
+    without it: the API logs in as `vectapilot_app`, never as the owner.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="VECTAPILOT_",
+        env_file=".env",
+        extra="ignore",
+        hide_input_in_errors=True,
+    )
+
+    migration_database_url: Secret[PostgresDsn]
+    """`VECTAPILOT_MIGRATION_DATABASE_URL`: the role that owns the schema and runs migrations."""
+    database_url: Secret[PostgresDsn] | None = None
+    """The API's URL (`vectapilot_app` and its password). Only `vectapilot-db-provision` needs it:
+    it sets that password on the role, so the password has one source."""

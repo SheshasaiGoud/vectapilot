@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from vectapilot_api import __version__
 from vectapilot_api.config import Settings
+from vectapilot_api.db import Database
 from vectapilot_api.gateway.catalog import load_catalog
 from vectapilot_api.health import router as health_router
 from vectapilot_api.log import configure_logging
@@ -34,9 +35,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # Clients connect lazily, so the API starts even when a dependency is down:
         # /healthz stays green and /readyz reports the problem.
         # The secret DSNs are unwrapped only here, straight into the clients — never into a log.
-        app.state.db_engine = create_async_engine(
+        engine = create_async_engine(
             str(settings.database_url.get_secret_value()), pool_pre_ping=True
         )
+        database = Database(engine)
+        # ADR 0009: a role that could skip or switch off RLS (superuser, BYPASSRLS, owner of a
+        # relation, or a member of such a role) stops startup here (UnsafeDatabaseRole).
+        try:
+            await database.verify_role_at_startup(settings.readiness_timeout_seconds)
+        except BaseException:
+            await engine.dispose()
+            raise
+        app.state.db_engine = engine
+        app.state.database = database
         app.state.redis = Redis.from_url(str(settings.redis_url.get_secret_value()))
         logger.info("startup", extra={"environment": settings.environment, "version": __version__})
         yield

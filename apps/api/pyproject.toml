@@ -22,6 +22,8 @@ dependencies = [
 vectapilot-api = "vectapilot_api.main:run"
 # The M1 measurement CLI: a dry run unless `--live` (shesha only; agents never pass it).
 vectapilot-llm = "vectapilot_api.llm_cli:main"
+# After `alembic upgrade head`: the app role's login and password (ADR 0009).
+vectapilot-db-provision = "vectapilot_api.db_provision:main"
 
 [build-system]
 requires = ["uv_build>=0.12.24,<0.13.0"]

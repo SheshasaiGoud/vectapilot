@@ -17,7 +17,8 @@ path segment, or waiting for auth.
 **Decision.** (b) + (ii) + a header.
 - **Roles.** The owner role owns the schema and runs Alembic; the API never connects as it.
   `vectapilot_app` logs in with `NOSUPERUSER NOBYPASSRLS`, owns nothing and gets only the grants it
-  needs. Startup fails if the app connection's role is a superuser or has `BYPASSRLS`.
+  needs. Startup fails if the app connection's role is a superuser, has `BYPASSRLS`, owns a
+  relation (an owner can turn `FORCE` off), or is a member of a role that does any of these.
 - **FORCE RLS** on every business-owned table, so even owner sessions (migrations, scripts) see no
   rows unless they name a business. Policy: `business_id = nullif(current_setting(
   'app.business_id', true), '')`, for both `USING` and `WITH CHECK`.
@@ -30,8 +31,9 @@ path segment, or waiting for auth.
   on a connection where a local value has ended; `nullif` turns both into NULL, which matches no
   row, so reads return nothing and writes fail `WITH CHECK`.
 - **`X-Business-Id` until M8.** Validated as a `BusinessId` (`re.fullmatch`); unknown and malformed
-  ids get the same error. It names a business; it does not authenticate. Refused in `production`
-  (400), so business routes cannot be served there before M8 auth replaces it.
+  ids get the same error. It names a business; it does not authenticate. Accepted only in `local`,
+  `test` and `ci` (an allowlist; `production` and any later environment get a 400), so business
+  routes cannot be served there before M8 auth replaces it.
 - **Canary leakage suite = hard gate.** At least two fictional businesses, each seeded with a
   unique canary string. Acting as one, no read path (SQL, vector search, API route) may return the
   other's canary; no business ⇒ 0 rows; a reused pooled connection keeps no business; the app
@@ -43,3 +45,19 @@ database URLs; every database access, background jobs included, needs a transact
 business set; owner scripts must name a business deliberately; CI gains a Postgres service and
 minutes. RLS covers Postgres only: caches, files, prompts and logs are scoped in code, and the
 canary suite grows to cover them as they arrive.
+
+**Role and password (settled in M2 PR 1, 2026-10-21; Diego's choice, open to shesha's review).**
+- Migration 0002 creates `vectapilot_app` **NOLOGIN, without a password**, plus its grants, so a
+  migration never holds a secret. If the role already exists with SUPERUSER or BYPASSRLS, the
+  migration stops instead of altering it.
+- `vectapilot-db-provision`, run as the owner right after `alembic upgrade head`, turns on LOGIN
+  and sets the password taken from the API's own URL (`VECTAPILOT_DATABASE_URL`, whose user must
+  be `vectapilot_app`). So there is one source for the password; it is idempotent, and running it
+  again after a change rotates it. Postgres quotes the literal (`format('%L')`) and stores only a
+  SCRAM hash. The `migrate` compose job and CI run it; the API never gets the owner's URL.
+- Why not a Postgres init script: it runs only on an empty data volume (existing local volumes
+  would never get the role) and CI's service containers cannot mount one.
+- Local stack: `VECTAPILOT_APP_DB_PASSWORD` in `infra/.env` (default `vectapilot-app-dev`, like
+  ADR 0005's `POSTGRES_PASSWORD`). CI: a throwaway `vectapilot-app-ci`. Production: M10.
+- Limit: locally and in CI the owner is the bootstrap superuser, which skips RLS even with FORCE.
+  A non-superuser owner, and an owner allowed to create roles on managed Postgres, are M10 work.
