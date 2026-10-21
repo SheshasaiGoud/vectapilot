@@ -1,0 +1,42 @@
+{
+  "title": "Clinic appointment policy (synthetic)",
+  "source_type": "pdf",
+  "page_count": 3,
+  "content_sha256": "aab2d2445b5c200f0f88458d8ebbe647ee69cd8abf8ad759cfb0b676be0fe7c7",
+  "sections": [
+    {
+      "heading_path": [],
+      "page": 1,
+      "row": null,
+      "start": 0,
+      "end": 148
+    },
+    {
+      "heading_path": [],
+      "page": 3,
+      "row": null,
+      "start": 150,
+      "end": 209
+    }
+  ],
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "content": "Clinic appointment policy\nSynthetic test fixture: a fictional business, not real data.\nAppointments can be moved once without a fee (one time only).",
+      "char_start": 0,
+      "char_end": 148,
+      "page": 1,
+      "row": null,
+      "heading_path": []
+    },
+    {
+      "chunk_index": 1,
+      "content": "Refunds\nDeposits are refunded if you cancel 24 hours ahead.",
+      "char_start": 150,
+      "char_end": 209,
+      "page": 3,
+      "row": null,
+      "heading_path": []
+    }
+  ]
+}

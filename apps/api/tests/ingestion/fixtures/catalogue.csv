@@ -1,0 +1,8 @@
+sku,name,price_inr,notes
+SYN-0,Synthetic test record,0,Fictional business; not real data
+DOG-FOOD-1,"Puppy food, 2 kg",899,Grain-free
+CAT-TOY-7,Feather wand,249,"Two-line
+note"
+,,,
+SHAMPOO-3,Oatmeal shampoo,399,"=HYPERLINK(""https://example.invalid"",""click"")"
+HI-1,कुत्ते का पट्टा,299,हिंदी नमूना,extra-cell

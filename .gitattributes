@@ -1,0 +1,3 @@
+# PDFs are binary: no line-ending conversion or whitespace checks. Their cross-reference table
+# stores byte offsets (and its entries end in a space), so converting line endings would corrupt them.
+*.pdf binary

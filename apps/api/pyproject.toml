@@ -13,6 +13,9 @@ dependencies = [
     "asyncpg>=0.32.0",
     "fastapi>=0.143.0",
     "pydantic-settings>=2.15.0",
+    # Exact pin, rule 11 (shesha, 2026-10-21): the newest release at least 7 days old that day
+    # (6.20.1, uploaded 2026-10-12). PDF text per page for ingestion; no dependencies on 3.12.
+    "pypdf==6.20.1",
     "redis>=8.1.0",
     "sqlalchemy[asyncio]>=2.1.4",
     "uvicorn[standard]>=0.54.0",

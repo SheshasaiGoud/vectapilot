@@ -1,0 +1,90 @@
+{
+  "title": "catalogue.csv",
+  "source_type": "csv",
+  "page_count": null,
+  "content_sha256": "276432c8b9bbee22c82182c3ad5fe5381c3a250d9c1e3f048e658cf58f120e6c",
+  "sections": [
+    {
+      "heading_path": [],
+      "page": null,
+      "row": 1,
+      "start": 0,
+      "end": 92
+    },
+    {
+      "heading_path": [],
+      "page": null,
+      "row": 2,
+      "start": 94,
+      "end": 165
+    },
+    {
+      "heading_path": [],
+      "page": null,
+      "row": 3,
+      "start": 167,
+      "end": 236
+    },
+    {
+      "heading_path": [],
+      "page": null,
+      "row": 5,
+      "start": 238,
+      "end": 342
+    },
+    {
+      "heading_path": [],
+      "page": null,
+      "row": 6,
+      "start": 344,
+      "end": 430
+    }
+  ],
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "content": "sku: SYN-0\nname: Synthetic test record\nprice_inr: 0\nnotes: Fictional business; not real data",
+      "char_start": 0,
+      "char_end": 92,
+      "page": null,
+      "row": 1,
+      "heading_path": []
+    },
+    {
+      "chunk_index": 1,
+      "content": "sku: DOG-FOOD-1\nname: Puppy food, 2 kg\nprice_inr: 899\nnotes: Grain-free",
+      "char_start": 94,
+      "char_end": 165,
+      "page": null,
+      "row": 2,
+      "heading_path": []
+    },
+    {
+      "chunk_index": 2,
+      "content": "sku: CAT-TOY-7\nname: Feather wand\nprice_inr: 249\nnotes: Two-line\nnote",
+      "char_start": 167,
+      "char_end": 236,
+      "page": null,
+      "row": 3,
+      "heading_path": []
+    },
+    {
+      "chunk_index": 3,
+      "content": "sku: SHAMPOO-3\nname: Oatmeal shampoo\nprice_inr: 399\nnotes: =HYPERLINK(\"https://example.invalid\",\"click\")",
+      "char_start": 238,
+      "char_end": 342,
+      "page": null,
+      "row": 5,
+      "heading_path": []
+    },
+    {
+      "chunk_index": 4,
+      "content": "sku: HI-1\nname: कुत्ते का पट्टा\nprice_inr: 299\nnotes: हिंदी नमूना\ncolumn 5: extra-cell",
+      "char_start": 344,
+      "char_end": 430,
+      "page": null,
+      "row": 6,
+      "heading_path": []
+    }
+  ]
+}
