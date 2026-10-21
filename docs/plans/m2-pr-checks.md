@@ -55,6 +55,10 @@ eval set · real customer data · the admin screen.
   business ⇒ 0 rows (fresh connection and reused pooled connection); app role attributes; catalog
   check that every table with `business_id` has RLS and `FORCE`.
 - Proved on purpose: dropping `FORCE`, or connecting as the owner, turns the suite red.
+- **[PR 1 CI]** Catalog check: every UNIQUE constraint and unique index on a business-owned table
+  starts with `business_id`. Uniqueness is enforced across all rows, ignoring RLS, so a key
+  without it lets one business learn from an error that another's row exists (found in PR 1's
+  first CI run on `chunks`, fixed 2026-10-21).
 - Recheck Zara's PR 1 nits: find the tables from `information_schema` (not a hard-coded list);
   migration 0002's downgrade must not drop an app role that existed before it; `RESET
   app.business_id` when a connection returns to the pool.

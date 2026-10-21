@@ -88,7 +88,10 @@ CREATE_TABLES: Final = (
         created_at timestamptz NOT NULL DEFAULT now(),
         FOREIGN KEY (business_id, document_id)
             REFERENCES documents (business_id, id) ON DELETE CASCADE,
-        UNIQUE (document_id, chunk_index)
+        -- business_id first: Postgres checks uniqueness across all rows, ignoring RLS, so a key
+        -- without it would let one business learn that another's (document_id, chunk_index)
+        -- exists from the error it gets back. With it, such an insert reaches the foreign key.
+        UNIQUE (business_id, document_id, chunk_index)
     )
     """,
     # Search filters by business and model id (ADR 0008); exact search, no ANN index yet.
