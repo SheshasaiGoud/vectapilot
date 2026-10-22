@@ -71,6 +71,8 @@ From the repository root (`make` lists everything):
 - `make coverage` — tests under coverage, then the gateway gate (combined and branch-only ≥ 95 %, ADR 0006)
 - `make llm-demo` — the M1 measurement CLI as a dry run (fake provider, $0) into the git-ignored
   `evals/reports/tmp/`
+- `make eval-check` — check eval v0 (`evals/datasets/support_qa/`) for its stage, then print its
+  coverage counts (no model, no network, writes nothing)
 
 API (run inside `apps/api/`, Python 3.12 managed by uv):
 - `uv sync` — create/update the virtualenv from `uv.lock`
@@ -83,6 +85,8 @@ API (run inside `apps/api/`, Python 3.12 managed by uv):
 - `uv run alembic upgrade head` · `uv run alembic revision -m "..." --rev-id 000N` — migrations
   (as the owner role, from `VECTAPILOT_MIGRATION_DATABASE_URL` in Settings / `apps/api/.env`, never
   from alembic.ini); the API itself connects as `vectapilot_app` (ADR 0009)
+- `uv run python -m vectapilot_api.evalset check|ready|report|lookup|show|freeze|import-friends` —
+  eval v0 tools (ADR 0012), no model or network; `freeze` writes files, once per dataset version
 
 Team site (run inside `apps/web/`):
 - `npm run dev` — local dev server at http://localhost:3000
@@ -103,13 +107,14 @@ docs/adr/            architecture decision records
 docs/learning/       guides for [HAND-WRITE] tasks
 docs/plans/          per-PR acceptance checks for the current milestone
 docs/notes/          shesha's own write-ups (e.g. M1's "what I measured")
-evals/               datasets (synthetic) and committed live measurement runs; evals/reports/tmp/
-                     holds dry runs (git-ignored)
+data/sample/          synthetic corpus: two fictional businesses, one folder per business_id
+evals/               datasets (synthetic: gateway_smoke, support_qa = eval v0) and committed live
+                     measurement runs; evals/reports/tmp/ holds dry runs (git-ignored)
 .github/workflows/   ci.yml (lint, types, tests, image build) · deploy-site.yml (GitHub Pages)
 infra/               compose.yaml — the local stack
 Makefile             developer commands
 ```
-Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
+Planned: `packages/mcp_server/`, `scripts/`.
 
 ## Decisions
 - [ADR 0001](docs/adr/0001-virtual-team-as-claude-code-subagents.md) — virtual team as Claude Code subagents
@@ -123,6 +128,7 @@ Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
 - [ADR 0009](docs/adr/0009-db-roles-and-rls.md) — app role without `BYPASSRLS`, `FORCE` RLS, business set per transaction, `X-Business-Id` until M8, canary suite as hard gate
 - [ADR 0010](docs/adr/0010-one-approved-version-per-source.md) — one approved version per source: partial unique index (migration 0004, `business_id` first), approving retires the previous version in the same transaction
 - [ADR 0011](docs/adr/0011-cited-answers-v0.md) — cited answers v0: answer only from retrieved chunks, any unverified citation drops the answer, no model call below the provisional score threshold
+- [ADR 0012](docs/adr/0012-eval-dataset-v0.md) — eval dataset v0: synthetic two-business corpus, human-written JSONL questions, evidence groups of `source_id` + `version` + anchor keys, 30 % test split fixed before any question, freeze pins, labels per run
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
@@ -148,7 +154,12 @@ Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
   handle the key. It never sits in the repo tree (`.env` included), a shell profile or history:
   shesha enters it with `read -s` in a separate terminal without Claude Code or Cursor, then closes it.
-- **M2 planned 2026-10-21** (`docs/plans/m2-pr-checks.md`); PR 0 in review.
+- **M2 (ingestion, vector search, cited answers, eval v0) — in progress** (ADRs 0008–0012; plan
+  `docs/plans/m2-pr-checks.md`). Merged 2026-10-21/22: #23 ADRs · #24 DB roles + RLS · #25 canary
+  suite in CI · #26 ingestion · #27 embeddings · #28 KB endpoints · #29 H1 scaffold · #30 one
+  approved version · #31 search + cited answers. H1 (shesha's `vector_search`) not yet written
+  (strict xfail). PR 7 (eval v0: corpus, schema, checks; 0 questions, which are shesha's and
+  friends') in review. Next: H2 metrics, PR 8 harness, PR 9 shesha's live run.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

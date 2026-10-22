@@ -288,16 +288,102 @@ and those that reach `vector_search` wait for H1).**
 ## PR 7 — `m2/eval-v0` (noah)
 - The corpus: synthetic documents for two fictional businesses under `data/`, labelled synthetic.
 - **[decided 1, 5]** 40+ questions, ~10 Hindi/Hinglish, ~10 written by friends without seeing the
-  documents; every category except `action` (M5); each has its expected source chunk(s) and a
-  human correctness label slot. A held-out test split is frozen and never tuned on.
+  documents; every category except `action` (M5) and `document` (M6, decided below); each has its
+  expected evidence (groups of anchor keys, decided below) and a human correctness label (per
+  run). A held-out test split is frozen and never tuned on.
+
+**Built (2026-10-22, noah; everything except the questions, which are shesha's and friends').**
+- Corpus `data/sample/` (README: synthetic, fictional, fake contacts, `.example` domains, 112 as
+  the only real number): `sunrise-clinic` and `paws-and-co`, 9 documents each (18; 129 chunks at
+  the default size), Markdown, HTML, CSV and one PDF (`fees-2026-04.pdf`, built from its
+  `.pdf.txt` by `tests/ingestion/pdf_builder.py`, no new package), all six content kinds, a
+  staff-only document per business, a retired `fees` version (Sunrise) and a draft (Paws), the same
+  source ids with confusable facts in both, emergency guidance without medical advice, and one
+  Hindi FAQ (`faq-hi`, `review: pending`). A manifest per business carries the upload parameters.
+- Dataset `evals/datasets/support_qa/v0.1/`: `manifest.json` (`stage: collecting`, split rule,
+  requirements 40 / 10 Hindi / 10 friend_blind / 3 per category / 15 per business / 3 safety
+  per business / 8 dont_know),
+  `questions.jsonl` **empty**, README (schema, categories, keys, split, freeze, versions),
+  `friends-brief.md` + `friends-template.csv`. Guide: `docs/learning/m2-eval-questions.md`.
+- Code `vectapilot_api/evalset/` (no model, network or database): evidence is a list of groups
+  of interchangeable `(source_id, version, anchor)` keys (anchor 8-100 characters) resolved
+  through the real loaders and chunker to chunk indexes at a given chunk size; the
+  content-relevance rule PR 8 scores with (`relevance.py`); row checks (placeholders and
+  personal data refused); `ready` with a dry-run split preview; coverage counts (split × category, author,
+  language, business); `stratified-systematic-v2` split, a balance check that `freeze` enforces,
+  `replaces` for corrected questions in a later version, `freeze.json` pins (questions, corpus
+  files, a hash of each corpus manifest); per-run `CorrectnessLabel`. CLI:
+  `uv run python -m vectapilot_api.evalset check|ready|report|lookup|show|freeze|import-friends`;
+  `make eval-check`. Tests: `tests/evalset/` (no Postgres).
+- Review fixes (2026-10-22, kenji, zara, ananya, maya): v1's split rule never put position 0 in
+  test and sorted `friend_blind` first, so friends' questions almost never reached test (measured
+  on attribute-only rows); replaced by v2 before any question existed. Never-answer documents now
+  use values found in no approved document (a test checks it); emergency lists are examples with
+  a catch-all line, and `faq-hi`'s emergency section matches the English one (still
+  `review: pending`); two product names made obviously fictional; the "relevant hit" rule is by
+  content, not chunk number; corpus statistics after the edits: 129 sections → 129 chunks at
+  1200/150 (0 split; longest section 936 characters, median 167), 138 at 400/50 (6 split), 184 at
+  200/40 (32 split), so v0.1 cannot meaningfully tune the chunk size.
+- CI stays green with zero rows (`collecting` checks rows only); `freeze` switches the manifest to
+  `frozen`, and the same test then enforces the requirements and pins.
+- Repository layout (this plan only): `data/sample/<business_id>/` (synthetic corpus) ·
+  `evals/datasets/support_qa/<version>/` (eval v0) · `apps/api/src/vectapilot_api/evalset/`.
+- **[decided 2026-10-22] (shesha)** every recommendation accepted. (1) Businesses
+  `sunrise-clinic` + `paws-and-co`; `faq-hi` stays `review: pending` (now per document in the
+  corpus manifest) until shesha reviews it, and `freeze` refuses while any corpus document is
+  pending; 112 stays. (2) JSONL; a key is `source_id` + `version` + verbatim anchor (8-100
+  characters); correctness labels per run. (3) `expected_evidence` replaces `expected_sources`:
+  groups of interchangeable keys, any key finds its group; `answered` ≥ 1 group, `multi_hop` ≥ 2,
+  `out_of_scope` and `dont_know` 0, `handoff` optional; the content-relevance helper is
+  `evalset/relevance.py` (typed, tested), and H2 works on ranked groups. (4) Split v2 at 30 %;
+  when `freeze` refuses on balance, add or remove one question, never change the seed (README);
+  an optional hashed `split_group` (renamed from `group` so it cannot be mistaken for an
+  evidence group) makes translations and cross-business twins share one split, and identical
+  text in two businesses is allowed only when they share one. (5) Eight required categories,
+  one precedence order: safety > handoff_request > adversarial > out_of_scope > ambiguous >
+  multi_hop > policy > faq; `action` and `document` refused, `import-friends` drops the rows
+  shesha triages as such and reports the count; optional hashed `subtype` (safety: emergency |
+  professional_judgement; out_of_scope: off_domain | unanswerable | non_public_only);
+  `ambiguous` is answered, with a group per reading; refund requests are `handoff_request`,
+  refund-policy questions `policy`. (6) Ready minimums: 40 total; 10 Hindi/Hinglish counted only
+  for a business whose manifest lists `hi` (Sunrise; the brief invites Hindi for Sunrise only);
+  10 friend_blind; 3 per category; 15 per business; 3 safety per business; 8 `dont_know` (some
+  about staff-only, retired or draft-only facts); a question in a language its business does
+  not list expects `handoff`. (7) `author_type` is `team` | `friend_blind`; a "prices are
+  fictional" caveat is ignored when labelling. (8) Friends may write everyday emergencies, but
+  nothing about self-harm and no real health details; shesha writes the sensitive safety
+  questions.
+- Mutation-audit gaps closed (2026-10-22): a golden test pins `assign_splits` on a TEST-ONLY
+  layout where two category repairs compete, and a subprocess runs it under two
+  `PYTHONHASHSEED` values that iterate the categories in opposite orders (M2b/M2f; checked: a
+  set-ordered repair fails it); case-only anchors and source ids never resolve or match
+  (M3a/M3d); the CLI's `freeze` refuses placeholder rows (M5b); the `example-` id rule and
+  lowercase markers (M5e/M5f); markers match on NFKC-casefolded text with
+  `example[\W_]*only|test[-_\u2010-\u2015\u2212]+only` (D5b, narrowed 2026-10-22: the test
+  marker needs a hyphen, underscore or dash, so a real "blood test only" passes);
+  manifest errors keep their rule text (D10).
 
 ## H2 — `m2/metrics` (`[HAND-WRITE]`, shesha)
 - hit@k and MRR, with noah's tests and a short guide.
+- **Input (decided 2026-10-22, item 3):** per question, its ranked hits as
+  `evalset.relevance.matched_groups` gives them (for each hit, the indexes of the evidence groups
+  it finds; empty = not relevant) and its number of groups. `relevance.py` only says which hit
+  finds which group; the metrics on top are H2's, including how several groups count (for
+  `multi_hop`: any group in the top k, or all of them), a question for H2's guide.
 
 ## PR 8 — `m2/eval-harness` (noah)
 - The eval harness and the baseline report: hit@5, MRR and correctness, each with dataset
   version, commit, model ids and config, reproducible from the commit. The fake embedder's numbers
   are never reported as results.
+- A hit is relevant by content (`evalset/relevance.py`: `hit_matches_key`, `matched_groups`):
+  same business, same `(source_id, version)`, and its normalised text contains the anchor; any
+  key of a group finds the group. `SearchHit` has no business id: the harness fills
+  `RetrievedChunk.business_id` from the hit's document row, never from the question, so every
+  hit's document is checked against the question's business (asserted: a leak check). A key that no stored chunk holds is reported as "unscorable
+  at this config", never dropped. A different chunk size needs a fresh ingest (re-ingesting an
+  existing version does not re-chunk).
+- Reports take "synthetic" from the corpus and dataset manifests, never from chunk text; safety
+  results are counts (`k of n`), never a rate gate.
 
 ## PR 9 — close-out (shesha's live run)
 - Live ingestion and the eval v0 run; human correctness labels; a "what I measured" note with

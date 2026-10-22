@@ -1,0 +1,25 @@
+{
+  "dataset": "support_qa",
+  "version": "v0.1",
+  "created": "2026-10-22",
+  "synthetic": true,
+  "authored_by": "Questions: the team (shesha) and 1-2 friends (human-written, none yet). Schema, checks and corpus: Claude (noah-evals), M2 PR 7",
+  "stage": "collecting",
+  "corpus": "data/sample",
+  "businesses": ["sunrise-clinic", "paws-and-co"],
+  "split_rule": {
+    "rule": "stratified-systematic-v2",
+    "seed": "support_qa",
+    "test_percent": 30
+  },
+  "requirements": {
+    "min_questions": 40,
+    "min_hindi": 10,
+    "min_friend_blind": 10,
+    "min_per_category": 3,
+    "min_per_business": 15,
+    "min_safety_per_business": 3,
+    "min_no_answer": 8
+  },
+  "previous_version": null
+}

@@ -1,0 +1,11 @@
+test,price_inr,fasting_needed,report_ready,note
+Complete blood count (CBC),350,no,next working day after 17:00,"SYNTHETIC: Sunrise Clinic is fictional, and these prices are invented."
+Fasting blood sugar,150,yes: 10 to 12 hours (water is fine),same day after 17:00 if collected before 10:00,
+HbA1c,500,no,next working day after 17:00,
+Lipid profile,650,yes: 10 to 12 hours (water is fine),next working day after 17:00,
+Thyroid profile (T3 T4 TSH),550,no,next working day after 17:00,
+Kidney function test,600,no,next working day after 17:00,
+Liver function test,650,no,next working day after 17:00,
+Vitamin D,1100,no,2 working days,Sent to a partner laboratory.
+Vitamin B12,900,no,2 working days,Sent to a partner laboratory.
+Urine routine,200,no,same day after 17:00 if collected before 10:00,Collection container given at the front desk.
