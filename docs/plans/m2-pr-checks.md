@@ -1,6 +1,7 @@
 # M2 — acceptance checks per PR
 
-> **Status (2026-10-21):** planned; PR 0 in review.
+> **Status (2026-10-22):** PR 0–5 merged; H1 scaffold in review (`m2/retrieval-scaffold`);
+> PR 5b (diego) lands before PR 6.
 
 ADRs 0008 (embeddings) and 0009 (database roles and RLS) record the decisions and their sources.
 This file holds what each M2 PR must prove; each PR copies its section into its own acceptance
@@ -162,6 +163,44 @@ live run, including every red proof, happens in CI or once Docker works).** Suit
 - ananya provides the interface, tests and a short guide; shesha writes top-k exact vector search
   with the `business_id` filter inside the SQL (vector only; fusion is M3). The canary suite
   stays green.
+
+**Scaffold (2026-10-21, ananya; branch `m2/retrieval-scaffold`; Postgres parts not yet run:
+Docker is unreachable, they run in CI).** `retrieval/types.py`: `VectorQuery` (all checks that
+need no database) and `SearchHit` (citation fields, including the document's `language` and
+`content_kind`), 23 tests / 81 cases in `tests/retrieval/test_types.py`, passing.
+`retrieval/vector.py`: `vector_search`, body `raise NotImplementedError`, docstring = the spec
+(`<=>`, score = 1 − distance, tie-break source id → version → chunk index with `COLLATE "C"`,
+`1 ≤ k ≤ 50`, approved + reader's audiences + one model id, the caller's business transaction,
+every value bound). Strict-xfail contract tests:
+`test_vector_search.py` (12 tests / 21 cases, Postgres; one runs on the owner's connection, where
+RLS cannot help, at k = 1 and k = 50; one checks that every filter applies before the `LIMIT`)
+and `test_vector_search_binding.py` (2 cases, no database: one `execute`, nothing after it, every
+value a real bind). Canary: the `vector_search` read path is wired and listed in
+`PENDING_HAND_WRITE` (a strict xfail, allowed by the gate) until H1 lands. It runs as the app role
+under RLS, so it proves isolation through RLS, not the `WHERE` clause; the clause is proven by
+`test_vector_search.py`'s owner-connection and other-business-transaction tests, which
+`canary_gate.py` does not cover (proposal for zara and shesha after H1: mirror those two checks
+into `tests/canary`, or make the gate require their test ids to pass). Guide:
+`docs/learning/m2-retrieval.md`; its §5 lists the decisions. Still open: how H1 is tested while
+Docker is down (guide §1).
+
+- **[decided 2026-10-22]** (shesha) Versions: at most one approved version per source (option c),
+  enforced by migration 0004 in PR 5b; H1's SQL does not filter versions, and every H1 test plants
+  data valid with and without 0004. `SearchHit` carries the document's `language` and
+  `content_kind` for PR 6's citations; no language filter in H1 (Q6 stays open). shesha writes H1
+  on `m2/retrieval`, time-box 3 h. Defaults accepted: `MAX_K` = 50, reader `customer`/`staff`,
+  `<=>` with score = 1 − distance, `COLLATE "C"` tie-break, mixed model ids refused by PR 6 via
+  `require_one_model`, `review_by` not filtered.
+
+## PR 5b — `m2/one-approved-version` (diego)
+- Small and separate; **must land before PR 6** exposes search.
+- Migration 0004: a partial unique index on `documents` that starts with `business_id`, over
+  `(business_id, source_id)` where `status = 'approved'` (the canary key check applies to it).
+- Approving a new version (today: uploading it with `status=approved`) retires the previously
+  approved version of the same source **in the same transaction**. Test: afterwards exactly one
+  approved version, the new one; if the write fails, the old one is still approved.
+- An ADR recording option (c) and why (business-context §3.4: stale documents are the top cause
+  of wrong answers).
 
 ## PR 6 — `m2/search-and-answer` (ananya)
 - `GET /v1/kb/search?q=` returns only the business's approved public chunks.

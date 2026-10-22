@@ -26,6 +26,7 @@ from tests.canary.checks import (
     policy_problems,
     relation_problems,
 )
+from tests.canary.read_paths import PENDING_HAND_WRITE, READ_PATHS, read_path_params
 
 PRINTED: Final = "(business_id = NULLIF(current_setting('app.business_id'::text, true), ''::text))"
 """How Postgres prints ADR 0009's policy back (`pg_get_expr`): parenthesised, NULLIF upper-case."""
@@ -229,6 +230,28 @@ def test_the_other_businesss_id_or_canary_is_a_leak(marker: str) -> None:
 @pytest.mark.parametrize("outputs", [{}, {"sql:chunks": ""}], ids=["no path", "empty"])
 def test_seeing_nothing_at_all_is_not_a_pass(outputs: dict[str, str]) -> None:
     assert canary_leaks(outputs, A, B) != []
+
+
+# ── Read paths: a [HAND-WRITE] stub is a strict xfail until written ──────────────────────────
+
+
+def test_a_pending_read_path_is_a_read_path() -> None:
+    assert READ_PATHS.keys() >= PENDING_HAND_WRITE
+
+
+def test_only_pending_read_paths_are_marked_and_each_as_a_strict_xfail_on_the_stub() -> None:
+    marked: dict[str, list[dict[str, object]]] = {}
+    for param in read_path_params():
+        values, marks = param.values, param.marks  # type: ignore[attr-defined]
+        marked[values[0]] = [dict(mark.kwargs) for mark in marks if mark.name == "xfail"]
+
+    assert sorted(marked) == sorted(READ_PATHS)
+    for name, xfails in marked.items():
+        if name in PENDING_HAND_WRITE:
+            assert len(xfails) == 1, name
+            assert (xfails[0]["strict"], xfails[0]["raises"]) == (True, NotImplementedError)
+        else:
+            assert xfails == [], name
 
 
 # ── The CI gate (scripts/canary_gate.py) ─────────────────────────────────────────────────────
