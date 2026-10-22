@@ -1,12 +1,13 @@
 """The canary leakage suite: a hard gate (ADR 0009; business-context §5, §6). Integration only.
 
-Two fictional businesses get a random canary in every business table. The tables come from the
-catalog (every relation with a `business_id` column, `catalog.py`), never from a list here, so a
-new table is checked the day it is created: until `plant` seeds it, the positive control in the
-reads below fails for it ("shows nothing of ..."). Every check also proves itself on purpose: the
-`test_red_proof_*` tests break one protection inside a rolled-back transaction (Postgres DDL is
-transactional) and assert the same check turns red. CI fails when none of this ran
-(scripts/canary_gate.py).
+Two fictional businesses get a random canary in every business table, and the same `BAIT` chunk
+(`read_paths.py`, "The bait") so that a search path has the other business's data to leak. The
+tables come from the catalog (every relation with a `business_id` column, `catalog.py`), never
+from a list here, so a new table is checked the day it is created: until `plant` seeds it, the
+positive control in the reads below fails for it ("shows nothing of ..."). Every check also
+proves itself on purpose: the `test_red_proof_*` tests break one protection inside a rolled-back
+transaction (Postgres DDL is transactional) and assert the same check turns red. CI fails when
+none of this ran (scripts/canary_gate.py).
 
 As tests/test_rls.py: the owner (VECTAPILOT_MIGRATION_DATABASE_URL) is the bootstrap superuser
 locally and in CI; it seeds the registry and breaks things on purpose. Everything checked for
@@ -34,12 +35,20 @@ from tests.canary.catalog import (
     load_role_facts,
 )
 from tests.canary.checks import Planted
-from tests.canary.read_paths import READ_PATHS, read_path_params, sql_on_every_business_table
+from tests.canary.read_paths import (
+    BAIT,
+    READ_PATHS,
+    read_path_params,
+    sql_on_every_business_table,
+)
 from tests.canary.write_paths import WRITE_PATHS
 from tests.conftest import integration
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import APP_ROLE, business_transaction
-from vectapilot_api.kb.store import ONE_APPROVED_INDEX
+from vectapilot_api.embeddings.base import EmbeddingSpec
+from vectapilot_api.embeddings.catalog import load_embedding_catalog
+from vectapilot_api.embeddings.fake import fake_vector
+from vectapilot_api.kb.store import ONE_APPROVED_INDEX, vector_literal
 from vectapilot_api.main import create_app
 
 pytestmark = [integration, pytest.mark.anyio]
@@ -52,7 +61,12 @@ CURRENT_BUSINESS = text("SELECT current_setting('app.business_id', true)")
 BACKEND_PID = text("SELECT pg_backend_pid()")
 
 # Each business gets source `canary` version 1, approved: write_paths.approve_a_new_version
-# approves version 2 of it, and the other business's version 1 must stay approved.
+# approves version 2 of it, and the other business's version 1 must stay approved. Its chunk
+# carries model id `fake`, not the configured one, so write_paths.reindex has something to do.
+# Each business also gets source `bait`, approved and public, titled with its own canary: one chunk
+# whose text is the shared BAIT, stored under the configured embedding model with the fake
+# embedder's vector of BAIT. PR 6's API read paths ask BAIT, so the other business's bait is a
+# same-model candidate scoring 1.0: a leaking route would show its title, the other canary.
 PLANT: Final = (
     text(
         "INSERT INTO documents (business_id, source_id, version, title, source_type,"
@@ -65,6 +79,19 @@ PLANT: Final = (
         " embedding_model, embedding_dim)"
         " SELECT :b, id, 0, :canary, CAST(:embedding AS vector), 'fake', 1024 FROM documents"
         " WHERE business_id = :b AND source_id = 'canary'"
+    ),
+    text(
+        "INSERT INTO documents (business_id, source_id, version, title, source_type,"
+        " content_kind, language, status, audience, content_sha256)"
+        " VALUES (:b, 'bait', '1', :canary, 'markdown', 'faq', 'en', 'approved', 'public',"
+        " repeat('d', 64))"
+    ),
+    text(
+        "INSERT INTO chunks (business_id, document_id, chunk_index, content, embedding,"
+        " embedding_model, embedding_dim)"
+        " SELECT :b, id, 0, :bait, CAST(:bait_embedding AS vector), :model,"
+        " CAST(:dimension AS integer)"
+        " FROM documents WHERE business_id = :b AND source_id = 'bait'"
     ),
     text(
         "INSERT INTO llm_calls (business_id, record_version, alias, catalog_version, outcome,"
@@ -113,9 +140,28 @@ async def pooled_engine() -> AsyncIterator[AsyncEngine]:
     await engine.dispose()
 
 
+def configured_embedding() -> EmbeddingSpec:
+    """The embedding model and dimension the app is configured with (as `build_embedder` resolves
+    them), never a hard-coded id. Fake only: the bait's vector is the fake embedder's."""
+    settings = Settings()
+    assert settings.embeddings_provider == "fake", "the canary bait needs the fake embedder"
+    return load_embedding_catalog().resolve(
+        settings.embeddings_provider, settings.embeddings_model, settings.embeddings_dimension
+    )
+
+
 async def plant(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Planted:
     planted = Planted(f"canary-{letter}-{secrets.token_hex(4)}", f"canary-{secrets.token_hex(8)}")
-    params = {"b": planted.business_id, "canary": planted.canary, "embedding": VECTOR}
+    spec = configured_embedding()
+    params = {
+        "b": planted.business_id,
+        "canary": planted.canary,
+        "embedding": VECTOR,
+        "bait": BAIT,
+        "bait_embedding": vector_literal(fake_vector(BAIT, spec.dimension)),
+        "model": spec.model,
+        "dimension": spec.dimension,
+    }
     async with business_transaction(owner, planted.business_id) as connection:
         await connection.execute(text("INSERT INTO businesses (business_id) VALUES (:b)"), params)
     async with business_transaction(app, planted.business_id) as connection:  # the app role writes

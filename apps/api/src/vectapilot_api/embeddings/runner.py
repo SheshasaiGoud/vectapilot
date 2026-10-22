@@ -21,7 +21,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Final
 
-from pydantic import Field
+from pydantic import Field, TypeAdapter, ValidationError
 
 from vectapilot_api.embeddings.base import (
     Embedder,
@@ -32,7 +32,7 @@ from vectapilot_api.embeddings.base import (
     plan_batches,
     token_upper_bound,
 )
-from vectapilot_api.gateway.errors import GatewayError, ProviderError
+from vectapilot_api.gateway.errors import GatewayError, InvalidRequest, ProviderError
 from vectapilot_api.gateway.retry import call_with_retries
 from vectapilot_api.gateway.types import (
     BusinessId,
@@ -42,10 +42,13 @@ from vectapilot_api.gateway.types import (
     OpaqueId,
     RetryPolicy,
     Slug,
+    TraceId,
 )
 
 EMBEDDING_CALL: Final = "embedding_call"
 """The log message of the one record per embedding call, and the key that holds the record."""
+
+_TRACE_ID: Final = TypeAdapter[str](TraceId)
 
 logger = logging.getLogger("vectapilot_api.embeddings")
 # Pinned at INFO like the gateway's: a quieter `log_level` must never drop the records.
@@ -72,6 +75,9 @@ class EmbeddingCallRecord(GatewayModel):
     attempts: Count
     retries: Count
     latency_ms: float = Field(ge=0)
+    trace_id: TraceId | None = None
+    """The request's trace id (M2 PR 6: search and answer pass theirs), so this record and the
+    request's `llm_call` record can be joined; None for calls without one (ingest, reindex)."""
 
 
 @dataclass(frozen=True)
@@ -124,14 +130,18 @@ class EmbeddingRunner:
         input_type: InputType,
         business_id: str,
         operation: str,
+        trace_id: str | None = None,
     ) -> EmbeddedTexts:
-        """Embed `texts` in order, batch by batch. Raises the embedder's typed errors."""
+        """Embed `texts` in order, batch by batch. Raises the embedder's typed errors.
+
+        `trace_id` (a W3C trace id, as `LLMRequest.trace_id`) goes into every record of the call."""
         business = check_business_id(business_id)
+        trace = None if trace_id is None else _check_trace_id(trace_id)
         batches = plan_batches(texts, self._spec)  # raises before any call: no record, no cost
         results: list[Embeddings] = []
         for batch in batches:
             results.append(
-                await self._call([texts[i] for i in batch], input_type, business, operation)
+                await self._call([texts[i] for i in batch], input_type, business, operation, trace)
             )
             if results[-1].model != results[0].model:
                 raise ProviderError()  # two model ids in one call: never mixed vectors
@@ -144,7 +154,12 @@ class EmbeddingRunner:
         )
 
     async def _call(
-        self, batch: list[str], input_type: InputType, business_id: BusinessId, operation: str
+        self,
+        batch: list[str],
+        input_type: InputType,
+        business_id: BusinessId,
+        operation: str,
+        trace_id: str | None,
     ) -> Embeddings:
         started = self._clock()
         attempts = 0
@@ -189,8 +204,21 @@ class EmbeddingRunner:
                     attempts=attempts,
                     retries=max(attempts - 1, 0),
                     latency_ms=max(0.0, (self._clock() - started) * 1000),
+                    trace_id=trace_id,
                 )
                 logger.info(EMBEDDING_CALL, extra={EMBEDDING_CALL: record.model_dump(mode="json")})
+
+
+def _check_trace_id(value: str) -> str:
+    """The `TraceId` rule, or `InvalidRequest` before any call: an invalid id would otherwise make
+    the record fail to build, and a record is never dropped (the value is not echoed)."""
+    try:
+        checked: str | None = _TRACE_ID.validate_python(value)
+    except ValidationError:
+        checked = None
+    if checked is None:
+        raise InvalidRequest()
+    return checked
 
 
 def batch_deadline_s(policy: RetryPolicy, request_timeout_s: float) -> float:

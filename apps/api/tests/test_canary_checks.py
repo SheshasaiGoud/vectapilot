@@ -6,10 +6,12 @@ on the real catalog, and break real tables on purpose, in tests/canary/test_leak
 Kept outside tests/canary/ on purpose: scripts/canary_gate.py must not count these as the suite.
 """
 
+from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
-from typing import Final
+from typing import Any, Final, cast
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from scripts.canary_gate import SuiteCounts, gate_problems, main, suite_counts
 from tests.canary.checks import (
@@ -26,7 +28,23 @@ from tests.canary.checks import (
     policy_problems,
     relation_problems,
 )
-from tests.canary.read_paths import PENDING_HAND_WRITE, READ_PATHS, read_path_params
+from tests.canary.read_paths import (
+    BAIT,
+    NEEDS_HAND_WRITE,
+    PENDING_HAND_WRITE,
+    READ_PATHS,
+    answer_through_the_api,
+    pending_hand_write,
+    read_path_params,
+    search_through_the_api,
+)
+from tests.conftest import make_settings
+from tests.retrieval.standins import FakeDatabase, hit
+from vectapilot_api.db import Database
+from vectapilot_api.embeddings.fake import fake_vector
+from vectapilot_api.kb.service import KbService
+from vectapilot_api.kb.types import ReindexResult
+from vectapilot_api.retrieval.types import SearchHit, VectorQuery
 
 PRINTED: Final = "(business_id = NULLIF(current_setting('app.business_id'::text, true), ''::text))"
 """How Postgres prints ADR 0009's policy back (`pg_get_expr`): parenthesised, NULLIF upper-case."""
@@ -274,11 +292,18 @@ def test_seeing_nothing_at_all_is_not_a_pass(outputs: dict[str, str]) -> None:
 # ── Read paths: a [HAND-WRITE] stub is a strict xfail until written ──────────────────────────
 
 
-def test_a_pending_read_path_is_a_read_path() -> None:
-    assert READ_PATHS.keys() >= PENDING_HAND_WRITE
+def test_every_stub_dependency_names_a_read_path_and_every_pending_stub_is_used() -> None:
+    assert READ_PATHS.keys() >= NEEDS_HAND_WRITE.keys()
+    assert set(NEEDS_HAND_WRITE.values()) >= PENDING_HAND_WRITE
+    # PR 6's routes run H1: they wait for the same switch as H1's own read path.
+    assert {name for name, stub in NEEDS_HAND_WRITE.items() if stub == "vector_search"} == {
+        "vector_search",
+        "GET /v1/kb/search",
+        "POST /v1/answer",
+    }
 
 
-def test_only_pending_read_paths_are_marked_and_each_as_a_strict_xfail_on_the_stub() -> None:
+def test_only_read_paths_on_a_pending_stub_are_marked_and_each_as_a_strict_xfail() -> None:
     marked: dict[str, list[dict[str, object]]] = {}
     for param in read_path_params():
         values, marks = param.values, param.marks  # type: ignore[attr-defined]
@@ -286,11 +311,112 @@ def test_only_pending_read_paths_are_marked_and_each_as_a_strict_xfail_on_the_st
 
     assert sorted(marked) == sorted(READ_PATHS)
     for name, xfails in marked.items():
-        if name in PENDING_HAND_WRITE:
+        if NEEDS_HAND_WRITE.get(name) in PENDING_HAND_WRITE:
             assert len(xfails) == 1, name
             assert (xfails[0]["strict"], xfails[0]["raises"]) == (True, NotImplementedError)
         else:
             assert xfails == [], name
+
+
+ApiReadPath = Callable[[AsyncEngine, Planted], Awaitable[Mapping[str, str]]]
+API_READ_PATHS: Final[list[ApiReadPath]] = [search_through_the_api, answer_through_the_api]
+
+
+@pytest.fixture
+def app_without_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
+    """PR 6's API read paths run the real app; here everything that would reach Postgres is
+    replaced (the registry, the reindex, the transaction, the stored models), and H1's
+    `vector_search` stays whatever the test sets. The same paths run against Postgres in CI."""
+
+    async def business_exists(self: Database, business_id: str) -> bool:
+        return True
+
+    async def reindex(self: KbService, business_id: str) -> ReindexResult:
+        return ReindexResult(
+            embedding_model="fake-embedding-1024", dimension=1024, chunks_reindexed=1
+        )
+
+    async def one_model(connection: AsyncConnection, business_id: str) -> frozenset[str]:
+        return frozenset({"fake-embedding-1024"})
+
+    monkeypatch.setattr("tests.canary.read_paths.Settings", make_settings)  # hermetic: no .env
+    monkeypatch.setattr(Database, "business_exists", business_exists)
+    monkeypatch.setattr(Database, "business_transaction", FakeDatabase().business_transaction)
+    monkeypatch.setattr(KbService, "reindex", reindex)
+    monkeypatch.setattr("vectapilot_api.retrieval.search.stored_models_in", one_model)
+
+
+def search_returning(
+    hits: Mapping[str, list[SearchHit]], asked: list[VectorQuery] | None = None
+) -> Any:
+    async def search(connection: AsyncConnection, query: VectorQuery) -> list[SearchHit]:
+        if asked is not None:
+            asked.append(query)
+        return hits.get(query.business_id, [])
+
+    return search
+
+
+def bait(owner: Planted, score: float = 1.0) -> SearchHit:
+    """`owner`'s bait chunk as a search would return it from test_leakage.plant's rows: the shared
+    `BAIT` text, titled with `owner`'s canary. Asking `BAIT`, CI scores every bait 1.0."""
+    return hit(BAIT, score, source_id="bait", title=owner.canary)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", API_READ_PATHS)
+@pytest.mark.usefixtures("app_without_postgres")
+async def test_an_api_read_path_lets_h1s_stub_through_so_its_xfail_holds(path: ApiReadPath) -> None:
+    with pytest.raises(NotImplementedError):
+        await path(cast(AsyncEngine, None), A)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", API_READ_PATHS)
+@pytest.mark.usefixtures("app_without_postgres")
+async def test_an_api_read_path_over_a_correct_search_passes_the_leak_check(
+    path: ApiReadPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hits = {A.business_id: [bait(A)], B.business_id: [bait(B)]}
+    asked: list[VectorQuery] = []
+    monkeypatch.setattr(
+        "vectapilot_api.retrieval.search.vector_search", search_returning(hits, asked)
+    )
+
+    outputs = await path(cast(AsyncEngine, None), A)
+
+    assert canary_leaks(outputs, A, B) == []
+    # The path asks the shared bait, so in CI the other business's bait is a same-model candidate
+    # that scores 1.0: there is something to leak (zara's Z1).
+    assert [(q.business_id, q.embedding) for q in asked] == [
+        (A.business_id, fake_vector(BAIT, 1024))
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", API_READ_PATHS)
+@pytest.mark.usefixtures("app_without_postgres")
+async def test_red_proof_an_api_read_path_over_a_leaking_search_is_caught(
+    path: ApiReadPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # What CI's bait gives a route that leaks: both baits at 1.0, the other one titled B's canary.
+    leaking = {A.business_id: [bait(A), bait(B)]}
+    monkeypatch.setattr("vectapilot_api.retrieval.search.vector_search", search_returning(leaking))
+
+    outputs = await path(cast(AsyncEngine, None), A)
+
+    assert any(B.canary in problem for problem in canary_leaks(outputs, A, B))
+
+
+def test_a_written_stub_has_no_marks_and_a_pending_one_exactly_one() -> None:
+    assert pending_hand_write("a-stub-that-was-written") == []
+    for stub in PENDING_HAND_WRITE:
+        [mark] = pending_hand_write(stub)
+        assert (mark.name, mark.kwargs["strict"], mark.kwargs["raises"]) == (
+            "xfail",
+            True,
+            NotImplementedError,
+        )
 
 
 # ── The CI gate (scripts/canary_gate.py) ─────────────────────────────────────────────────────

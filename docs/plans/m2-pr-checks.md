@@ -1,7 +1,7 @@
 # M2 — acceptance checks per PR
 
-> **Status (2026-10-22):** PR 0–5 merged; H1 scaffold in review (`m2/retrieval-scaffold`);
-> PR 5b (diego) lands before PR 6.
+> **Status (2026-10-22):** PR 0–5, the H1 scaffold and PR 5b merged; PR 6 built on
+> `m2/search-and-answer` (not yet a PR).
 
 ADRs 0008 (embeddings) and 0009 (database roles and RLS) record the decisions and their sources.
 This file holds what each M2 PR must prove; each PR copies its section into its own acceptance
@@ -234,6 +234,56 @@ like H1's (see the H1 proposal above).
   uncalibrated), `route` = `rag` (until M4) and `trace_id`.
 - Retrieved text is data, never instructions: it is delimited in the prompt, and adversarial
   documents are part of the tests.
+
+**Built (2026-10-22, ananya; Postgres parts not yet run: Docker is unreachable, they run in CI,
+and those that reach `vector_search` wait for H1).**
+- `GET /v1/kb/search?q=&k=` (`retrieval/search.py`, `retrieval/router.py`): the question is
+  embedded as `query` through the runner (one `embedding_call`, with the request's `trace_id`),
+  `require_one_model` runs (else `503 reindex_required`), then H1's `vector_search` as `customer`,
+  both in one business transaction (READ COMMITTED). `q` 1–2,000 characters, stripped, valid
+  Unicode; `k` 1–50, default 5. No threshold. Typed errors with fixed messages; nothing echoed.
+- `POST /v1/answer` with `{"question": ...}` (`answer/`): evidence = hits scoring at least
+  `rag_min_score` (0.3: **provisional and unmeasured**, tuned on the dev split in PR 8). No
+  evidence ⇒ `dont_know` (or `handoff` by setting) with no model call. Otherwise the versioned
+  prompt (`rag-answer.1`), `complete_structured` (alias `large`), then fail-closed verification:
+  shown only if the model answered, wrote a text and cited ≥ 1 id, and every cited id was in that
+  prompt; else the weak-evidence outcome, no text. Response: `outcome`, `answer` (null unless
+  answered), `sources` (cited chunks only), `confidence` (top score, `calibrated: false`),
+  `route: rag`, `trace_id` (also in the `embedding_call`, `llm_call` and new metadata-only
+  `rag_answer` records), `prompt_version`.
+- Prompt: each chunk in a block whose markers carry a boundary that no untrusted text contains
+  (deterministic, checked); documents first, question last. Tests: forged markers, injected
+  instructions, fake system prompts, forged ids, a model that follows them. `PROMPT_FINGERPRINTS`
+  pins each version's sha256 (fixed texts, a canonical rendering, `ModelAnswer`'s schema): CI
+  fails when the prompt changes without a new `PROMPT_VERSION`.
+- Canary: `GET /v1/kb/search` and `POST /v1/answer` (its prompt too) are read paths, pending on
+  H1 through `NEEDS_HAND_WRITE` + `PENDING_HAND_WRITE`; `tests/answer/test_postgres_search_and_answer.py`
+  uses the same switch, so H1's step 3 turns all of it on. Both businesses carry the same `bait`
+  chunk (configured model, the fake's vector of one shared text, titled with their own canary)
+  and the API paths ask it, so the other business's bait is a same-model candidate scoring 1.0:
+  a leaking route would show its canary (zara's review, Z1). Local proof of the plumbing:
+  `tests/test_canary_checks.py` (no Postgres, including a red proof over that bait). To add once
+  H1 lands (zara, ananya): a Postgres red proof that an API path turns red.
+- Open for shesha (options in the proposed [ADR 0011](../adr/0011-cited-answers-v0.md), status
+  Proposed, and in the PR description): threshold value, `dont_know` vs `handoff`, dropping a
+  whole answer on one unverified citation, answer language (Q6), isolation level, per-business
+  configuration, the question limit, the endpoint's shape, trace-id plumbing **including error
+  responses** (typed 502/503 bodies carry no trace id today; proposal: an `X-Trace-Id` header on
+  every `/v1/kb/search` and `/v1/answer` response); typed errors (503/502) vs `dont_know` for
+  `reindex_required` and model failures; **the paid HTTP path before M7's budgets** (ADR 0006
+  "Exposure" says no HTTP route, but with `llm_provider=anthropic` every `POST /v1/answer` with
+  evidence makes an uncapped `large` call; proposal: the API refuses `anthropic` unless an
+  explicit opt-in setting, default off, and amend ADR 0006); one switch vs a separate flag for
+  PR 6's H1-dependent Postgres tests (they first run inside H1's PR); how PR 6 lands (one PR with
+  owner reviews, or a two- or three-way stacked split).
+- **[decided 2026-10-22]** (shesha) ADR 0011 accepted with every recommended default
+  (threshold 0.3, provisional and unmeasured, tuned in PR 8 on the dev split; `dont_know` until
+  M8 can alert staff; any unverified citation drops the whole answer; answer in the question's
+  language until Q6; READ COMMITTED; platform defaults until a per-business config loader;
+  `POST /v1/answer`; 2,000 characters; typed 502/503 errors). An `X-Trace-Id` header on every
+  search and answer response, errors included. Until M7 budgets, the API refuses a paid provider
+  unless `api_allow_paid_llm` is on (ADR 0006 amendment). One PR. One switch for H1: if a PR 6 test
+  fails in the H1 PR, ananya fixes her test in a separate commit; H1 never changes to suit it.
 
 ## PR 7 — `m2/eval-v0` (noah)
 - The corpus: synthetic documents for two fictional businesses under `data/`, labelled synthetic.

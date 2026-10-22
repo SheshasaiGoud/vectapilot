@@ -75,7 +75,12 @@ SDK's, ours, or both. Structured output: native `output_config.format`, or Pydan
   ≥ attempt timeout; bad catalog ⇒ stop.
 - **Exposure.** No HTTP route in M1. Paid calls are human-only: the CLI is fake unless `--live`,
   which needs `--max-usd` (≤ $1.00) and a typed confirmation; it stops before any call whose worst
-  case could cross the cap.
+  case could cross the cap. **Amended 2026-10-22 (shesha):** M2 PR 6's `POST /v1/answer` makes
+  one uncapped call to `large` per answer with evidence, so until M7 adds budgets the API server
+  refuses a paid `llm_provider` (any but `fake`) unless `VECTAPILOT_API_ALLOW_PAID_LLM` is true
+  (default false): `create_app` stops at startup with a fixed `ValidationError` that names the
+  setting, never a value. Only the API checks it, not `_llm_rules`, so the CLI's `--live` path is
+  unchanged. Live evals in PR 8/9 go through the harness under M1's reservation cap, not the API.
 - **Coverage gate** (CI `api` job and `make check`) on `gateway/`, unimported modules counted:
   coverage.py's combined total ≥ 95.00 % and, as the playbook says "branch", branches alone ≥ 95 %.
   No `pragma: no cover` or `exclude_also` in `gateway/` without an ADR note.

@@ -114,6 +114,7 @@ def test_production_refuses_the_header(header: str, monkeypatch: pytest.MonkeyPa
         environment="production",
         llm_provider="anthropic",
         anthropic_api_key="not-a-real-key",
+        api_allow_paid_llm=True,  # production is never fake, so the API needs the opt-in
         embeddings_provider="voyage",
         voyage_api_key="not-a-real-key",
     )
