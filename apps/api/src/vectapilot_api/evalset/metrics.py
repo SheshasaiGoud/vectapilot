@@ -1,8 +1,8 @@
-"""H2 — retrieval metrics: hit@k and reciprocal rank / MRR. [HAND-WRITE]: shesha writes the bodies.
+"""H2 — retrieval metrics: hit@k and reciprocal rank / MRR. [HAND-WRITE], written by Claude at
+shesha's request (2026-10-22); shesha's explain-back is still part of acceptance.
 
-Guide: docs/learning/m2-metrics.md · Tests: tests/evalset/test_metrics.py, marked
-`xfail(strict=True, raises=NotImplementedError)` until these work; then remove "retrieval_metrics"
-from `PENDING_HAND_WRITE` in tests/canary/read_paths.py (the one switch for every H2 test).
+Guide: docs/learning/m2-metrics.md · Tests: tests/evalset/test_metrics.py, plain tests now
+("retrieval_metrics" is out of `PENDING_HAND_WRITE` in tests/canary/read_paths.py).
 
 **Input.** One `ranking.RankedRelevance` per question, already checked when it was built: per rank
 of the search's ranked list (before any score threshold, `ranking.ranked_relevance`), the
@@ -34,7 +34,7 @@ harness, which also adds the counts and intervals a report needs). These functio
 from collections.abc import Sequence
 from fractions import Fraction
 
-from vectapilot_api.evalset.ranking import RankedRelevance
+from vectapilot_api.evalset.ranking import RankedRelevance, check_k, check_results
 
 
 def hit_at_k(result: RankedRelevance, k: int) -> bool:
@@ -54,7 +54,9 @@ def hit_at_k(result: RankedRelevance, k: int) -> bool:
     - **Errors.** `ValueError` when `k` is not an int of at least 1 (a bool is refused), before
       anything is computed.
     """
-    raise NotImplementedError("H2 [HAND-WRITE]: shesha writes hit_at_k")
+    check_k(k)
+    # Slicing never fails past the end; an empty tuple (an irrelevant hit) is falsy.
+    return any(result.groups_by_rank[:k])
 
 
 def all_groups_at_k(result: RankedRelevance, k: int) -> bool:
@@ -78,7 +80,10 @@ def all_groups_at_k(result: RankedRelevance, k: int) -> bool:
       hit@k) is open, guide §5.
     - **Type and errors.** A `bool`, exactly. `ValueError` for a bad `k`, as in `hit_at_k`.
     """
-    raise NotImplementedError("H2 [HAND-WRITE]: shesha writes all_groups_at_k")
+    check_k(k)
+    # A set keeps each group once, however many hits find it.
+    found = {group for groups in result.groups_by_rank[:k] for group in groups}
+    return found == set(range(result.n_groups))
 
 
 def reciprocal_rank(result: RankedRelevance, k: int) -> Fraction:
@@ -99,7 +104,11 @@ def reciprocal_rank(result: RankedRelevance, k: int) -> Fraction:
     - **Type and errors.** A `Fraction`, also for 0 and 1. `ValueError` for a bad `k`, as in
       `hit_at_k`.
     """
-    raise NotImplementedError("H2 [HAND-WRITE]: shesha writes reciprocal_rank")
+    check_k(k)
+    for rank, groups in enumerate(result.groups_by_rank[:k], start=1):  # ranks start at 1
+        if groups:
+            return Fraction(1, rank)
+    return Fraction(0)
 
 
 def mean_hit_at_k(results: Sequence[RankedRelevance], k: int) -> Fraction:
@@ -118,7 +127,10 @@ def mean_hit_at_k(results: Sequence[RankedRelevance], k: int) -> Fraction:
     - **Type and bounds.** An exact `Fraction` from 0 to 1 (the module docstring: n is not
       recoverable from it, so the report states n itself).
     """
-    raise NotImplementedError("H2 [HAND-WRITE]: shesha writes mean_hit_at_k")
+    check_k(k)
+    check_results(results)
+    hits = sum(hit_at_k(result, k) for result in results)  # True counts as 1
+    return Fraction(hits, len(results))  # n is every question, misses included
 
 
 def mean_reciprocal_rank(results: Sequence[RankedRelevance], k: int) -> Fraction:
@@ -132,4 +144,7 @@ def mean_reciprocal_rank(results: Sequence[RankedRelevance], k: int) -> Fraction
       questions and `k`, MRR@k is never above hit@k (each reciprocal rank is at most 1 and is 0
       exactly when that question has no hit), and at `k = 1` the two are equal.
     """
-    raise NotImplementedError("H2 [HAND-WRITE]: shesha writes mean_reciprocal_rank")
+    check_k(k)
+    check_results(results)
+    total = sum((reciprocal_rank(result, k) for result in results), Fraction(0))
+    return total / len(results)  # Fraction / int stays exact; n includes every 0

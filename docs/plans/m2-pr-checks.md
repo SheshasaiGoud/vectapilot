@@ -1,7 +1,8 @@
 # M2 — acceptance checks per PR
 
 > **Status (2026-10-22):** PR 0–8, PR 5b and the H1 and H2 scaffolds merged (GitHub #23–#34; PR 8
-> is #34). PR 9 prepared on `m2/close-out-prep`. What remains is shesha's: H1, H2, the questions
+> is #34). PR 9 prepared (#35). H2's bodies written by Claude at shesha's request (`m2/metrics`).
+> What remains is shesha's: H1, the H2 explain-back, the questions
 > and freeze, accounts and keys, the live run, the note, the explain-backs and the quiz, in order
 > in [`m2-close-out.md`](m2-close-out.md).
 
@@ -419,6 +420,9 @@ counting hits as groups now fails 3 tests instead of 2.
   (Wilson for hit@k counts, a bootstrap over questions for MRR). There is also an "evidence
   complete" count (`all_groups_at_k` on the prompt's evidence) for `multi_hop` and `ambiguous`,
   and questions unscorable at a config are a third count, never dropped.
+- **Written (2026-10-22, Claude at shesha's request, `m2/metrics`).** Five bodies, about 20
+  lines; 142 of 142 cases pass; "retrieval_metrics" removed from `PENDING_HAND_WRITE`, which
+  also turns on PR 8's scoring tests (all pass). shesha's explain-back (guide §6) is still due.
 
 ## PR 8 — `m2/eval-harness` (noah)
 - The eval harness and the baseline report: hit@5, MRR@5 (H2, decided 2026-10-22) and

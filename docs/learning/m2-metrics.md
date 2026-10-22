@@ -8,6 +8,10 @@ while tuning and on test once per reported configuration, and adds what a report
 them (counts, intervals, dataset version, commit, config); your live run (PR 9) reports them. The functions are pure Python over small tuples: no
 database, no network, no model.
 
+> **Status (2026-10-22).** The five bodies are written, by Claude at shesha's request; their
+> tests run as plain tests ("retrieval_metrics" is out of `PENDING_HAND_WRITE`). This guide stays
+> as the reference for the explain-back (§6), which is still part of acceptance.
+
 ## Your task
 
 | | Write the body of | So that these pass | Size | Time-box | Your branch |

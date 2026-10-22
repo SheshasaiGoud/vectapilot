@@ -171,8 +171,8 @@ Planned: `packages/mcp_server/`, `scripts/`.
   MRR) · #34 eval harness (PR 8, ADR 0013). PR 9 prepared on `m2/close-out-prep`. Docker Desktop
   is unreachable on the Mac, so Postgres tests run in CI only for now. No baseline yet.
 - **M2 remaining, shesha only** (in order, with commands and signals: `docs/plans/m2-close-out.md`):
-  H2 bodies (`m2/metrics`) and H1 `vector_search` (`m2/retrieval`), both still in
-  `PENDING_HAND_WRITE`; the questions, friends' round-trip, `faq-hi` review and freeze; Voyage and
+  H1 `vector_search` (`m2/retrieval`, still in `PENDING_HAND_WRITE`); the H2 explain-back (H2's
+  bodies written by Claude at shesha's request, 2026-10-22, on `m2/metrics`); the questions, friends' round-trip, `faq-hi` review and freeze; Voyage and
   Anthropic accounts and keys; the live run (dev, then test once: `docs/learning/m2-eval-run.md`);
   the note (skeleton: `docs/notes/m2-what-i-measured.md`); H1/H2 explain-backs; close-out quiz.
 
