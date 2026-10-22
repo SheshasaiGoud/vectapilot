@@ -1,0 +1,15 @@
+sku,product,category,pack,price_inr,prescription_only,note
+PC-1001,Example Kibble Adult Dog,dog food,3 kg,1450,no,"SYNTHETIC: Paws & Co is fictional; brands and prices are invented."
+PC-1002,Example Kibble Puppy,dog food,3 kg,1600,no,
+PC-1003,Example Kibble Senior Dog,dog food,3 kg,1550,no,
+PC-1101,Sample Whiskers Indoor Cat,cat food,1.5 kg,980,no,
+PC-1102,Sample Whiskers Kitten,cat food,1.5 kg,1050,no,
+PC-1201,Example Renal Diet (cat),prescription diet,2 kg,2350,yes,Sold only with a vet's authorisation.
+PC-1202,Sample Digestive Diet (dog),prescription diet,3 kg,2600,yes,Sold only with a vet's authorisation.
+PC-1301,Clumping cat litter,litter,10 litres,650,no,
+PC-1401,Timothy hay,small pet food,1 kg,420,no,
+PC-1402,Pet bird seed mix,bird food,1 kg,380,no,
+PC-1501,Padded harness (medium),accessories,1 piece,899,no,"Sizes small, medium and large."
+PC-1502,Rope chew toy,toys,1 piece,249,no,
+PC-1503,Flea comb,grooming,1 piece,299,no,
+PC-1504,Travel carrier (cat or small dog),accessories,1 piece,2199,no,

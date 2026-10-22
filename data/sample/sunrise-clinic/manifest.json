@@ -1,0 +1,121 @@
+{
+  "business_id": "sunrise-clinic",
+  "name": "Sunrise Clinic",
+  "business_type": "human_healthcare",
+  "synthetic": true,
+  "created": "2026-10-22",
+  "authored_by": "Claude (noah-evals), M2 PR 7",
+  "languages": ["en", "hi"],
+  "default_language": "en",
+  "sources": [
+    {
+      "file": "faq.md",
+      "format": "markdown",
+      "source_id": "faq",
+      "version": "2026-10",
+      "title": "Frequently asked questions",
+      "content_kind": "faq",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-04-30"
+    },
+    {
+      "file": "faq-hi.md",
+      "format": "markdown",
+      "source_id": "faq-hi",
+      "version": "2026-10",
+      "title": "अक्सर पूछे जाने वाले सवाल",
+      "content_kind": "faq",
+      "language": "hi",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-04-30",
+      "review": "pending"
+    },
+    {
+      "file": "services.html",
+      "format": "html",
+      "source_id": "services",
+      "version": "2026-10",
+      "title": "Our services",
+      "content_kind": "service_list",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-04-30"
+    },
+    {
+      "file": "fees-2026-04.pdf",
+      "format": "pdf",
+      "source_id": "fees",
+      "version": "2026-04",
+      "title": "Fee Policy",
+      "content_kind": "pricing",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-01-31"
+    },
+    {
+      "file": "fees-2025-10.md",
+      "format": "markdown",
+      "source_id": "fees",
+      "version": "2025-10",
+      "title": "Fee Policy (October 2025)",
+      "content_kind": "pricing",
+      "language": "en",
+      "status": "retired",
+      "audience": "public",
+      "review_by": null
+    },
+    {
+      "file": "lab-tests.csv",
+      "format": "csv",
+      "source_id": "lab-tests",
+      "version": "2026-04",
+      "title": "Lab test price list",
+      "content_kind": "pricing",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-01-31"
+    },
+    {
+      "file": "appointment-policy.md",
+      "format": "markdown",
+      "source_id": "appointment-policy",
+      "version": "2026-10",
+      "title": "Appointment policy",
+      "content_kind": "appointment_policy",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-04-30"
+    },
+    {
+      "file": "emergency.md",
+      "format": "markdown",
+      "source_id": "emergency",
+      "version": "2026-10",
+      "title": "Emergencies and urgent help",
+      "content_kind": "other",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-01-31"
+    },
+    {
+      "file": "staff-handbook.md",
+      "format": "markdown",
+      "source_id": "staff-handbook",
+      "version": "2026-10",
+      "title": "Staff handbook (internal)",
+      "content_kind": "other",
+      "language": "en",
+      "status": "approved",
+      "audience": "staff_only",
+      "review_by": "2027-04-30"
+    }
+  ]
+}

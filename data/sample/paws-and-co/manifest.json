@@ -1,0 +1,120 @@
+{
+  "business_id": "paws-and-co",
+  "name": "Paws & Co",
+  "business_type": "veterinary",
+  "synthetic": true,
+  "created": "2026-10-22",
+  "authored_by": "Claude (noah-evals), M2 PR 7",
+  "languages": ["en", "te"],
+  "default_language": "en",
+  "sources": [
+    {
+      "file": "faq.md",
+      "format": "markdown",
+      "source_id": "faq",
+      "version": "2026-09",
+      "title": "Frequently asked questions",
+      "content_kind": "faq",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-03-31"
+    },
+    {
+      "file": "services.html",
+      "format": "html",
+      "source_id": "services",
+      "version": "2026-09",
+      "title": "Vet and grooming services",
+      "content_kind": "service_list",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-03-31"
+    },
+    {
+      "file": "fees.csv",
+      "format": "csv",
+      "source_id": "fees",
+      "version": "2026-07",
+      "title": "Fee list",
+      "content_kind": "pricing",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-01-31"
+    },
+    {
+      "file": "products.csv",
+      "format": "csv",
+      "source_id": "products",
+      "version": "2026-09",
+      "title": "Pet store catalogue",
+      "content_kind": "product_catalogue",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2026-12-31"
+    },
+    {
+      "file": "appointment-policy.md",
+      "format": "markdown",
+      "source_id": "appointment-policy",
+      "version": "2026-09",
+      "title": "Appointment policy",
+      "content_kind": "appointment_policy",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-03-31"
+    },
+    {
+      "file": "emergency.md",
+      "format": "markdown",
+      "source_id": "emergency",
+      "version": "2026-09",
+      "title": "Pet emergencies",
+      "content_kind": "other",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-01-31"
+    },
+    {
+      "file": "store-policy.md",
+      "format": "markdown",
+      "source_id": "store-policy",
+      "version": "2026-09",
+      "title": "Store returns and delivery",
+      "content_kind": "other",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-03-31"
+    },
+    {
+      "file": "staff-notes.md",
+      "format": "markdown",
+      "source_id": "staff-notes",
+      "version": "2026-09",
+      "title": "Staff notes (internal)",
+      "content_kind": "other",
+      "language": "en",
+      "status": "approved",
+      "audience": "staff_only",
+      "review_by": "2027-03-31"
+    },
+    {
+      "file": "holiday-hours.md",
+      "format": "markdown",
+      "source_id": "holiday-hours",
+      "version": "2026-12",
+      "title": "Year-end opening hours",
+      "content_kind": "other",
+      "language": "en",
+      "status": "draft",
+      "audience": "public",
+      "review_by": null
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+service,price_inr,note
+Consultation (dog or cat),500,"SYNTHETIC: Paws & Co is fictional, and these prices are invented."
+"Consultation (rabbit, guinea pig or hamster)",550,
+Consultation (pet bird),650,
+Follow-up visit for the same problem within 5 days,0,Free of charge; after 5 days it is a new consultation.
+Vaccination visit,400,Includes the check-up; each vaccine is priced separately by the vet.
+Microchip with registration,1200,
+Dental cleaning,from 4500,The final price is given after the pre-anaesthetic check.
+Spaying or neutering (cat),from 3500,The final price is given after the pre-surgery check.
+Spaying or neutering (dog),from 6000,The final price depends on the dog's weight and is given after the pre-surgery check.
+Nail trim,250,
+Bath and dry (small dog or cat),700,
+Bath and dry (large dog),1100,
+Full groom (small dog or cat),1200,
+Full groom (large dog),1800,

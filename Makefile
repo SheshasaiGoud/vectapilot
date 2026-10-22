@@ -8,7 +8,7 @@ LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapi
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo eval-check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -63,3 +63,8 @@ check: lint typecheck coverage ## Everything CI checks, locally
 llm-demo: ## Dry run of the LLM measurement CLI: fake provider, canned replies, no key, no cost
 	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" \
 		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run vectapilot-llm
+
+# ── Eval v0 (M2 PR 7) ───────────────────────────────────────────────────────────────────
+# Reads evals/datasets/support_qa/v0.1 and data/sample; no model, no network, writes nothing.
+eval-check: ## Check the eval v0 dataset for its stage, then print its coverage counts
+	$(API) uv run python -m vectapilot_api.evalset check && uv run python -m vectapilot_api.evalset report
