@@ -1,8 +1,9 @@
 # M2 — acceptance checks per PR
 
-> **Status (2026-10-22):** PR 0–7, the H1 and H2 scaffolds and PR 5b merged; PR 8 (the eval
-> harness) on `m2/eval-harness`: shesha's decisions taken and built (ADR 0013 accepted), not yet
-> committed.
+> **Status (2026-10-22):** PR 0–8, PR 5b and the H1 and H2 scaffolds merged (GitHub #23–#34; PR 8
+> is #34). PR 9 prepared on `m2/close-out-prep`. What remains is shesha's: H1, H2, the questions
+> and freeze, accounts and keys, the live run, the note, the explain-backs and the quiz, in order
+> in [`m2-close-out.md`](m2-close-out.md).
 
 ADRs 0008 (embeddings) and 0009 (database roles and RLS) record the decisions and their sources.
 This file holds what each M2 PR must prove; each PR copies its section into its own acceptance
@@ -529,6 +530,9 @@ unreachable, they run in CI, and the end-to-end run waits for H1 and H2).**
   for byte (sha256 of 175 files before and after).
 
 ## PR 9 — close-out (shesha's live run)
+- Ordered checklist of every remaining step, with commands, "done when" signals, helpers and
+  dependencies: [`m2-close-out.md`](m2-close-out.md). Note skeleton:
+  [`docs/notes/m2-what-i-measured.md`](../notes/m2-what-i-measured.md).
 - Runbook: [`docs/learning/m2-eval-run.md`](../learning/m2-eval-run.md) (prerequisites, key
   entry, the exact commands, the cost formula, labelling, what feeds the note).
 - Live ingestion and the eval v0 run; human correctness labels; a "what I measured" note with

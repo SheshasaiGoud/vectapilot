@@ -7,8 +7,9 @@ whole module is marked `xfail(strict=True, raises=NotImplementedError)`:
 - implemented, wrong answer    → a normal failure (only NotImplementedError counts as expected);
 - implemented, right answer    → "XPASS(strict)", a failure on purpose: that is your signal.
 
-When no test here is xfailed any more, delete the `pytestmark` statement below and run again: every
-test must then simply pass. Do not edit the tests to make them pass; change the code.
+When no test here is xfailed any more, delete the xfail entry of `pytestmark` below (keep
+`anyio`) and run again: every test must then simply pass. Do not edit the tests to make them
+pass; change the code.
 
 This module needs no Postgres, so it runs everywhere: the quickest signal while writing H1, but
 only about the statement's shape and bindings. A recording stand-in for the connection records
