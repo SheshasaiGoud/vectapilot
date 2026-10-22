@@ -10,6 +10,7 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 
 from vectapilot_api.embeddings.catalog import EmbeddingsProvider
 from vectapilot_api.gateway.types import OpaqueId, RetryPolicy, Seconds
+from vectapilot_api.retrieval.types import MAX_K
 
 ANTHROPIC_SDK_ENV_VARS: Final = (
     "ANTHROPIC_API_KEY",
@@ -39,6 +40,13 @@ PROCESS_ENV_ONLY: Final = {
 }
 """API keys read from the process environment only: in the `.env` file they stop startup (ADR 0007,
 ADR 0008). Field name → variable name."""
+
+API_PAID_LLM_REFUSED: Final = (
+    "api_allow_paid_llm (VECTAPILOT_API_ALLOW_PAID_LLM) must be true for the API server to use a"
+    " paid llm_provider (any but 'fake'): it has no budgets until M7"
+)
+"""The API server's refusal (decided 2026-10-22, ADR 0006 Exposure). Fixed text: it names the
+setting and the rule, never a value."""
 
 # With PYDANTIC_SETTINGS_DEBUG set, pydantic-settings logs every raw source value (the API key and
 # the DSN passwords included) at DEBUG on this logger, before any validator runs. Pinned at WARNING
@@ -90,6 +98,12 @@ class Settings(BaseSettings):
     anthropic_api_key: SecretStr | None = None
     """`VECTAPILOT_ANTHROPIC_API_KEY`, from the process environment only (a `.env` one stops
     startup, see `settings_customise_sources`). Prints as '**********'."""
+    api_allow_paid_llm: bool = False
+    """`VECTAPILOT_API_ALLOW_PAID_LLM`: the API server's opt-in to a paid `llm_provider` (decided
+    2026-10-22, ADR 0006 Exposure). Until M7 adds budgets, every answer with evidence is an
+    uncapped call, so `create_app` refuses any provider but the fake while this is false
+    (`require_api_paid_llm_opt_in`). The measurement CLI never reads it: its `--live` run has its
+    own `--max-usd` reservation cap."""
 
     # ── Embeddings (ADR 0008) ──
     embeddings_provider: EmbeddingsProvider = "fake"
@@ -101,6 +115,21 @@ class Settings(BaseSettings):
     """Each embedding request's limit (a safety bound, not a latency target)."""
     voyage_api_key: SecretStr | None = None
     """`VECTAPILOT_VOYAGE_API_KEY`, from the process environment only, as the Anthropic key."""
+
+    # ── Cited answers (M2 PR 6, `answer/`) ──
+    # PLATFORM DEFAULTS until per-business configuration exists (rule 9: nothing here names a
+    # business). PROVISIONAL and UNMEASURED: starting values chosen before any eval data, to be
+    # tuned on eval v0's dev split (PR 7/8), never on the held-out test split. Not a result.
+    rag_min_score: float = Field(default=0.3, ge=0.0, le=1.0, allow_inf_nan=False)
+    """The abstention threshold: a hit is evidence only if its score (cosine similarity, H1) is at
+    least this. With no evidence the model is not called and the answer is the weak-evidence
+    outcome. 0.3 is an unmeasured starting value, not a calibrated one."""
+    rag_context_k: int = Field(default=5, ge=1, le=MAX_K)
+    """How many hits one answer retrieves (at most this many reach the prompt)."""
+    rag_weak_evidence_outcome: Literal["dont_know", "handoff"] = "dont_know"
+    """What weak or unusable evidence becomes. `dont_know` (the default) is an honest "I don't
+    know"; `handoff` is business-context §3.5's proposed default, but nothing notifies staff until
+    M8, so it is only a label for now."""
 
     @classmethod
     def settings_customise_sources(
@@ -201,6 +230,28 @@ class Settings(BaseSettings):
                     " (they replace the OS trust store or write TLS session keys): unset them"
                 )
         return problems
+
+    def require_api_paid_llm_opt_in(self) -> None:
+        """The API server's startup rule (2026-10-22): a paid provider needs `api_allow_paid_llm`.
+
+        Not one of `_llm_rules`: the measurement CLI builds the same Settings, and its `--live` run
+        must keep working under its own cap, so only `create_app` calls this. Every provider but
+        the fake counts as paid, so a provider added later is refused until opted in. Raised as a
+        ValidationError like every other settings rule, from fixed text (no value is passed in).
+        """
+        if self.llm_provider == "fake" or self.api_allow_paid_llm:
+            return
+        raise ValidationError.from_exception_data(
+            type(self).__name__,
+            [
+                {
+                    "type": PydanticCustomError("paid_llm_not_opted_in", API_PAID_LLM_REFUSED),
+                    "loc": ("api_allow_paid_llm",),
+                    "input": None,
+                }
+            ],
+            hide_input=True,
+        )
 
     def llm_retry_policy(self) -> RetryPolicy:
         """The retry settings as H2's `RetryPolicy` (valid by construction: see `_llm_rules`)."""

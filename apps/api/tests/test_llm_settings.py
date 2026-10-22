@@ -14,11 +14,20 @@ import pytest
 from pydantic import ValidationError
 
 from tests.conftest import TEST_SETTINGS_FIELDS, make_settings
+from vectapilot_api import llm_cli
 from vectapilot_api.config import ANTHROPIC_SDK_ENV_VARS, TLS_ENV_VARS, Settings
+from vectapilot_api.gateway.providers.fake import FakeProvider
 from vectapilot_api.gateway.types import RetryPolicy
+from vectapilot_api.main import create_app
 
 CANARY = "canary-key-7f3a"  # fake on purpose: never shaped like a real API key
 CANARY_DSN = f"postgresql+asyncpg://u:{CANARY}-db@db.example:5432/app"
+PAID: dict[str, Any] = {
+    "environment": "local",
+    "llm_provider": "anthropic",
+    "anthropic_api_key": CANARY,
+}
+"""Valid Settings for the paid provider: every `_llm_rules` rule passes."""
 
 
 def assert_hides(error: ValidationError, *canaries: str) -> str:
@@ -67,6 +76,7 @@ def test_defaults_are_adr_0006_starting_values(monkeypatch: pytest.MonkeyPatch) 
     assert (settings.llm_max_retries, settings.llm_max_repairs) == (2, 1)
     assert (settings.llm_backoff_base_seconds, settings.llm_backoff_cap_seconds) == (0.5, 8.0)
     assert settings.anthropic_api_key is None
+    assert settings.api_allow_paid_llm is False  # decided 2026-10-22: opt-in, off by default
 
 
 def test_the_retry_policy_comes_from_settings() -> None:
@@ -287,3 +297,72 @@ def test_pydantic_settings_debug_output_never_reaches_the_logs(
 
     assert CANARY not in caplog.text  # in the env key and the DSN password
     assert logging.getLogger("pydantic_settings").getEffectiveLevel() == logging.WARNING
+
+
+# ── The API server's opt-in to a paid provider (decided 2026-10-22, ADR 0006 Exposure) ───────
+# `create_app` is only called here, never started: the lifespan (clients, the gateway) never runs,
+# so nothing is built and nothing is sent.
+
+
+def test_the_api_refuses_a_paid_provider_without_the_opt_in() -> None:
+    settings = make_settings(database_url=CANARY_DSN, **PAID)  # valid Settings, opt-in off
+
+    with pytest.raises(ValidationError) as caught:
+        create_app(settings)  # at startup, in the factory: before any request is served
+
+    message = assert_hides(caught.value)  # neither the key nor the DSN password
+    assert message == (
+        "api_allow_paid_llm (VECTAPILOT_API_ALLOW_PAID_LLM) must be true for the API server to use"
+        " a paid llm_provider (any but 'fake'): it has no budgets until M7"
+    )
+    [detail] = caught.value.errors()  # even with the input: none was ever passed in
+    assert (detail["loc"], detail["type"], detail["input"]) == (
+        ("api_allow_paid_llm",),
+        "paid_llm_not_opted_in",
+        None,
+    )
+
+
+def test_an_injected_provider_does_not_bypass_the_opt_in() -> None:
+    # The rule reads Settings only: a paid provider in Settings is refused whatever is injected.
+    with pytest.raises(ValidationError, match="VECTAPILOT_API_ALLOW_PAID_LLM"):
+        create_app(make_settings(**PAID), llm_provider=FakeProvider())
+
+
+def test_the_api_accepts_a_paid_provider_with_the_opt_in() -> None:
+    app = create_app(make_settings(**PAID, api_allow_paid_llm=True))
+
+    assert app.state.settings.llm_provider == "anthropic"
+
+
+@pytest.mark.parametrize("environment", ["local", "test", "ci"])
+@pytest.mark.parametrize("opt_in", [False, True], ids=["opt-in-off", "opt-in-on"])
+def test_the_api_always_accepts_the_fake_provider(environment: str, opt_in: bool) -> None:
+    settings = make_settings(environment=environment, api_allow_paid_llm=opt_in)
+
+    assert create_app(settings).state.settings.llm_provider == "fake"
+    # A test's injected (scripted) fake as well:
+    assert create_app(settings, llm_provider=FakeProvider()).state.settings is settings
+
+
+def test_the_measurement_cli_does_not_need_the_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The CLI's `--live` loader reads the same Settings as the API, but the opt-in is the API
+    # server's rule alone: the CLI's live run keeps its own --max-usd cap (test_llm_cli.py runs it
+    # with settings that leave the opt-in off).
+    for name in [k for k in os.environ if k.startswith("VECTAPILOT_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.chdir(tmp_path)  # no .env here
+    monkeypatch.setenv("VECTAPILOT_ENVIRONMENT", "local")
+    monkeypatch.setenv("VECTAPILOT_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("VECTAPILOT_ANTHROPIC_API_KEY", CANARY)
+    monkeypatch.setenv("VECTAPILOT_DATABASE_URL", "postgresql+asyncpg://u:p@127.0.0.1:1/db")
+    monkeypatch.setenv("VECTAPILOT_REDIS_URL", "redis://127.0.0.1:1/0")
+
+    live = llm_cli.load_settings(True)  # the real loader, reading that environment
+
+    assert (live.llm_provider, live.api_allow_paid_llm) == ("anthropic", False)
+    # The same Settings stop the API server:
+    with pytest.raises(ValidationError, match="VECTAPILOT_API_ALLOW_PAID_LLM"):
+        create_app(live)

@@ -4,28 +4,43 @@ A read path acts as one business and returns what it produced, as text per label
 (`test_no_read_path_shows_another_businesss_canary`) runs every entry of `READ_PATHS` as each
 business and fails if the other business's id or canary appears, or if its own never does.
 
-The paths: plain SQL on every business table, and H1's top-k vector search (`m2/retrieval`).
-Add yours here, with no other change:
-- PR 6: each business route (`/v1/kb/...`) called with that business's `X-Business-Id`.
+The paths: plain SQL on every business table, H1's top-k vector search (`m2/retrieval`), and
+PR 6's two routes that show chunk text (`GET /v1/kb/search`, `POST /v1/answer`, through the real
+app with that business's `X-Business-Id`). Add yours here, with no other change.
 
-**A path whose code is still a [HAND-WRITE] stub** is listed in `PENDING_HAND_WRITE` too. The canary
-test then marks it `xfail(strict=True, raises=NotImplementedError)` (`read_path_params`), which
-`scripts/canary_gate.py` allows as a recorded gap: the scaffold PR stays green, and the path is
-wired so that it runs the moment the stub is replaced. Then the path's canary tests show
-XPASS(strict), a failure on purpose, or FAILED if it leaks: either way CI is red until the name is
-removed from `PENDING_HAND_WRITE`, and from then on the path is checked like any other.
+**The bait.** A search path is only a test if the other business's data could be returned. So
+`test_leakage.plant` gives both businesses the same `BAIT` chunk (same text, the configured
+embedding model, the fake embedder's vector of `BAIT`), titled with that business's own canary,
+and PR 6's API paths ask `BAIT`. The other business's bait is then a same-model candidate that
+scores 1.0, above any answer threshold: a route that leaked across businesses would return it,
+and its title, the other canary, would show in the hits, the prompt and the sources.
+
+**A path that runs a [HAND-WRITE] stub** names it in `NEEDS_HAND_WRITE`, and a stub that still
+raises NotImplementedError is listed in `PENDING_HAND_WRITE`. While it is, the canary test marks
+the path `xfail(strict=True, raises=NotImplementedError)` (`read_path_params`, via
+`pending_hand_write`), which `scripts/canary_gate.py` allows as a recorded gap: the PR stays green,
+and the path is wired so that it runs the moment the stub is replaced. Then the path's canary
+tests show XPASS(strict), a failure on purpose, or FAILED if it leaks: either way CI is red until
+the stub's name is removed from `PENDING_HAND_WRITE`, and from then on the path is checked like
+any other. **One switch:** PR 6's Postgres tests use the same `pending_hand_write`, so removing
+"vector_search" (H1's step 3) turns on every check that runs H1 at once.
 """
 
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Final
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from tests.answer.providers import CitingProvider
 from tests.canary.catalog import business_tables
 from tests.canary.checks import Planted
+from vectapilot_api.business import BUSINESS_HEADER
+from vectapilot_api.config import Settings
 from vectapilot_api.db import business_transaction
+from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.types import MAX_K, VectorQuery
 from vectapilot_api.retrieval.vector import vector_search
 
@@ -34,6 +49,10 @@ ReadPath = Callable[[AsyncEngine, Planted], Awaitable[Mapping[str, str]]]
 
 CANARY_EMBEDDING: Final = (0.0,) * 1023 + (1.0,)
 """The direction `test_leakage.plant` stores every canary chunk with (its `VECTOR`)."""
+
+BAIT: Final = "Bait for the canary suite: the same question and chunk text for every business."
+"""The text of each business's `bait` chunk (`test_leakage.plant`) and the question PR 6's API
+read paths ask. Shared on purpose; it holds no business id and no canary."""
 
 _STORED_MODELS: Final = text(
     "SELECT DISTINCT embedding_model FROM chunks WHERE business_id = :b ORDER BY 1"
@@ -54,9 +73,10 @@ async def sql_on_every_business_table(engine: AsyncEngine, me: Planted) -> Mappi
 
 
 async def vector_search_as_staff(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
-    """H1's `vector_search` as `me`, once per embedding model id `me`'s chunks carry, every hit as
-    JSON. Staff is the widest reader (public and staff-only), `k` the most allowed, and the question
-    points straight at the canary chunk, so a working search shows `me`'s canary.
+    """H1's `vector_search` as `me`, once per embedding model id `me`'s chunks carry (`fake` for
+    the canary chunk, the configured model for the bait), every hit as JSON. Staff is the widest
+    reader (public and staff-only), `k` the most allowed, and the question points straight at the
+    canary chunk, so a working search shows `me`'s canary (the bait's title is `me`'s canary too).
 
     Like every read path here it runs as the app role, under RLS, so it proves isolation through
     RLS, not `vector_search`'s own `WHERE business_id` clause: a search without that clause would
@@ -80,25 +100,92 @@ async def vector_search_as_staff(engine: AsyncEngine, me: Planted) -> Mapping[st
     return outputs
 
 
+def _reindex(client: TestClient, me: Planted) -> None:
+    """Re-embed `me`'s canary chunk with the configured (fake) model: `test_leakage.plant` stores
+    it under model id `fake` next to the bait under the configured one, and search refuses mixed
+    models (`reindex_required`). Afterwards all of `me`'s chunks carry the configured model; the
+    canary chunk scores about 0 against `BAIT`, the bait 1.0."""
+    response = client.post("/v1/kb/reindex", headers={BUSINESS_HEADER: me.business_id})
+    assert response.is_success, response.text
+
+
+async def search_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """`GET /v1/kb/search` as `me` (reader customer: approved public chunks), asking `BAIT` with
+    the largest `k`; the response body as text (`me`'s bait shows `me`'s canary as its title).
+    Through the real app, as the app role: it proves the route's isolation through RLS and its own
+    scoping together."""
+    with TestClient(create_app(Settings())) as client:
+        _reindex(client, me)
+        response = client.get(
+            "/v1/kb/search",
+            params={"q": BAIT, "k": MAX_K},
+            headers={BUSINESS_HEADER: me.business_id},
+        )
+    assert response.is_success, response.text
+    return {"GET /v1/kb/search": response.text}
+
+
+async def answer_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """`POST /v1/answer` as `me`, asking `BAIT`, with a scripted model that cites every real block
+    of its prompt; the response body (its `sources` show chunk text and titles) and every prompt
+    the model got (business-context §5: a prompt only ever holds the current business's data).
+    `me`'s bait scores 1.0, so it is evidence, and its title, `me`'s canary, is the positive
+    control in both outputs."""
+    provider = CitingProvider()
+    with TestClient(create_app(Settings(), llm_provider=provider)) as client:
+        _reindex(client, me)
+        response = client.post(
+            "/v1/answer",
+            json={"question": BAIT},
+            headers={BUSINESS_HEADER: me.business_id},
+        )
+    assert response.is_success, response.text
+    prompts = [f"{call.system}\n{call.messages[-1].content}" for call in provider.calls]
+    return {"POST /v1/answer": response.text, "POST /v1/answer (prompt)": "\n".join(prompts)}
+
+
 READ_PATHS: Final[dict[str, ReadPath]] = {
     "sql": sql_on_every_business_table,
     "vector_search": vector_search_as_staff,
-    # "GET /v1/kb/search": ..., PR 6
+    "GET /v1/kb/search": search_through_the_api,
+    "POST /v1/answer": answer_through_the_api,
 }
 
+NEEDS_HAND_WRITE: Final[Mapping[str, str]] = {
+    "vector_search": "vector_search",
+    "GET /v1/kb/search": "vector_search",
+    "POST /v1/answer": "vector_search",
+}
+"""Read path → the [HAND-WRITE] stub it runs (H1's `vector_search` for all three)."""
+
 PENDING_HAND_WRITE: Final = frozenset({"vector_search"})
-"""Read paths still raising NotImplementedError (a [HAND-WRITE] stub). H1: remove
-"vector_search" once `retrieval/vector.py` is written (its canary tests show XPASS(strict))."""
+"""[HAND-WRITE] stubs still raising NotImplementedError. H1: remove "vector_search" once
+`retrieval/vector.py` is written (its canary tests show XPASS(strict)). That one line turns on
+every check that runs it: the read paths above and PR 6's Postgres tests
+(`tests/answer/test_postgres_search_and_answer.py`), which all ask `pending_hand_write`."""
+
+
+def pending_hand_write(stub: str) -> list[pytest.MarkDecorator]:
+    """The marks for a test that runs `stub`: a strict xfail on NotImplementedError while the stub
+    is pending, none once it is written (so the test must then simply pass)."""
+    if stub not in PENDING_HAND_WRITE:
+        return []
+    return [
+        pytest.mark.xfail(
+            strict=True,
+            raises=NotImplementedError,
+            reason=f"[HAND-WRITE] {stub} not written yet (tests/canary/read_paths.py,"
+            " PENDING_HAND_WRITE)",
+        )
+    ]
 
 
 def read_path_params() -> list[object]:
     """`READ_PATHS`' names for `pytest.mark.parametrize`, a pending one marked strict xfail."""
-    pending = pytest.mark.xfail(
-        strict=True,
-        raises=NotImplementedError,
-        reason="[HAND-WRITE] stub not written yet (tests/canary/read_paths.py, PENDING_HAND_WRITE)",
-    )
     return [
-        pytest.param(name, marks=[pending] if name in PENDING_HAND_WRITE else [])
+        pytest.param(
+            name,
+            marks=pending_hand_write(NEEDS_HAND_WRITE[name]) if name in NEEDS_HAND_WRITE else [],
+        )
         for name in sorted(READ_PATHS)
     ]

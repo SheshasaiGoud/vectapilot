@@ -19,7 +19,9 @@ INVALID_REQUEST: Final = "the request is invalid: see problems (location, type)"
 async def kb_error_handler(request: Request, exc: Exception) -> JSONResponse:
     error = cast(KbError, exc)  # registered for KbError only
     return JSONResponse(
-        {"detail": error.message, "error": error.code}, status_code=error.status_code
+        {"detail": error.message, "error": error.code},
+        status_code=error.status_code,
+        headers=error.headers or None,
     )
 
 

@@ -78,6 +78,11 @@ simply pass:
    `test_vector_search.py`'s owner-connection and other-business-transaction tests, which the
    canary gate does not cover. A proposal for zara and you once H1 lands: mirror those two checks
    into `tests/canary`, or make the gate require those test ids to pass.
+   **PR 6 pointer (one switch, decided 2026-10-22):** removing this entry also turns on PR 6's
+   canary paths (`GET /v1/kb/search`, `POST /v1/answer`) and the H1-dependent tests in
+   `tests/answer/test_postgres_search_and_answer.py`, which all ask `pending_hand_write`. If one
+   of those PR 6 tests fails in your H1 PR, ananya fixes that test in a separate commit; you never
+   change H1 to make a PR 6 test pass (H1's own tests above are the ones your code answers to).
 
 **Rules.** Do not edit a test to make it pass; change the code. If you think a test is wrong, say so
 in your PR. `mypy` (strict) and `ruff` apply as everywhere. Commit with your own message (for
@@ -152,7 +157,8 @@ and one business setting, but **not** one snapshot: the codebase sets no isolati
 Postgres' default READ COMMITTED applies, where each statement sees its own snapshot. If a reindex
 commits between PR 6's model check and the search, the search simply finds no chunks of the old
 model, or a mix that the model filter keeps apart: vectors of two models are still never compared.
-If PR 6 needs a single snapshot, it opens the transaction as REPEATABLE READ (a PR 6 decision).
+PR 6 keeps READ COMMITTED (ADR 0011, accepted 2026-10-22): a single snapshot (REPEATABLE READ)
+is not needed for correctness, because your model filter keeps the vectors apart.
 
 ## 3. Common mistakes
 - Filtering or re-sorting in Python after the query (see §2.3).

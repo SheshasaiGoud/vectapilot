@@ -88,8 +88,52 @@ async def test_batches_are_embedded_in_order_with_one_record_each(
         "attempts": 1,
         "retries": 0,
         "latency_ms": 0.0,
+        "trace_id": None,
     }
     assert PLANTED_TEXT not in caplog.text  # metadata only
+
+
+async def test_a_trace_id_goes_into_every_record_of_the_call(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    embedder = ScriptedEmbedder(small_spec(max_texts_per_request=1))
+    trace_id = "4bf92f3577b34da6a3ce929d0e0e4736"
+
+    await runner_for(embedder, FakeClock()).embed(
+        ["one", "two"],
+        input_type="query",
+        business_id=BUSINESS,
+        operation="kb-search",
+        trace_id=trace_id,
+    )
+
+    assert [(r["trace_id"], r["input_type"]) for r in records(caplog)] == [
+        (trace_id, "query"),
+        (trace_id, "query"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "trace_id", ["", "0" * 32, "4BF92F3577B34DA6A3CE929D0E0E4736", PLANTED_TEXT]
+)
+async def test_an_invalid_trace_id_is_refused_before_any_call(
+    caplog: pytest.LogCaptureFixture, trace_id: str
+) -> None:
+    caplog.set_level(logging.INFO)
+    embedder = ScriptedEmbedder()
+
+    with pytest.raises(InvalidRequest) as raised:
+        await runner_for(embedder, FakeClock()).embed(
+            ["one"],
+            input_type="query",
+            business_id=BUSINESS,
+            operation="kb-search",
+            trace_id=trace_id,
+        )
+
+    assert embedder.batches == [] and records(caplog) == []
+    assert PLANTED_TEXT not in str(raised.value)
 
 
 async def test_a_transient_failure_is_retried_with_backoff(

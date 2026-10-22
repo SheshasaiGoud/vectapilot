@@ -122,6 +122,7 @@ Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
 - [ADR 0008](docs/adr/0008-embeddings.md) — embeddings: Voyage AI over REST (`voyage-4`, 1024 dims), model id per chunk, exact search, fake embedder in CI
 - [ADR 0009](docs/adr/0009-db-roles-and-rls.md) — app role without `BYPASSRLS`, `FORCE` RLS, business set per transaction, `X-Business-Id` until M8, canary suite as hard gate
 - [ADR 0010](docs/adr/0010-one-approved-version-per-source.md) — one approved version per source: partial unique index (migration 0004, `business_id` first), approving retires the previous version in the same transaction
+- [ADR 0011](docs/adr/0011-cited-answers-v0.md) — cited answers v0: answer only from retrieved chunks, any unverified citation drops the answer, no model call below the provisional score threshold
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·

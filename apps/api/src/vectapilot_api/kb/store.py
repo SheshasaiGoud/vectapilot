@@ -22,6 +22,7 @@ from typing import Final, Protocol
 
 from sqlalchemy import Row, text
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from vectapilot_api.db import Database
 from vectapilot_api.kb.types import (
@@ -149,6 +150,15 @@ _REPLACE_EMBEDDING: Final = text(
 )
 
 
+async def stored_models_in(connection: AsyncConnection, business_id: str) -> frozenset[str]:
+    """The business's distinct `chunks.embedding_model` values, on the caller's connection (inside
+    its business transaction; the `WHERE` names the business on top of RLS). The one copy of this
+    query: reindex (`stored_models` below) and search (`retrieval/search.py`) decide from it, so
+    the one-model guard (ADR 0008) cannot see two answers."""
+    result = await connection.execute(_STORED_MODELS, {"business_id": business_id})
+    return frozenset(result.scalars().all())
+
+
 class PostgresKbStore:
     """`KbStore` over the API's `Database` (the app role, under RLS)."""
 
@@ -229,8 +239,7 @@ class PostgresKbStore:
 
     async def stored_models(self, business_id: str) -> frozenset[str]:
         async with self._database.business_transaction(business_id) as connection:
-            result = await connection.execute(_STORED_MODELS, {"business_id": business_id})
-            return frozenset(result.scalars().all())
+            return await stored_models_in(connection, business_id)
 
     async def stale_chunks(self, business_id: str, model: str) -> list[StaleChunk]:
         params = {"business_id": business_id, "model": model}

@@ -4,6 +4,7 @@ Every error carries a fixed message and a code: never document text, a header or
 """
 
 import uuid
+from collections.abc import Mapping
 from datetime import date
 from enum import StrEnum
 from typing import Literal
@@ -141,13 +142,24 @@ class ChunkEmbedding(BaseModel):
 
 
 class KbError(Exception):
-    """A typed API error: HTTP status, a stable code and a fixed message (never input)."""
+    """A typed API error: HTTP status, a stable code and a fixed message (never input).
 
-    def __init__(self, status_code: int, code: str, message: str) -> None:
+    `headers` go onto the error response as they are: values the server made (PR 6's
+    `X-Trace-Id`), never request input."""
+
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
+        self.headers: dict[str, str] = dict(headers or {})
 
 
 class VersionConflict(Exception):

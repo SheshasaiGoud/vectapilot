@@ -45,11 +45,15 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "llm_backoff_cap_seconds": 8.0,
     "llm_max_repairs": 1,
     "anthropic_api_key": None,
+    "api_allow_paid_llm": False,
     "embeddings_provider": "fake",
     "embeddings_model": None,
     "embeddings_dimension": 1024,
     "embeddings_timeout_seconds": 30.0,
     "voyage_api_key": None,
+    "rag_min_score": 0.3,
+    "rag_context_k": 5,
+    "rag_weak_evidence_outcome": "dont_know",
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 
