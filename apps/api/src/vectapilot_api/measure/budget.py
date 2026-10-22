@@ -113,9 +113,35 @@ def reserve(
     `schema` is the case's schema class, None for a plain case. The case's alias must be in the
     catalog (`dataset.check_dataset` checks it); a missing one raises `KeyError`.
     """
-    alias = catalog.aliases[case.alias]
+    return request_reservation(
+        case_id=case.id,
+        alias_name=case.alias,
+        prompt_bytes=len(case.prompt.encode("utf-8")),
+        schema=schema,
+        catalog=catalog,
+        max_retries=max_retries,
+        max_repairs=max_repairs,
+    )
+
+
+def request_reservation(
+    *,
+    case_id: str,
+    alias_name: str,
+    prompt_bytes: int,
+    schema: type[BaseModel] | None,
+    catalog: Catalog,
+    max_retries: int,
+    max_repairs: int,
+) -> Reservation:
+    """The worst-case cost of one call whose prompt text (system prompt and messages together) is
+    `prompt_bytes` UTF-8 bytes: the module docstring's formula, for any caller. `reserve` uses it
+    for a smoke case; the eval harness (M2 PR 8) for a cited answer's request, with its system
+    prompt. `case_id` only labels the reservation. A missing alias raises `KeyError`.
+    """
+    alias = catalog.aliases[alias_name]
     pricing = catalog.models[alias.model]
-    first = len(case.prompt.encode("utf-8")) + REQUEST_OVERHEAD_TOKENS
+    first = prompt_bytes + REQUEST_OVERHEAD_TOKENS
     prompts = [first]
     if schema is not None:
         prompts[0] += _schema_bytes(schema) + STRUCTURED_INSTRUCTION_BYTES
@@ -131,8 +157,8 @@ def reserve(
         Decimal(0),
     )
     return Reservation(
-        case_id=case.id,
-        alias=case.alias,
+        case_id=case_id,
+        alias=alias_name,
         model=alias.model,
         attempts_per_request=attempts,
         prompt_tokens=tuple(prompts),

@@ -8,6 +8,12 @@
 # on the day of the first live call (docs/plans/m2-pr-checks.md, PR 4).
 #
 # A model change means a full reindex of the business (embeddings/guard.py), never mixed vectors.
+#
+# Prices (M2 PR 8): list price in US dollars per million tokens, exactly as ADR 0008's Facts
+# record them from https://docs.voyageai.com/docs/pricing (checked 2026-10-21): voyage-4 $0.06,
+# voyage-4-lite $0.02. Read as Decimal. The free allowance (first 200M tokens of the 4 series per
+# account) is never applied: the eval harness reserves every token as billed. Re-check the price
+# on the day of the first live call, with the model id.
 
 [providers.voyage]
 default_model = "voyage-4"
@@ -23,6 +29,9 @@ max_tokens_per_request = 320_000
 context_tokens = 32_000
 source_url = "https://docs.voyageai.com/docs/embeddings"
 checked = 2026-10-21
+usd_per_million_tokens = 0.06
+price_source_url = "https://docs.voyageai.com/docs/pricing"
+price_checked = 2026-10-21
 
 # The cheaper fallback, if eval v0 shows no quality loss (ADR 0008).
 [models.voyage-4-lite]
@@ -33,6 +42,9 @@ max_tokens_per_request = 1_000_000
 context_tokens = 32_000
 source_url = "https://docs.voyageai.com/docs/embeddings"
 checked = 2026-10-21
+usd_per_million_tokens = 0.02
+price_source_url = "https://docs.voyageai.com/docs/pricing"
+price_checked = 2026-10-21
 
 # The offline test double (embeddings/fake.py). Same limits as voyage-4, so CI refuses what
 # production would. Its vectors mean nothing: no quality number is ever reported from it.
@@ -44,3 +56,7 @@ max_tokens_per_request = 320_000
 context_tokens = 32_000
 source_url = "https://github.com/SheshasaiGoud/vectapilot/blob/main/docs/adr/0008-embeddings.md"
 checked = 2026-10-21
+# Offline and free: nothing is sent anywhere.
+usd_per_million_tokens = 0
+price_source_url = "https://github.com/SheshasaiGoud/vectapilot/blob/main/docs/adr/0008-embeddings.md"
+price_checked = 2026-10-21

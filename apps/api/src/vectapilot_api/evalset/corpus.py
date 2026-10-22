@@ -17,8 +17,11 @@ business, so the same `fees` key cannot reach the other business's `fees`.
 **When a retrieved hit counts as relevant** is by content, not by chunk number (`relevance.py`,
 the rule PR 8 scores with). `resolve_key` stays the check when a label is written: it finds the
 quote exactly once (whitespace-insensitive, case-sensitive) and lists the chunks that hold all of
-it at a given chunking config. A key that no chunk holds at a config is reported as unscorable
-there, never dropped.
+it at a given chunking config. At a config, a group none of whose keys any chunk holds makes its
+question unscorable there; a single key no chunk holds, in a group another key still finds, is
+counted in the report as an unheld key. Neither is ever dropped (PR 8; the per-group rule was
+decided by shesha on 2026-10-22, ADR 0013, with a conservative line counting unscorable questions
+as misses, and chunk configs compared on dev only over questions scorable under both).
 
 **Review before the freeze (decided 2026-10-22, item 1).** A document Claude wrote in a language
 shesha must check (`faq-hi`) carries `review: pending` in its manifest entry until shesha has read

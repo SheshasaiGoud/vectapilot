@@ -2,14 +2,17 @@
 docs/learning/m2-metrics.md).
 
 The metrics are [HAND-WRITE]: shesha writes them. Until then they raise NotImplementedError, so the
-whole module is marked `xfail(strict=True, raises=NotImplementedError)`:
+whole module is marked `xfail(strict=True, raises=NotImplementedError)` through the same switch as
+every other test that waits for H2 (`tests/canary/read_paths.py`, `PENDING_HAND_WRITE`,
+"retrieval_metrics"):
 
 - not implemented yet          → "xfailed" (expected);
 - implemented, wrong answer    → a normal failure (only NotImplementedError counts as expected);
 - implemented, right answer    → "XPASS(strict)", a failure on purpose: that is your signal.
 
-When no test here is xfailed any more, delete the `pytestmark` statement below and run again: every
-test must then simply pass. Do not edit the tests to make them pass; change the code.
+When no test here is xfailed any more, remove "retrieval_metrics" from `PENDING_HAND_WRITE` (one
+line; it also turns on the eval harness's H2 tests) and run again: every test must then simply
+pass. Do not edit the tests to make them pass; change the code.
 
 No database, no network: these run everywhere, in about a second. Every expected value is worked
 out by hand in the comment next to it, and compared exactly (`Fraction`, `bool`): no tolerance.
@@ -24,6 +27,7 @@ from typing import Any, Final
 
 import pytest
 
+from tests.canary.read_paths import pending_hand_write
 from vectapilot_api.evalset.metrics import (
     all_groups_at_k,
     hit_at_k,
@@ -33,11 +37,7 @@ from vectapilot_api.evalset.metrics import (
 )
 from vectapilot_api.evalset.ranking import RankedRelevance
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    raises=NotImplementedError,
-    reason="H2: shesha implements the retrieval metrics — see docs/learning/m2-metrics.md",
-)
+pytestmark = pending_hand_write("retrieval_metrics")  # guide: docs/learning/m2-metrics.md
 
 
 def record(question_id: str, n_groups: int, *ranks: tuple[int, ...]) -> RankedRelevance:

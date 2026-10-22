@@ -1,7 +1,8 @@
 # M2 — acceptance checks per PR
 
-> **Status (2026-10-22):** PR 0–7, the H1 scaffold and PR 5b merged; H2 scaffold on
-> `m2/metrics-scaffold` in review.
+> **Status (2026-10-22):** PR 0–7, the H1 and H2 scaffolds and PR 5b merged; PR 8 (the eval
+> harness) on `m2/eval-harness`: shesha's decisions taken and built (ADR 0013 accepted), not yet
+> committed.
 
 ADRs 0008 (embeddings) and 0009 (database roles and RLS) record the decisions and their sources.
 This file holds what each M2 PR must prove; each PR copies its section into its own acceptance
@@ -430,13 +431,106 @@ counting hits as groups now fails 3 tests instead of 2.
   same business, same `(source_id, version)`, and its normalised text contains the anchor; any
   key of a group finds the group. `SearchHit` has no business id: the harness fills
   `RetrievedChunk.business_id` from the hit's document row, never from the question, so every
-  hit's document is checked against the question's business (asserted: a leak check). A key that no stored chunk holds is reported as "unscorable
-  at this config", never dropped. A different chunk size needs a fresh ingest (re-ingesting an
-  existing version does not re-chunk).
+  hit's document is checked against the question's business (asserted: a leak check). A key that
+  no stored chunk holds is never dropped: a group none of whose keys is held makes its question
+  "unscorable at this config"; a single unheld key in a group another key finds is counted in the
+  report; a conservative line counts every unscorable question as a miss; chunk configs are
+  compared on dev only, over the questions scorable under both (decided 2026-10-22, below). A
+  different chunk size needs a fresh ingest (re-ingesting an existing version does not re-chunk).
 - Reports take "synthetic" from the corpus and dataset manifests, never from chunk text; safety
   results are counts (`k of n`), never a rate gate.
 
+**Built (2026-10-22, noah; branch `m2/eval-harness`; Postgres parts not yet run: Docker is
+unreachable, they run in CI, and the end-to-end run waits for H1 and H2).**
+[ADR 0013](../adr/0013-eval-harness.md) (accepted 2026-10-22) records the choices; runbook for PR 9:
+[`docs/learning/m2-eval-run.md`](../learning/m2-eval-run.md).
+- `apps/api/src/vectapilot_api/evalrun/` (not in `evalset`, which stays free of models, network
+  and database): `uv run python -m vectapilot_api.evalrun run|ingest|summarize|label-sheet`
+  (no new console script); `make eval-dry-run`. `run` = register the eval businesses (owner URL),
+  ingest through `KbService`, check the stored chunks against the corpus at the chunk config, then
+  each question of the split through `AnswerService`, scored with H2, into one run folder.
+- Business from the document row: `RecordingSearch` wraps H1 through `SearchService`'s `search`
+  seam and reads `documents.business_id` on the same connection, in the same business
+  transaction (no business filter in that `WHERE`, on purpose; RLS hides another business's rows,
+  which counts as a leak too). Any hit not of the question's business aborts the run (exit 4).
+- Eval businesses `<business>-ev-<hash of model, max_chars, overlap>` (a fresh namespace per chunk
+  config or embedding model; `--fresh` deletes only those ids' documents). Unscorable = a group no
+  key of which any stored customer-visible chunk holds (`relevance.hit_matches_key`).
+- Cost cap over embeddings and `large`: `CappedEmbedder` (per attempt, `token_upper_bound` ×
+  price; prices added to `embeddings/models.toml` from ADR 0008's Facts) and `CappedGateway`
+  (M1's formula via the new `measure.budget.request_reservation`, M1's stop rules).
+- Test split: live only, frozen dataset, a committed complete live dev run with the same config
+  fingerprint, and `evals/reports/<dataset>/test-runs.jsonl` appended before the first paid
+  call; a second test run of one fingerprint needs `--test-rerun-reason`.
+- Run folder: `run.json`, `results.jsonl` (no text), `answers.jsonl`, `labels.jsonl` (template),
+  three record logs, `summary.md`/`.json` recomputed from the files through H2. Wilson 95 % for
+  every `x of n`; percentile bootstrap (2,000 resamples, seed 20261022) for MRR from n = 10; a
+  percentage from n = 10; safety as counts only; status line DRY RUN / PARTIAL / dev tuning /
+  held-out test, and every reason a run cannot feed the note.
+- H2 switch: `"retrieval_metrics"` added to `PENDING_HAND_WRITE` (with `pending_hand_writes` for
+  tests that need both stubs); the canary consistency test accepts it through
+  `NEEDED_OUTSIDE_READ_PATHS`. The H1 and H2 guides name the extra step.
+- Tests `tests/evalrun/`: 183 tests / 282 cases after the decisions and the mutation-audit tests
+  (164 / 252 before); locally 271 passed, 4 xfailed (H2), 7 skipped (Postgres). Stand-ins
+  return prepared hits, document rows and metric values (both means as hand-written literals);
+  nothing implements search or the metrics. Wilson checked against Newcombe (1998), Table I.
+- **Review fixes (2026-10-22, noah; kenji, ananya, diego, zara, maya).** Every hit is checked in
+  the search itself, before the answer step (a later cap stop, Ctrl-C or error can no longer hide
+  a leak), with its document's status and audience (`AUDIENCE LEAK`, exit 4); questions validated
+  as `POST /v1/answer` does; the test ledger must match HEAD before a test run, and run.json and
+  the status line record reruns and earlier entries; the status line says a test run may feed the
+  note only with no reason against it; MRR shown only from n = 10, a zero-width bootstrap called
+  degenerate, H2's MRR cross-checked against its reciprocal ranks; unscorable counts per row,
+  unheld keys and uncounted evidence by id; "synthetic" built from the manifest flags; a failure
+  after the calls never says "nothing was sent"; Ctrl-C before the questions ends `partial`; dry
+  runs refuse paid providers; `--fresh` deletes only derived ids; ingest stops at the cap's stop
+  rule; H2's own tests now use the one `PENDING_HAND_WRITE` switch. Postgres parts (incl. a new
+  leak test through `execute`, and `summarize()` at the end of the end-to-end run) still run in
+  CI only.
+- **[decided 2026-10-22] (shesha)**, every recommendation, one PR: (1) one derived eval business
+  per (business, embedding model, chunk config); (2) answers.jsonl committed, questions by id;
+  (3) the test split: live only, frozen, after a complete live dev run of the same config
+  fingerprint, its ledger entry before the first paid call, a rerun needs a reason; (4) dry runs
+  on unfrozen data allowed (`unassigned`), a live run needs the freeze; (5) Wilson 95 %
+  everywhere, a seeded percentile bootstrap over questions (2,000 resamples) shown from n ≥ 10,
+  with "approximate at small n (percentile bootstrap undercovers)" in summary.md; (6) M1's
+  formula and $1.00 ceiling; (7) only a complete, labelled, live test run feeds the "what I
+  measured" note, dev runs next to it labelled as tuning; (8) unscorable per group, plus a
+  conservative line counting unscorable questions as misses, and chunk configs compared on dev
+  only over the questions scorable under both (the aligned wording in `evalset/corpus.py`, the
+  v0.1 README and this plan approved); (9) a §6 target is "met" when the point estimate reaches
+  it, always shown with its Wilson interval, and "not shown at 95 % confidence" when the lower
+  end is below it; `RATE_MIN_N` applies to every split; (10) a stop rule tripped by the last
+  question aligns with M1 (status `complete`, a not-for-the-note reason, exit 0); a leak always
+  exits 4, also after a failed summary; `--live` is refused unless the dataset and every corpus
+  manifest say `synthetic: true` (a guard for a future real pilot); (11) the H2 stand-ins and the
+  report's cross-checks against H2's per-question values are on the team side of the
+  [HAND-WRITE] line; (12) ADR 0013 accepted with these options.
+- **Built from the decisions (2026-10-22, noah).** `harness.final_status` (a last-question stop
+  is `complete`, its stop kept); `status_of` adds "stopped by its last question"; summary rows
+  carry `conservative` (hits of n + unscorable, shown for "all" and each business); a "Targets
+  (business-context §6)" table for hit@5 and correctness, "all" and each business (no verdict
+  below n = 10, for a dry, partial or failed run, at another metric k, or while answers are
+  unlabelled); the bootstrap note in the Intervals row and under the retrieval table; the
+  `--live` synthetic guard in `cli.run_command`. The ingest-only path's unreachable "partial"
+  branch is gone (a cap stop during ingest already returns `partial` before it).
+- **Mutation-audit tests (2026-10-22, noah).** M7b/c/d: the H2 stand-in's resample statistic now
+  depends on the whole resample (position-weighted prepared values, not a mean), and a test with
+  a non-default seed (7) and count (300) checks the "all" and "language en" intervals against a
+  bootstrap written out in the test; M13a/b: `execute` ends `partial` when the cap stops the
+  question loop or the ingest (a refusal or a stop rule, `ingest_only` too); M11b: `wired`
+  prices embeddings at the catalog's voyage-4 price (a spy, paid Settings with TEST-ONLY keys,
+  stand-in embedder and model, nothing built that could send); M10b: stdout not a terminal
+  refuses `--live`, nothing sent, no folder; M14b: every package logger at DEBUG, no record holds
+  question text; M15a/b/c: a corpus manifest with `synthetic: false` gives run.json
+  `corpus_synthetic: false`, "NOT synthetic" in summary.md and the plan, and a refused `--live`;
+  M17b: a size-only `ChunkingConfig` change is another namespace. Each was run against its mutant
+  in a scratch copy (28 mutants incl. the decisions' own: all killed) and the tree restored byte
+  for byte (sha256 of 175 files before and after).
+
 ## PR 9 — close-out (shesha's live run)
+- Runbook: [`docs/learning/m2-eval-run.md`](../learning/m2-eval-run.md) (prerequisites, key
+  entry, the exact commands, the cost formula, labelling, what feeds the note).
 - Live ingestion and the eval v0 run; human correctness labels; a "what I measured" note with
   measured hit@5, MRR and correctness against the §6 targets, per language. No target is claimed
   unless met. The study PDF for M2.
