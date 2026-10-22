@@ -34,7 +34,7 @@ from tests.canary.catalog import (
     load_role_facts,
 )
 from tests.canary.checks import Planted
-from tests.canary.read_paths import READ_PATHS, sql_on_every_business_table
+from tests.canary.read_paths import READ_PATHS, read_path_params, sql_on_every_business_table
 from tests.canary.write_paths import WRITE_PATHS
 from tests.conftest import integration
 from vectapilot_api.config import MigrationSettings, Settings
@@ -274,7 +274,7 @@ async def test_a_business_sees_only_its_own_rows_on_a_reused_pooled_connection(
     assert only(seen, mine), seen
 
 
-@pytest.mark.parametrize("path", sorted(READ_PATHS))
+@pytest.mark.parametrize("path", read_path_params())  # a pending stub is a strict xfail
 @pytest.mark.parametrize("me", [0, 1], ids=["as a", "as b"])
 async def test_no_read_path_shows_another_businesss_canary(
     fresh_engine: AsyncEngine, planted: tuple[Planted, Planted], me: int, path: str
