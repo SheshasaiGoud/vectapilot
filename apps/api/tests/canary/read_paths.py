@@ -165,7 +165,7 @@ NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {
 """[HAND-WRITE] stubs that no read path runs, but other tests wait for through this same switch:
 stub → who waits. H2's `evalset/metrics.py` is one (the harness scores with it)."""
 
-PENDING_HAND_WRITE: Final = frozenset({"vector_search", "retrieval_metrics"})
+PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"vector_search", "retrieval_metrics"})
 """[HAND-WRITE] stubs still raising NotImplementedError, one switch each:
 
 - H1: remove "vector_search" once `retrieval/vector.py` is written (its canary tests show

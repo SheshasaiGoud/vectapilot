@@ -433,7 +433,8 @@ def test_several_stubs_give_one_mark_while_any_is_pending_and_none_once_all_are_
             NotImplementedError,
         )
         assert stub in mark.kwargs["reason"]
-    assert len(pending_hand_writes(*PENDING_HAND_WRITE)) == 1
+    # One mark while any stub is pending; none once the last entry is removed (H1 or H2 lands last).
+    assert len(pending_hand_writes(*PENDING_HAND_WRITE)) == min(1, len(PENDING_HAND_WRITE))
 
 
 # ── The CI gate (scripts/canary_gate.py) ─────────────────────────────────────────────────────

@@ -64,7 +64,7 @@ re-chunk it; and nothing yet records which configs ran on test.
    percentage from n = 10, on every split; safety as counts only. Questions sharing a
    `split_group` are counted, since the intervals assume independence. **Limits of the
    bootstrap:** at small n it covers less than 95 %, and it never reaches past the observed values
-   (with every RR equal it has zero width, while Wilson for the same 10 of 10 hits is 72.3 % to
+   (with every RR equal it has zero width, while Wilson for the same 10 of 10 hits is 72.2 % to
    100 %); summary.md says "approximate at small n (percentile bootstrap undercovers)", and a
    zero-width interval is printed as degenerate, pointing to the hit@k Wilson interval, never as
    a 95 % interval.

@@ -168,10 +168,13 @@ Planned: `packages/mcp_server/`, `scripts/`.
   suite in CI · #26 ingestion · #27 embeddings · #28 KB endpoints · #29 H1 scaffold · #30 one
   approved version · #31 search + cited answers · #32 eval v0 (corpus, format, frozen split; 0
   questions yet, which are shesha's and friends'; stage `collecting`) · #33 H2 scaffold (hit@k,
-  MRR). H1 (shesha's `vector_search`) not yet written (strict xfail); shesha writes H2's bodies on
-  `m2/metrics`. PR 8 eval harness (`m2/eval-harness`; ADR 0013 accepted by shesha 2026-10-22) in
-  review. No baseline yet: it comes from shesha's PR 9 live run (dev, then test once), after H1,
-  H2 and the frozen dataset.
+  MRR) · #34 eval harness (PR 8, ADR 0013). PR 9 prepared on `m2/close-out-prep`. Docker Desktop
+  is unreachable on the Mac, so Postgres tests run in CI only for now. No baseline yet.
+- **M2 remaining, shesha only** (in order, with commands and signals: `docs/plans/m2-close-out.md`):
+  H2 bodies (`m2/metrics`) and H1 `vector_search` (`m2/retrieval`), both still in
+  `PENDING_HAND_WRITE`; the questions, friends' round-trip, `faq-hi` review and freeze; Voyage and
+  Anthropic accounts and keys; the live run (dev, then test once: `docs/learning/m2-eval-run.md`);
+  the note (skeleton: `docs/notes/m2-what-i-measured.md`); H1/H2 explain-backs; close-out quiz.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
