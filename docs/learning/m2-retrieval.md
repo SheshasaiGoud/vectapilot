@@ -6,6 +6,11 @@ closest to a question, for **one** business, from **approved** sources only. PR 
 cited answer on top of it, and noah's harness (PR 8) measures it with your H2 metrics. Fusion with
 full-text search comes in M3, so H1 is vector search only.
 
+> **Status (2026-10-22).** `vector_search` is written, by Claude at shesha's request; its tests run
+> as plain tests and "vector_search" is out of `PENDING_HAND_WRITE`. The Postgres cases first run
+> in CI (Docker is unreachable locally). This guide stays as the reference for the explain-back,
+> which is still part of acceptance.
+
 ## Your task
 
 | | Write the body of | So that these pass | Size | Time-box | Your branch |
