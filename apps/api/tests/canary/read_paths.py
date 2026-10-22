@@ -158,24 +158,21 @@ NEEDS_HAND_WRITE: Final[Mapping[str, str]] = {
 }
 """Read path → the [HAND-WRITE] stub it runs (H1's `vector_search` for all three)."""
 
-NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {
-    "retrieval_metrics": "tests/evalset/test_metrics.py (H2's own tests) and tests/evalrun (M2 PR"
-    " 8's eval harness calls H2's metrics)",
-}
+NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {}
 """[HAND-WRITE] stubs that no read path runs, but other tests wait for through this same switch:
-stub → who waits. H2's `evalset/metrics.py` is one (the harness scores with it)."""
+stub → who waits. None today: H2's `evalset/metrics.py` was the only one until it was written
+(2026-10-22)."""
 
-PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"vector_search", "retrieval_metrics"})
+PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"vector_search"})
 """[HAND-WRITE] stubs still raising NotImplementedError, one switch each:
 
 - H1: remove "vector_search" once `retrieval/vector.py` is written (its canary tests show
   XPASS(strict)). That one line turns on every check that runs it: the read paths above, PR 6's
   Postgres tests (`tests/answer/test_postgres_search_and_answer.py`) and PR 8's harness tests
   that search, which all ask `pending_hand_write` / `pending_hand_writes`.
-- H2: remove "retrieval_metrics" once `evalset/metrics.py` is written (its own tests in
-  `tests/evalset/test_metrics.py` show XPASS(strict)). That one line turns on H2's own tests and
-  PR 8's harness tests that score with H2 (`tests/evalrun/`), which all ask `pending_hand_write` /
-  `pending_hand_writes`."""
+- H2: done (2026-10-22, written by Claude at shesha's request). "retrieval_metrics" is removed, so
+  H2's own tests (`tests/evalset/test_metrics.py`) and PR 8's harness tests that score with H2
+  (`tests/evalrun/`) run as plain tests."""
 
 
 def pending_hand_write(stub: str) -> list[pytest.MarkDecorator]:

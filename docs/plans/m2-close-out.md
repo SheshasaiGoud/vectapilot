@@ -2,8 +2,9 @@
 
 > **Status (2026-10-22):** the team side of M2 is merged (plan PR 0–8, PR 5b and the H1 and H2
 > scaffolds; GitHub #23–#34).
-> Everything below is shesha's. Today: H1 `vector_search` and the five H2 metric bodies are stubs
-> (`PENDING_HAND_WRITE = {"vector_search", "retrieval_metrics"}`); `support_qa` v0.1 has no
+> Everything below is shesha's. Today: H1 `vector_search` is a stub
+> (`PENDING_HAND_WRITE = {"vector_search"}`); H2's five bodies are written (by Claude at shesha's
+> request, 2026-10-22, `m2/metrics`), so step 3 leaves only H2's explain-back (step 18); `support_qa` v0.1 has no
 > questions (`stage: collecting`); `faq-hi` is `review: pending`; Docker Desktop is unreachable on
 > the Mac; no Voyage or Anthropic account or key is known to be set up. Prepared by maya on
 > `m2/close-out-prep`. Nothing in this file is a result, and no cost in it is a figure: the cost of
@@ -67,6 +68,9 @@ as `unassigned`); steps 13 and 15 cannot.
   or (c) a local Postgres is still yours to answer; this step is option (a).
 
 ## 3. H2: the retrieval metrics, on `m2/metrics` (`[HAND-WRITE]`, time-box 2 h)
+> **Done (2026-10-22):** written by Claude at shesha's request; 142 of 142 cases pass and
+> "retrieval_metrics" is out of `PENDING_HAND_WRITE`. The explain-back (step 18) remains.
+
 - **Do:** write the five bodies in `apps/api/src/vectapilot_api/evalset/metrics.py`; guide
   `docs/learning/m2-metrics.md` (§1 workflow, §5 decisions as taken). No Docker needed.
 - **Commands:**
