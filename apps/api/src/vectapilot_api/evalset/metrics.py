@@ -1,7 +1,8 @@
 """H2 — retrieval metrics: hit@k and reciprocal rank / MRR. [HAND-WRITE]: shesha writes the bodies.
 
 Guide: docs/learning/m2-metrics.md · Tests: tests/evalset/test_metrics.py, marked
-`xfail(strict=True, raises=NotImplementedError)` until these work; then delete its `pytestmark`.
+`xfail(strict=True, raises=NotImplementedError)` until these work; then remove "retrieval_metrics"
+from `PENDING_HAND_WRITE` in tests/canary/read_paths.py (the one switch for every H2 test).
 
 **Input.** One `ranking.RankedRelevance` per question, already checked when it was built: per rank
 of the search's ranked list (before any score threshold, `ranking.ranked_relevance`), the

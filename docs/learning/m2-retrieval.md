@@ -69,7 +69,9 @@ When every case shows `XPASS(strict)`, remove **three** markers in your PR, then
 simply pass:
 1. the `xfail` entry of `pytestmark` in `test_vector_search_binding.py`;
 2. the `xfail` entry of `pytestmark` in `test_vector_search.py` (keep `integration` and `anyio`);
-3. `"vector_search"` from `PENDING_HAND_WRITE` in `tests/canary/read_paths.py`. The canary suite's
+3. `"vector_search"` from `PENDING_HAND_WRITE` in `tests/canary/read_paths.py` (it also turns on
+   PR 6's Postgres tests and PR 8's harness run, `tests/evalrun/test_postgres_harness.py`, which
+   waits for H2 as well). The canary suite's
    `vector_search` read path already calls your function (as staff, the widest reader); until
    then its two cases are strict xfails, which `scripts/canary_gate.py` allows as a recorded gap.
    A leak there shows `FAILED`, never `XPASS`. Note what it proves: like every canary read path it

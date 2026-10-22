@@ -30,11 +30,13 @@ from tests.canary.checks import (
 )
 from tests.canary.read_paths import (
     BAIT,
+    NEEDED_OUTSIDE_READ_PATHS,
     NEEDS_HAND_WRITE,
     PENDING_HAND_WRITE,
     READ_PATHS,
     answer_through_the_api,
     pending_hand_write,
+    pending_hand_writes,
     read_path_params,
     search_through_the_api,
 )
@@ -294,7 +296,9 @@ def test_seeing_nothing_at_all_is_not_a_pass(outputs: dict[str, str]) -> None:
 
 def test_every_stub_dependency_names_a_read_path_and_every_pending_stub_is_used() -> None:
     assert READ_PATHS.keys() >= NEEDS_HAND_WRITE.keys()
-    assert set(NEEDS_HAND_WRITE.values()) >= PENDING_HAND_WRITE
+    # A pending stub is run by a read path, or named as needed elsewhere (H2: PR 8's harness).
+    assert set(NEEDS_HAND_WRITE.values()) | NEEDED_OUTSIDE_READ_PATHS.keys() >= PENDING_HAND_WRITE
+    assert not NEEDED_OUTSIDE_READ_PATHS.keys() & set(NEEDS_HAND_WRITE.values())
     # PR 6's routes run H1: they wait for the same switch as H1's own read path.
     assert {name for name, stub in NEEDS_HAND_WRITE.items() if stub == "vector_search"} == {
         "vector_search",
@@ -417,6 +421,19 @@ def test_a_written_stub_has_no_marks_and_a_pending_one_exactly_one() -> None:
             True,
             NotImplementedError,
         )
+
+
+def test_several_stubs_give_one_mark_while_any_is_pending_and_none_once_all_are_written() -> None:
+    assert pending_hand_writes("a-stub-that-was-written", "another-written-one") == []
+    for stub in PENDING_HAND_WRITE:
+        [mark] = pending_hand_writes("a-stub-that-was-written", stub)
+        assert (mark.name, mark.kwargs["strict"], mark.kwargs["raises"]) == (
+            "xfail",
+            True,
+            NotImplementedError,
+        )
+        assert stub in mark.kwargs["reason"]
+    assert len(pending_hand_writes(*PENDING_HAND_WRITE)) == 1
 
 
 # ── The CI gate (scripts/canary_gate.py) ─────────────────────────────────────────────────────

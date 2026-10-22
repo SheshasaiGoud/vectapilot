@@ -73,6 +73,8 @@ From the repository root (`make` lists everything):
   `evals/reports/tmp/`
 - `make eval-check` — check eval v0 (`evals/datasets/support_qa/`) for its stage, then print its
   coverage counts (no model, no network, writes nothing)
+- `make eval-dry-run` — the eval harness on dev as a dry run (fake embedder, canned answers, $0) into
+  the git-ignored `evals/reports/tmp/`; needs `make up`, H1, H2 and questions. No make target for `--live`
 
 API (run inside `apps/api/`, Python 3.12 managed by uv):
 - `uv sync` — create/update the virtualenv from `uv.lock`
@@ -87,6 +89,10 @@ API (run inside `apps/api/`, Python 3.12 managed by uv):
   from alembic.ini); the API itself connects as `vectapilot_app` (ADR 0009)
 - `uv run python -m vectapilot_api.evalset check|ready|report|lookup|show|freeze|import-friends` —
   eval v0 tools (ADR 0012), no model or network; `freeze` writes files, once per dataset version
+- `uv run python -m vectapilot_api.evalrun run|ingest|summarize|label-sheet` — the eval harness
+  (ADR 0013; runbook `docs/learning/m2-eval-run.md`). `run --split dev|test` is a dry run unless
+  `--live --max-usd X` (≤ $1.00, typed again at a terminal): shesha's alone, agents never pass `--live`.
+  Test is live-only, frozen dataset only, once per config (ledger). `ingest` is dry only
 
 Team site (run inside `apps/web/`):
 - `npm run dev` — local dev server at http://localhost:3000
@@ -101,15 +107,17 @@ Team site (run inside `apps/web/`):
 ```
 .claude/agents/      virtual teammates (Claude Code subagents)
 apps/api/            FastAPI service (uv project): config, JSON logging, /healthz, /readyz,
-                     Alembic migrations, Dockerfile, LLM gateway, measurement CLI
+                     Alembic migrations, Dockerfile, LLM gateway, measurement CLI,
+                     eval tools (`evalset`) and harness (`evalrun`)
 apps/web/            Next.js — team site now; customer widget + staff dashboard later
 docs/adr/            architecture decision records
 docs/learning/       guides for [HAND-WRITE] tasks
 docs/plans/          per-PR acceptance checks for the current milestone
 docs/notes/          shesha's own write-ups (e.g. M1's "what I measured")
 data/sample/          synthetic corpus: two fictional businesses, one folder per business_id
-evals/               datasets (synthetic: gateway_smoke, support_qa = eval v0) and committed live
-                     measurement runs; evals/reports/tmp/ holds dry runs (git-ignored)
+evals/               datasets (synthetic: gateway_smoke, support_qa = eval v0); live runs committed
+                     under evals/reports/<dataset>/<version>/<run>/ (support_qa's test-run ledger:
+                     evals/reports/support_qa/test-runs.jsonl); dry runs in git-ignored evals/reports/tmp/
 .github/workflows/   ci.yml (lint, types, tests, image build) · deploy-site.yml (GitHub Pages)
 infra/               compose.yaml — the local stack
 Makefile             developer commands
@@ -129,6 +137,7 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - [ADR 0010](docs/adr/0010-one-approved-version-per-source.md) — one approved version per source: partial unique index (migration 0004, `business_id` first), approving retires the previous version in the same transaction
 - [ADR 0011](docs/adr/0011-cited-answers-v0.md) — cited answers v0: answer only from retrieved chunks, any unverified citation drops the answer, no model call below the provisional score threshold
 - [ADR 0012](docs/adr/0012-eval-dataset-v0.md) — eval dataset v0: synthetic two-business corpus, human-written JSONL questions, evidence groups of `source_id` + `version` + anchor keys, 30 % test split fixed before any question, freeze pins, labels per run
+- [ADR 0013](docs/adr/0013-eval-harness.md) — eval harness: `evalrun` package, every hit checked for business and audience before the answer step (exit 4), eval businesses per model + chunk config, one cap for embeddings and answers, test runs ledgered once per config, Wilson for counts and a seeded bootstrap for MRR
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
@@ -154,14 +163,15 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
   handle the key. It never sits in the repo tree (`.env` included), a shell profile or history:
   shesha enters it with `read -s` in a separate terminal without Claude Code or Cursor, then closes it.
-- **M2 (ingestion, vector search, cited answers, eval v0) — in progress** (ADRs 0008–0012; plan
+- **M2 (ingestion, vector search, cited answers, eval v0) — in progress** (ADRs 0008–0013; plan
   `docs/plans/m2-pr-checks.md`). Merged 2026-10-21/22: #23 ADRs · #24 DB roles + RLS · #25 canary
   suite in CI · #26 ingestion · #27 embeddings · #28 KB endpoints · #29 H1 scaffold · #30 one
   approved version · #31 search + cited answers · #32 eval v0 (corpus, format, frozen split; 0
-  questions yet, which are shesha's and friends'). H1 (shesha's `vector_search`) not yet written
-  (strict xfail). H2 scaffold (hit@k, MRR; `m2/metrics-scaffold`) in review; shesha writes the
-  bodies on `m2/metrics`. Next: H2, PR 8 harness + baseline report, PR 9 close-out (shesha's
-  live run).
+  questions yet, which are shesha's and friends'; stage `collecting`) · #33 H2 scaffold (hit@k,
+  MRR). H1 (shesha's `vector_search`) not yet written (strict xfail); shesha writes H2's bodies on
+  `m2/metrics`. PR 8 eval harness (`m2/eval-harness`; ADR 0013 accepted by shesha 2026-10-22) in
+  review. No baseline yet: it comes from shesha's PR 9 live run (dev, then test once), after H1,
+  H2 and the frozen dataset.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -242,3 +252,11 @@ Planned: `packages/mcp_server/`, `scripts/`.
   groups found) vs precision@k (share of the top k that is relevant); MRR@k counts only the first
   relevant hit; exact `Fraction`, not float or `Decimal` (1/3); "n scored, m not scored" next to
   every number; why small n needs counts and an interval, never a bare percentage.
+- M2 · eval harness: the leak check runs on every hit *before* the answer step (a later cap stop,
+  Ctrl-C or error cannot hide a leak); Wilson, not the normal (Wald) approximation, for `x of n`
+  (stays in [0, 1], never zero-width at 0 or n of n: 12 of 12 is 75.8 %–100 %); a percentile
+  bootstrap for MRR resamples questions, the independent unit, not hits of one search; it
+  undercovers at small n and cannot reach past observed values (degenerate when every RR is
+  equal); test runs are ledgered before the first paid call, so "once per config" is auditable and
+  only a complete, labelled live test run feeds the note; dry-run numbers (fake embedder, canned
+  answers) test the plumbing, never the system, so they are never results.

@@ -8,7 +8,7 @@ LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapi
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo eval-check
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo eval-check eval-dry-run
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -68,3 +68,12 @@ llm-demo: ## Dry run of the LLM measurement CLI: fake provider, canned replies, 
 # Reads evals/datasets/support_qa/v0.1 and data/sample; no model, no network, writes nothing.
 eval-check: ## Check the eval v0 dataset for its stage, then print its coverage counts
 	$(API) uv run python -m vectapilot_api.evalset check && uv run python -m vectapilot_api.evalset report
+
+# ── Eval harness (M2 PR 8) ──────────────────────────────────────────────────────────────
+# Always a dry run: fake embedder, canned answers, $0, into the git-ignored evals/reports/tmp/.
+# Needs `make up` (Postgres), H1 and H2 written, and questions in the dataset. There is
+# deliberately no make target for `--live` (shesha runs it by hand: docs/learning/m2-eval-run.md).
+eval-dry-run: ## Dry run of the eval harness on dev: fake embedder, canned answers, no cost
+	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_EMBEDDINGS_PROVIDER=fake \
+		VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" VECTAPILOT_MIGRATION_DATABASE_URL="$(LOCAL_OWNER_URL)" \
+		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run python -m vectapilot_api.evalrun run --split dev

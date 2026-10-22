@@ -158,24 +158,44 @@ NEEDS_HAND_WRITE: Final[Mapping[str, str]] = {
 }
 """Read path → the [HAND-WRITE] stub it runs (H1's `vector_search` for all three)."""
 
-PENDING_HAND_WRITE: Final = frozenset({"vector_search"})
-"""[HAND-WRITE] stubs still raising NotImplementedError. H1: remove "vector_search" once
-`retrieval/vector.py` is written (its canary tests show XPASS(strict)). That one line turns on
-every check that runs it: the read paths above and PR 6's Postgres tests
-(`tests/answer/test_postgres_search_and_answer.py`), which all ask `pending_hand_write`."""
+NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {
+    "retrieval_metrics": "tests/evalset/test_metrics.py (H2's own tests) and tests/evalrun (M2 PR"
+    " 8's eval harness calls H2's metrics)",
+}
+"""[HAND-WRITE] stubs that no read path runs, but other tests wait for through this same switch:
+stub → who waits. H2's `evalset/metrics.py` is one (the harness scores with it)."""
+
+PENDING_HAND_WRITE: Final = frozenset({"vector_search", "retrieval_metrics"})
+"""[HAND-WRITE] stubs still raising NotImplementedError, one switch each:
+
+- H1: remove "vector_search" once `retrieval/vector.py` is written (its canary tests show
+  XPASS(strict)). That one line turns on every check that runs it: the read paths above, PR 6's
+  Postgres tests (`tests/answer/test_postgres_search_and_answer.py`) and PR 8's harness tests
+  that search, which all ask `pending_hand_write` / `pending_hand_writes`.
+- H2: remove "retrieval_metrics" once `evalset/metrics.py` is written (its own tests in
+  `tests/evalset/test_metrics.py` show XPASS(strict)). That one line turns on H2's own tests and
+  PR 8's harness tests that score with H2 (`tests/evalrun/`), which all ask `pending_hand_write` /
+  `pending_hand_writes`."""
 
 
 def pending_hand_write(stub: str) -> list[pytest.MarkDecorator]:
     """The marks for a test that runs `stub`: a strict xfail on NotImplementedError while the stub
     is pending, none once it is written (so the test must then simply pass)."""
-    if stub not in PENDING_HAND_WRITE:
+    return pending_hand_writes(stub)
+
+
+def pending_hand_writes(*stubs: str) -> list[pytest.MarkDecorator]:
+    """The marks for a test that runs every stub in `stubs`: one strict xfail on
+    NotImplementedError while any of them is pending, none once all are written."""
+    pending = [stub for stub in stubs if stub in PENDING_HAND_WRITE]
+    if not pending:
         return []
     return [
         pytest.mark.xfail(
             strict=True,
             raises=NotImplementedError,
-            reason=f"[HAND-WRITE] {stub} not written yet (tests/canary/read_paths.py,"
-            " PENDING_HAND_WRITE)",
+            reason=f"[HAND-WRITE] {', '.join(pending)} not written yet"
+            " (tests/canary/read_paths.py, PENDING_HAND_WRITE)",
         )
     ]
 

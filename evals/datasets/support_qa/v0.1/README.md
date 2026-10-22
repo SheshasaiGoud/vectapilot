@@ -121,7 +121,11 @@ never from the question, so this doubles as a leak check), its `(source_id, vers
 key's, and its normalised text contains the anchor. `matched_groups` gives, for each ranked hit,
 the groups it finds; hit@k and MRR on those ranked groups are shesha's H2. That works at any
 chunk size and survives reindexing. A key that no chunk holds at a config (an anchor can
-straddle a chunk boundary at small sizes) is reported as unscorable there, never dropped.
+straddle a chunk boundary at small sizes) is never dropped: when no key of its group is held, the
+question is reported as unscorable there; when another key of the group still finds it, the key
+is counted in the report as not held at that config. The report adds a conservative hit@k that
+counts every unscorable question as a miss, and two chunk configs are compared on dev only, over
+the questions scorable under both (PR 8; decided by shesha, 2026-10-22, ADR 0013).
 
 ### Categories
 

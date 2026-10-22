@@ -49,7 +49,8 @@ uv run pytest -q && uv run mypy && uv run ruff check . && uv run ruff format --c
 ```
 
 **Reading the output (strict xfail, as in M1 and H1).** `test_metrics.py` starts with
-`pytestmark = pytest.mark.xfail(strict=True, raises=NotImplementedError, …)`. While it is there:
+`pytestmark = pending_hand_write("retrieval_metrics")`: a strict xfail on `NotImplementedError`
+while `"retrieval_metrics"` is in `PENDING_HAND_WRITE` (`tests/canary/read_paths.py`). While it is:
 
 | Your code | pytest shows |
 |---|---|
@@ -61,8 +62,11 @@ The five functions share one module, so you can write them one at a time: a test
 finished functions turns `XPASS(strict)` or `FAILED`, the rest stay `xfailed`. A suggested order:
 `hit_at_k`, `reciprocal_rank`, `all_groups_at_k`, then the two means (they use the first two).
 The property tests near the end call several functions and stay `xfailed` until all of those are
-done. When every case shows `XPASS(strict)`, **delete the `pytestmark = …` statement** (the only
-marker; H2 has no canary entry) and run again: every test must then simply pass.
+done. When every case shows `XPASS(strict)`, **remove `"retrieval_metrics"` from
+`PENDING_HAND_WRITE`** in `tests/canary/read_paths.py`: the one switch for every H2 test. It turns
+on these tests and PR 8's harness tests that score with H2 (`tests/evalrun/`: scoring, the report's
+recomputation and bootstrap, hit@k before the threshold, and the Postgres end-to-end run, which
+also waits for H1; H2 has no canary read path). Run again: every test must then simply pass.
 
 **Rules.** Do not edit a test to make it pass; change the code. If you think a test is wrong, say
 so in your PR. `mypy` (strict) and `ruff` apply as everywhere. Commit with your own message (for
