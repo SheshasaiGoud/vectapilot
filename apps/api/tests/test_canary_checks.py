@@ -329,8 +329,8 @@ API_READ_PATHS: Final[list[ApiReadPath]] = [search_through_the_api, answer_throu
 @pytest.fixture
 def app_without_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
     """PR 6's API read paths run the real app; here everything that would reach Postgres is
-    replaced (the registry, the reindex, the transaction, the stored models), and H1's
-    `vector_search` stays whatever the test sets. The same paths run against Postgres in CI."""
+    replaced (the registry, the reindex, the transaction, the stored models); each test replaces
+    H1's `vector_search` itself. The same paths run against Postgres in CI."""
 
     async def business_exists(self: Database, business_id: str) -> bool:
         return True
@@ -365,14 +365,6 @@ def bait(owner: Planted, score: float = 1.0) -> SearchHit:
     """`owner`'s bait chunk as a search would return it from test_leakage.plant's rows: the shared
     `BAIT` text, titled with `owner`'s canary. Asking `BAIT`, CI scores every bait 1.0."""
     return hit(BAIT, score, source_id="bait", title=owner.canary)
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize("path", API_READ_PATHS)
-@pytest.mark.usefixtures("app_without_postgres")
-async def test_an_api_read_path_lets_h1s_stub_through_so_its_xfail_holds(path: ApiReadPath) -> None:
-    with pytest.raises(NotImplementedError):
-        await path(cast(AsyncEngine, None), A)
 
 
 @pytest.mark.anyio
