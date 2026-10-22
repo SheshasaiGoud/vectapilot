@@ -47,11 +47,12 @@ _POLICIES: Final = text(
 )
 
 # Key columns only (`indnkeyatts`): INCLUDE columns take no part in uniqueness. attnum 0 is an
-# expression, so the LEFT JOIN yields NULL for it.
+# expression, so the LEFT JOIN yields NULL for it. A partial index is included like any other
+# (`indisunique` is true for it); `indpred` is its WHERE, NULL for a full index.
 _KEY_INDEXES: Final = text(
     f"""
     SELECT c.oid::regclass::text AS table_name, i.indexrelid::regclass::text AS name,
-           i.indisprimary,
+           i.indisprimary, pg_get_expr(i.indpred, i.indrelid) AS predicate,
            array(SELECT a.attname::text
                  FROM unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord)
                  LEFT JOIN pg_catalog.pg_attribute a
@@ -132,7 +133,13 @@ async def load_key_indexes(connection: AsyncConnection) -> list[KeyIndex]:
     rows = (await connection.execute(_KEY_INDEXES)).all()
     return [
         KeyIndex(
-            r.table_name, r.name, r.indisprimary, tuple(r.columns), r.first_type, r.first_default
+            r.table_name,
+            r.name,
+            r.indisprimary,
+            tuple(r.columns),
+            r.first_type,
+            r.first_default,
+            r.predicate,
         )
         for r in rows
     ]

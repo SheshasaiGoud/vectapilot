@@ -166,6 +166,45 @@ def test_other_keys_without_business_id_are_problems(key: KeyIndex) -> None:
     assert key_problems([key]) != []
 
 
+APPROVED_ONLY: Final = "(status = 'approved'::text)"
+"""How Postgres prints migration 0004's WHERE back (`pg_get_expr(indpred, indrelid)`)."""
+
+
+def test_a_partial_key_starting_with_business_id_passes() -> None:
+    # Migration 0004: one approved version per source (ADR 0010).
+    key = KeyIndex(
+        "documents",
+        "documents_one_approved_version",
+        False,
+        ("business_id", "source_id"),
+        "text",
+        None,
+        APPROVED_ONLY,
+    )
+    assert key_problems([key]) == []
+
+
+def test_a_partial_key_without_business_id_first_is_a_problem_and_shows_its_predicate() -> None:
+    # The predicate narrows which rows take part; those rows are still compared across businesses.
+    key = KeyIndex(
+        "documents",
+        "approved_by_source",
+        False,
+        ("source_id", "business_id"),
+        "text",
+        None,
+        APPROVED_ONLY,
+    )
+    problems = key_problems([key])
+    assert len(problems) == 1
+    assert "approved_by_source" in problems[0] and f"WHERE {APPROVED_ONLY}" in problems[0]
+
+
+def test_a_predicate_never_makes_the_random_uuid_exception_apply() -> None:
+    key = KeyIndex("t", "partial_uuid", True, ("id",), "uuid", "gen_random_uuid()", "(x > 0)")
+    assert key_problems([key]) != []
+
+
 # ── Foreign keys into business tables pair business_id ──────────────────────────────────────
 
 

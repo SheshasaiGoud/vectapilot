@@ -5,6 +5,14 @@ business, and each statement also names `business_id` (defence in depth). A docu
 are written in ONE transaction, so a failure leaves neither. Tests use an in-memory store
 (`tests/kb/fakes.py`); this one runs against real Postgres in CI (`tests/kb/test_postgres_store.py`
 and the canary suite's write paths).
+
+**One approved version per source (ADR 0010).** Saving an approved document first retires the
+business's approved version of the same source, then inserts the new one, in that same
+transaction: migration 0004's partial unique index is checked row by row, so the old row must
+leave it before the new one enters. Any failure afterwards (a chunk, the commit) rolls the retire
+back with everything else, so the old version stays approved. When a concurrent request approves
+another version first, the index refuses this insert: `ApprovalConflict`, never a raw database
+error.
 """
 
 import json
@@ -12,16 +20,24 @@ import uuid
 from collections.abc import Sequence
 from typing import Final, Protocol
 
-from sqlalchemy import text
+from sqlalchemy import Row, text
+from sqlalchemy.exc import IntegrityError
 
 from vectapilot_api.db import Database
 from vectapilot_api.kb.types import (
+    ApprovalConflict,
     ChunkEmbedding,
     NewChunk,
     NewDocument,
     StaleChunk,
     StoredDocument,
 )
+
+ONE_APPROVED_INDEX: Final = "documents_one_approved_version"
+"""Migration 0004's partial unique index on (business_id, source_id) WHERE status = 'approved'
+(a test checks the migration uses the same name)."""
+UNIQUE_VIOLATION: Final = "23505"
+"""Postgres' SQLSTATE for a unique index or constraint violation."""
 
 
 class KbStore(Protocol):
@@ -40,8 +56,11 @@ class KbStore(Protocol):
         model: str,
         dimension: int,
     ) -> StoredDocument:
-        """Insert the document and its chunks in one transaction. If the source id and version
-        already exist (a concurrent upload), insert nothing and return the existing one."""
+        """Insert the document and its chunks in one transaction. An approved document retires
+        the source's previously approved version in that same transaction (`retired_version`).
+        If the source id and version already exist (a concurrent upload), change nothing and
+        return the existing one. `ApprovalConflict` if a concurrent request approved another
+        version of the source first."""
         ...
 
     async def stored_models(self, business_id: str) -> frozenset[str]:
@@ -65,9 +84,40 @@ def vector_literal(vector: Sequence[float]) -> str:
     return "[" + ",".join(repr(float(x)) for x in vector) + "]"
 
 
+def is_one_approved_violation(error: IntegrityError) -> bool:
+    """Whether `error` is migration 0004's index refusing a second approved version of a source.
+
+    SQLAlchemy 2.1's asyncpg adapter keeps the SQLSTATE on `error.orig` and asyncpg's own error,
+    which names the violated index, on `error.orig.orig`. Read with `getattr`: an unknown shape is
+    False (the error stays a database error, 503), never a wrong 409.
+    """
+    adapted = error.orig
+    driver = getattr(adapted, "orig", None)
+    return (
+        getattr(adapted, "sqlstate", None) == UNIQUE_VIOLATION
+        and getattr(driver, "constraint_name", None) == ONE_APPROVED_INDEX
+    )
+
+
+class _StoredMeanwhile(Exception):
+    """Raised inside a save's transaction to roll it back (the retire included) when the version
+    turned out to be stored already; carries that stored document out."""
+
+    def __init__(self, stored: StoredDocument) -> None:
+        super().__init__("stored meanwhile")
+        self.stored = stored
+
+
 _FIND_DOCUMENT: Final = text(
-    "SELECT id, content_sha256 FROM documents"
+    "SELECT id, content_sha256, status FROM documents"
     " WHERE business_id = :business_id AND source_id = :source_id AND version = :version"
+)
+# Never the version being written: only "the previously approved version" leaves the index.
+_RETIRE_APPROVED: Final = text(
+    "UPDATE documents SET status = 'retired'"
+    " WHERE business_id = :business_id AND source_id = :source_id AND status = 'approved'"
+    " AND version <> :version"
+    " RETURNING version"
 )
 _INSERT_DOCUMENT: Final = text(
     "INSERT INTO documents (business_id, source_id, version, title, source_type, content_kind,"
@@ -111,9 +161,7 @@ class PostgresKbStore:
         params = {"business_id": business_id, "source_id": source_id, "version": version}
         async with self._database.business_transaction(business_id) as connection:
             row = (await connection.execute(_FIND_DOCUMENT, params)).first()
-        if row is None:
-            return None
-        return StoredDocument(document_id=row.id, content_sha256=row.content_sha256, created=False)
+        return None if row is None else _existing(row)
 
     async def save_document(
         self,
@@ -131,35 +179,52 @@ class PostgresKbStore:
             "review_by": document.review_by,
             "metadata": json.dumps(document.metadata),
         }
-        async with self._database.business_transaction(business_id) as connection:
-            document_id: uuid.UUID | None = (
-                await connection.execute(_INSERT_DOCUMENT, params)
-            ).scalar_one_or_none()
-            if document_id is None:  # the same version arrived first through another request
-                key = {name: params[name] for name in ("business_id", "source_id", "version")}
-                row = (await connection.execute(_FIND_DOCUMENT, key)).one()
-                return StoredDocument(
-                    document_id=row.id, content_sha256=row.content_sha256, created=False
+        key = {name: params[name] for name in ("business_id", "source_id", "version")}
+        conflict = False
+        try:
+            async with self._database.business_transaction(business_id) as connection:
+                retired: str | None = None
+                if document.status == "approved":  # out of the index before the new row enters
+                    result = await connection.execute(_RETIRE_APPROVED, key)
+                    retired = result.scalar_one_or_none()  # at most one, by the index
+                document_id: uuid.UUID | None = (
+                    await connection.execute(_INSERT_DOCUMENT, params)
+                ).scalar_one_or_none()
+                if document_id is None:  # the same version arrived first through another request
+                    row = (await connection.execute(_FIND_DOCUMENT, key)).one()
+                    raise _StoredMeanwhile(_existing(row))  # undoes the retire above
+                await connection.execute(
+                    _INSERT_CHUNK,
+                    [
+                        {
+                            "business_id": business_id,
+                            "document_id": document_id,
+                            "chunk_index": chunk.chunk_index,
+                            "content": chunk.content,
+                            "page": chunk.page,
+                            "metadata": json.dumps(chunk.metadata),
+                            "embedding": vector_literal(chunk.embedding),
+                            "model": model,
+                            "dimension": dimension,
+                        }
+                        for chunk in chunks
+                    ],
                 )
-            await connection.execute(
-                _INSERT_CHUNK,
-                [
-                    {
-                        "business_id": business_id,
-                        "document_id": document_id,
-                        "chunk_index": chunk.chunk_index,
-                        "content": chunk.content,
-                        "page": chunk.page,
-                        "metadata": json.dumps(chunk.metadata),
-                        "embedding": vector_literal(chunk.embedding),
-                        "model": model,
-                        "dimension": dimension,
-                    }
-                    for chunk in chunks
-                ],
-            )
+        except _StoredMeanwhile as meanwhile:
+            return meanwhile.stored
+        except IntegrityError as error:
+            if not is_one_approved_violation(error):
+                raise
+            conflict = True
+        if conflict:
+            # Outside the `except`: nothing is chained (the database's text holds input).
+            raise ApprovalConflict()
         return StoredDocument(
-            document_id=document_id, content_sha256=document.content_sha256, created=True
+            document_id=document_id,
+            content_sha256=document.content_sha256,
+            status=document.status,
+            created=True,
+            retired_version=retired,
         )
 
     async def stored_models(self, business_id: str) -> frozenset[str]:
@@ -193,3 +258,10 @@ class PostgresKbStore:
                 if (await connection.execute(_REPLACE_EMBEDDING, params)).first() is not None:
                     changed += 1
         return changed
+
+
+def _existing(row: Row[tuple[uuid.UUID, str, str]]) -> StoredDocument:
+    """A stored document read by `_FIND_DOCUMENT` (id, content_sha256, status)."""
+    return StoredDocument(
+        document_id=row.id, content_sha256=row.content_sha256, status=row.status, created=False
+    )

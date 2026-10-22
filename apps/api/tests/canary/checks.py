@@ -46,7 +46,11 @@ class Policy:
 
 @dataclass(frozen=True)
 class KeyIndex:
-    """A unique or exclusion index (both enforce a rule across every row, ignoring RLS)."""
+    """A unique or exclusion index (both enforce a rule across every row, ignoring RLS).
+
+    A partial one (`predicate`, its WHERE) is checked like any other: the predicate only narrows
+    which rows take part, and the rows that do are still compared across every business.
+    """
 
     table: str
     name: str
@@ -54,6 +58,7 @@ class KeyIndex:
     columns: tuple[str | None, ...]  # key columns in order; None = an expression
     first_type: str | None = None  # format_type() of the first key column
     first_default: str | None = None  # its default, as pg_get_expr prints it
+    predicate: str | None = None  # a partial index's WHERE, as pg_get_expr prints it
 
 
 @dataclass(frozen=True)
@@ -146,15 +151,18 @@ def key_problems(indexes: Iterable[KeyIndex]) -> list[str]:
     by one business fails when another's row exists, and the error tells it so. The one exception
     is a primary key on a single uuid column filled by `gen_random_uuid()`: a caller cannot
     collide with a value it cannot guess. That holds only while no API accepts a client-chosen id.
+    A partial index (migration 0004's one approved version per source) follows the same rule; its
+    predicate never excuses a missing `business_id`, nor makes the uuid exception apply.
     """
     problems: list[str] = []
     for index in indexes:
         if index.columns[:1] == (BUSINESS_COLUMN,) or _random_uuid_key(index):
             continue
         shown = ", ".join(column or "<expression>" for column in index.columns)
+        where = "" if index.predicate is None else f" WHERE {index.predicate}"
         problems.append(
-            f"{index.table}: unique/exclusion index {index.name} ({shown}) does not start with"
-            f" {BUSINESS_COLUMN}, so its errors reveal other businesses' rows"
+            f"{index.table}: unique/exclusion index {index.name} ({shown}){where} does not start"
+            f" with {BUSINESS_COLUMN}, so its errors reveal other businesses' rows"
         )
     return problems
 
@@ -230,6 +238,7 @@ def _security_invoker(options: Iterable[str]) -> bool:
 def _random_uuid_key(index: KeyIndex) -> bool:
     return (
         index.primary
+        and index.predicate is None  # Postgres has no partial primary key: fail closed anyway
         and len(index.columns) == 1
         and index.first_type == "uuid"
         and index.first_default == "gen_random_uuid()"

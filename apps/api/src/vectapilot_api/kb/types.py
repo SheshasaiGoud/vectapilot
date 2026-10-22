@@ -61,11 +61,16 @@ class IngestResult(BaseModel):
     source_id: str
     version: str
     created: bool
-    """False when this business already had this source id and version with the same bytes."""
+    """False when this business already had this source id and version with the same bytes and
+    status."""
     chunks_written: int
     """0 for an existing document: nothing was loaded, embedded or written."""
     embedding_model: str | None
     """The model id the stored chunks carry; None for an existing document (nothing embedded)."""
+    retired_version: str | None
+    """The version of this source that was approved until this upload approved a new one, and is
+    now retired (ADR 0010). None when nothing was retired: a draft or retired upload, the source's
+    first approved version, or an existing document."""
 
 
 class ReindexResult(BaseModel):
@@ -108,7 +113,10 @@ class StoredDocument(BaseModel):
 
     document_id: uuid.UUID
     content_sha256: str
+    status: DocumentStatus
     created: bool
+    retired_version: str | None = None
+    """Set only when this write approved a new version and retired the previous one."""
 
 
 class StaleChunk(BaseModel):
@@ -144,3 +152,15 @@ class KbError(Exception):
 
 class VersionConflict(Exception):
     """This source id and version exist with different bytes: a change needs a new version."""
+
+
+class StatusConflict(Exception):
+    """This source id and version exist with the same bytes but another status (for example a
+    retired version uploaded again as approved). An upload never changes a stored version's
+    status: approving it again means a new version (PR 5b's default, ADR 0010)."""
+
+
+class ApprovalConflict(Exception):
+    """A concurrent request approved another version of this source, and migration 0004's index
+    let only one of the two commit. Nothing of this upload was stored; sending it again retires
+    the version approved meanwhile."""
