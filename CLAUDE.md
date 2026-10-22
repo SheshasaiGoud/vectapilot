@@ -121,6 +121,7 @@ Planned: `packages/mcp_server/`, `data/` (sample data only), `scripts/`.
 - [ADR 0007](docs/adr/0007-llm-observability.md) — LLM observability: metadata-only `llm_call` record; trace span in M3; no India API region; key never in the repo
 - [ADR 0008](docs/adr/0008-embeddings.md) — embeddings: Voyage AI over REST (`voyage-4`, 1024 dims), model id per chunk, exact search, fake embedder in CI
 - [ADR 0009](docs/adr/0009-db-roles-and-rls.md) — app role without `BYPASSRLS`, `FORCE` RLS, business set per transaction, `X-Business-Id` until M8, canary suite as hard gate
+- [ADR 0010](docs/adr/0010-one-approved-version-per-source.md) — one approved version per source: partial unique index (migration 0004, `business_id` first), approving retires the previous version in the same transaction
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·

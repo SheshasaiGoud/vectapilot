@@ -1,9 +1,17 @@
 """Ingest and reindex (M2 PR 5): load → chunk → embed → store, synchronous (workers are M9).
 
 **Idempotent ingestion.** A business's (source id, version) is stored once (the database's unique
-key). Re-sending the same bytes under the same version returns the stored document and embeds
-nothing (no cost); different bytes under a stored version are a `VersionConflict` (a change needs a
-new version). The check runs before loading, and again inside the write (two concurrent uploads).
+key). Re-sending the same bytes under the same version, with the same status, returns the stored
+document and embeds nothing (no cost); different bytes under a stored version are a
+`VersionConflict` (a change needs a new version), and the same bytes with another status a
+`StatusConflict` (an upload never changes a stored version's status, for example re-approving a
+retired one: that is a new version). The check runs before loading, and again inside the write
+(two concurrent uploads).
+
+**One approved version per source (ADR 0010).** Uploading a new version as approved retires the
+source's previously approved version in the store's same transaction (`IngestResult.
+retired_version` names it); a draft or retired upload retires nothing. A concurrent approval of
+another version of the source is an `ApprovalConflict`.
 
 **Reindex.** Chunks carry the model id they were embedded with (ADR 0008). After a model change,
 `reindex` re-embeds every chunk whose model is not the configured one and switches them all in one
@@ -26,6 +34,7 @@ from vectapilot_api.kb.types import (
     NewChunk,
     NewDocument,
     ReindexResult,
+    StatusConflict,
     StoredDocument,
     VersionConflict,
 )
@@ -95,6 +104,7 @@ class KbService:
             created=True,
             chunks_written=len(chunks),
             embedding_model=embedded.model,
+            retired_version=stored.retired_version,
         )
 
     async def reindex(self, business_id: str) -> ReindexResult:
@@ -128,6 +138,8 @@ class KbService:
 def _already_stored(stored: StoredDocument, sha256: str, params: IngestParams) -> IngestResult:
     if stored.content_sha256 != sha256:
         raise VersionConflict()
+    if stored.status != params.status:
+        raise StatusConflict()
     return IngestResult(
         document_id=stored.document_id,
         source_id=params.source_id,
@@ -135,6 +147,7 @@ def _already_stored(stored: StoredDocument, sha256: str, params: IngestParams) -
         created=False,
         chunks_written=0,
         embedding_model=None,
+        retired_version=None,
     )
 
 

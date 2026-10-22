@@ -36,10 +36,12 @@ from vectapilot_api.ingestion.types import (
 )
 from vectapilot_api.kb.service import KbService
 from vectapilot_api.kb.types import (
+    ApprovalConflict,
     IngestParams,
     IngestResult,
     KbError,
     ReindexResult,
+    StatusConflict,
     VersionConflict,
 )
 
@@ -80,6 +82,16 @@ ERRORS: Final[dict[type[Exception], tuple[int, str, str]]] = {
         409,
         "version_conflict",
         "this source id and version are stored with other content: upload it as a new version",
+    ),
+    StatusConflict: (
+        409,
+        "status_conflict",
+        "this source id and version are stored with another status: upload it as a new version",
+    ),
+    ApprovalConflict: (
+        409,
+        "approval_conflict",
+        "another version of this source was approved at the same time: send the upload again",
     ),
     InputTooLarge: (422, "chunk_too_long", "a chunk is longer than the embedding model accepts"),
     Transient: (503, "embedding_unavailable", "the embedding service is unavailable; try later"),
@@ -133,7 +145,7 @@ ERROR_RESPONSES: Final[dict[int | str, dict[str, object]]] = {
 @router.post(
     "/documents",
     status_code=status.HTTP_201_CREATED,
-    responses={200: {"description": "already stored (same bytes)"}, **ERROR_RESPONSES},
+    responses={200: {"description": "already stored (same bytes and status)"}, **ERROR_RESPONSES},
 )
 async def ingest_document(
     request: Request,
@@ -143,7 +155,8 @@ async def ingest_document(
     service: Annotated[KbService, Depends(get_kb_service)],
 ) -> IngestResult:
     """Ingest one file (the raw body) for the business: load, chunk, embed, store. 201 when it
-    was stored now, 200 when this source id and version already hold the same bytes."""
+    was stored now, 200 when this source id and version already hold the same bytes and status.
+    An approved upload retires the source's previously approved version (ADR 0010)."""
     source_type = source_type_of(request.headers.get("content-type"))
     data = await read_body(request, service.limits.max_bytes)
     try:

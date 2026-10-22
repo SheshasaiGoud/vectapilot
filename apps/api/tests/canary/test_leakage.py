@@ -39,6 +39,7 @@ from tests.canary.write_paths import WRITE_PATHS
 from tests.conftest import integration
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import APP_ROLE, business_transaction
+from vectapilot_api.kb.store import ONE_APPROVED_INDEX
 from vectapilot_api.main import create_app
 
 pytestmark = [integration, pytest.mark.anyio]
@@ -50,6 +51,8 @@ VECTOR: Final = "[" + ",".join(["0"] * 1023 + ["1"]) + "]"
 CURRENT_BUSINESS = text("SELECT current_setting('app.business_id', true)")
 BACKEND_PID = text("SELECT pg_backend_pid()")
 
+# Each business gets source `canary` version 1, approved: write_paths.approve_a_new_version
+# approves version 2 of it, and the other business's version 1 must stay approved.
 PLANT: Final = (
     text(
         "INSERT INTO documents (business_id, source_id, version, title, source_type,"
@@ -202,6 +205,23 @@ async def test_every_policy_is_exactly_the_business_policy(owner_engine: AsyncEn
 async def test_every_unique_key_starts_with_business_id(owner_engine: AsyncEngine) -> None:
     async with owner_engine.connect() as connection:
         assert checks.key_problems(await load_key_indexes(connection)) == []
+
+
+async def test_the_key_check_reads_the_partial_one_approved_version_index(
+    owner_engine: AsyncEngine,
+) -> None:
+    # Migration 0004 (ADR 0010): the catalog query must see a partial index, with its WHERE, or
+    # the check above would pass by not looking at it.
+    async with owner_engine.connect() as connection:
+        found = {k.name: k for k in await load_key_indexes(connection)}
+
+    index = found[ONE_APPROVED_INDEX]
+    assert (index.table, index.primary, index.columns) == (
+        "documents",
+        False,
+        ("business_id", "source_id"),
+    )
+    assert index.predicate == "(status = 'approved'::text)"
 
 
 async def test_foreign_keys_into_business_tables_keep_the_business(
@@ -406,6 +426,21 @@ async def test_red_proof_a_unique_key_without_business_id(owner_engine: AsyncEng
         problems = checks.key_problems(await load_key_indexes(connection))
 
     assert len(problems) == 1 and "canary_probe_key" in problems[0], problems
+
+
+async def test_red_proof_a_partial_unique_key_without_business_id(
+    owner_engine: AsyncEngine,
+) -> None:
+    # Migration 0004's index with business_id forgotten: a predicate does not make it safe.
+    async with rolled_back(owner_engine) as connection:
+        await connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX canary_probe_partial_key ON documents (source_id)"
+            " WHERE status = 'approved'"
+        )
+        problems = checks.key_problems(await load_key_indexes(connection))
+
+    assert len(problems) == 1 and "canary_probe_partial_key" in problems[0], problems
+    assert "WHERE (status = 'approved'::text)" in problems[0], problems
 
 
 async def test_red_proof_an_open_extra_policy(owner_engine: AsyncEngine) -> None:

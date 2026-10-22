@@ -24,13 +24,18 @@ class ChunkRow:
 
 
 class InMemoryKbStore:
-    """`fail` makes every method raise it (a database outage). `hide_from_find` makes
-    `find_document` miss, as when a concurrent upload stores the version after the check."""
+    """`fail` makes every method raise it (a database outage); `fail_on_save` only
+    `save_document`, before it changes anything (as a refused transaction). `hide_from_find`
+    makes `find_document` miss, as when a concurrent upload stores the version after the check.
+
+    Like Postgres with migration 0004 (ADR 0010): saving an approved document retires the
+    source's approved version, all or nothing; an existing version is returned unchanged."""
 
     def __init__(self) -> None:
         self.documents: dict[tuple[str, str, str], tuple[uuid.UUID, NewDocument]] = {}
         self.chunks: dict[uuid.UUID, ChunkRow] = {}
         self.fail: Exception | None = None
+        self.fail_on_save: Exception | None = None
         self.hide_from_find = False
 
     def _check(self) -> None:
@@ -40,6 +45,14 @@ class InMemoryKbStore:
     def chunks_of(self, business_id: str) -> list[ChunkRow]:
         return [row for row in self.chunks.values() if row.business_id == business_id]
 
+    def statuses(self, business_id: str, source_id: str) -> dict[str, str]:
+        """{version: status} of one source of one business."""
+        return {
+            version: document.status
+            for (business, source, version), (_, document) in self.documents.items()
+            if (business, source) == (business_id, source_id)
+        }
+
     async def find_document(
         self, business_id: str, source_id: str, version: str
     ) -> StoredDocument | None:
@@ -47,9 +60,7 @@ class InMemoryKbStore:
         found = self.documents.get((business_id, source_id, version))
         if found is None or self.hide_from_find:
             return None
-        return StoredDocument(
-            document_id=found[0], content_sha256=found[1].content_sha256, created=False
-        )
+        return _existing(*found)
 
     async def save_document(
         self,
@@ -61,12 +72,20 @@ class InMemoryKbStore:
         dimension: int,
     ) -> StoredDocument:
         self._check()
+        if self.fail_on_save is not None:
+            raise self.fail_on_save
         key = (business_id, document.source_id, document.version)
         if key in self.documents:
-            document_id, stored = self.documents[key]
-            return StoredDocument(
-                document_id=document_id, content_sha256=stored.content_sha256, created=False
-            )
+            return _existing(*self.documents[key])
+        retired: str | None = None
+        if document.status == "approved":
+            for other_key, (other_id, other) in list(self.documents.items()):
+                if other_key[:2] == key[:2] and other.status == "approved":
+                    self.documents[other_key] = (
+                        other_id,
+                        other.model_copy(update={"status": "retired"}),
+                    )
+                    retired = other.version
         document_id = uuid.uuid4()
         self.documents[key] = (document_id, document)
         for chunk in chunks:
@@ -74,7 +93,11 @@ class InMemoryKbStore:
                 business_id, document_id, chunk, chunk.embedding, model, dimension
             )
         return StoredDocument(
-            document_id=document_id, content_sha256=document.content_sha256, created=True
+            document_id=document_id,
+            content_sha256=document.content_sha256,
+            status=document.status,
+            created=True,
+            retired_version=retired,
         )
 
     async def stored_models(self, business_id: str) -> frozenset[str]:
@@ -100,3 +123,12 @@ class InMemoryKbStore:
                 row.embedding, row.model, row.dimension = update.embedding, model, dimension
                 changed += 1
         return changed
+
+
+def _existing(document_id: uuid.UUID, document: NewDocument) -> StoredDocument:
+    return StoredDocument(
+        document_id=document_id,
+        content_sha256=document.content_sha256,
+        status=document.status,
+        created=False,
+    )

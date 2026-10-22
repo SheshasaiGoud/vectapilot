@@ -179,7 +179,9 @@ value a real bind). Canary: the `vector_search` read path is wired and listed in
 `PENDING_HAND_WRITE` (a strict xfail, allowed by the gate) until H1 lands. It runs as the app role
 under RLS, so it proves isolation through RLS, not the `WHERE` clause; the clause is proven by
 `test_vector_search.py`'s owner-connection and other-business-transaction tests, which
-`canary_gate.py` does not cover (proposal for zara and shesha after H1: mirror those two checks
+`canary_gate.py` does not cover (proposal for zara and shesha after H1: mirror those two checks,
+and PR 5b's
+`tests/kb/test_postgres_store.py::test_the_retire_names_the_business_even_where_rls_cannot_help`,
 into `tests/canary`, or make the gate require their test ids to pass). Guide:
 `docs/learning/m2-retrieval.md`; its §5 lists the decisions. Still open: how H1 is tested while
 Docker is down (guide §1).
@@ -201,6 +203,28 @@ Docker is down (guide §1).
   approved version, the new one; if the write fails, the old one is still approved.
 - An ADR recording option (c) and why (business-context §3.4: stale documents are the top cause
   of wrong answers).
+
+**Built (2026-10-22, Diego; Postgres parts not yet run: Docker is unreachable, they run in CI).**
+ADR 0010. Migration 0004: `documents_one_approved_version` on `(business_id, source_id) WHERE
+status = 'approved'`; existing duplicates stop the upgrade with a fixed message naming no data.
+`kb/store.py`: an approved save retires the previous approved version, then inserts, in one
+transaction (`retired_version` in the response); a version stored meanwhile rolls the retire
+back; the index refusing a concurrent approval is `409 approval_conflict`. Same bytes with another
+status (e.g. re-approving a retired version) is `409 status_conflict`. No new grant (0002 already
+gives `UPDATE` on `documents`). Canary: the key check reads a partial index's `WHERE` (pure tests
+and a red proof), and the write path `POST /v1/kb/documents (approve a new version)` leaves the
+other business's approved `canary` source untouched (under RLS: it proves RLS, not the store's
+`WHERE`). Tests: `tests/kb/test_approval.py` (local, including the retire's SQL text: business,
+source, `status = 'approved'`, another version), `tests/kb/test_postgres_store.py` and
+`tests/test_migrations.py` (Postgres: one approved version afterwards, retiring only the approved
+version of that source while a draft and another source stay, rollback on a failed write, the
+concurrent approval, the index, the store's own `business_id` filter on the owner's connection,
+0004's downgrade/upgrade and its refusal). That owner-connection test is outside `canary_gate.py`,
+like H1's (see the H1 proposal above).
+- **[decided 2026-10-22]** (shesha) Migration 0004 stops on existing duplicates with its fixed
+  message (nothing is retired by guesswork). Same bytes with another status is
+  `409 status_conflict` (to roll back, upload as a new version; revisit with M8's approve step).
+  The response keeps `retired_version`.
 
 ## PR 6 — `m2/search-and-answer` (ananya)
 - `GET /v1/kb/search?q=` returns only the business's approved public chunks.

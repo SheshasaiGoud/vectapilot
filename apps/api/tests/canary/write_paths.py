@@ -46,6 +46,29 @@ def ingest_a_document(client: TestClient, business_id: str | None) -> httpx2.Res
     )
 
 
+def approve_a_new_version(client: TestClient, business_id: str | None) -> httpx2.Response:
+    """Approves version 2 of the planted source `canary` (planted approved as version 1): writes
+    the new document and its chunks and retires version 1, in one transaction (ADR 0010). The
+    other business's `canary` source is approved under the same source id. Under RLS (the app
+    role) this proves approving retires none of its rows; the store's own `WHERE business_id` is
+    proven on the owner's connection in
+    tests/kb/test_postgres_store.py::test_the_retire_names_the_business_even_where_rls_cannot_help.
+    """
+    return client.post(
+        "/v1/kb/documents",
+        content=b"# Approved through the API\n\nThe next version of the canary source.\n",
+        params={
+            "source_id": "canary",
+            "version": "2",
+            "language": "en",
+            "content_kind": "faq",
+            "status": "approved",
+            "audience": "public",
+        },
+        headers=_headers(business_id, **{"Content-Type": "text/markdown"}),
+    )
+
+
 def reindex(client: TestClient, business_id: str | None) -> httpx2.Response:
     """Re-embeds the planted chunk (planted with model id `fake`, not the configured one)."""
     return client.post("/v1/kb/reindex", headers=_headers(business_id))
@@ -53,5 +76,6 @@ def reindex(client: TestClient, business_id: str | None) -> httpx2.Response:
 
 WRITE_PATHS: Final[dict[str, WritePath]] = {
     "POST /v1/kb/documents": ingest_a_document,
+    "POST /v1/kb/documents (approve a new version)": approve_a_new_version,
     "POST /v1/kb/reindex": reindex,
 }
