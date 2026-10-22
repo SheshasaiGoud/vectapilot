@@ -1,7 +1,7 @@
 # M2 — acceptance checks per PR
 
-> **Status (2026-10-22):** PR 0–5, the H1 scaffold and PR 5b merged; PR 6 built on
-> `m2/search-and-answer` (not yet a PR).
+> **Status (2026-10-22):** PR 0–7, the H1 scaffold and PR 5b merged; H2 scaffold on
+> `m2/metrics-scaffold` in review.
 
 ADRs 0008 (embeddings) and 0009 (database roles and RLS) record the decisions and their sources.
 This file holds what each M2 PR must prove; each PR copies its section into its own acceptance
@@ -371,10 +371,61 @@ and those that reach `vector_search` wait for H1).**
   finds which group; the metrics on top are H2's, including how several groups count (for
   `multi_hop`: any group in the top k, or all of them), a question for H2's guide.
 
+**Scaffold (2026-10-22, noah; branch `m2/metrics-scaffold`; everything runs locally, no
+database).** `evalset/ranking.py` (built, not hand-write): `RankedRelevance` (question id,
+`n_groups` ≥ 1, `groups_by_rank` = per rank the group indexes `matched_groups` gives; checked when
+built), `ranked_relevance` (a question and its ranked hits → the record), `select_for_retrieval`
+and `has_evidence` (questions without evidence are listed as not scored, never dropped),
+`check_k`, `check_results`; 20 tests / 38 cases in `tests/evalset/test_ranking.py`, passing.
+`evalset/metrics.py`: `hit_at_k`, `all_groups_at_k`, `reciprocal_rank`, `mean_hit_at_k`,
+`mean_reciprocal_rank`, bodies `raise NotImplementedError`, docstrings = the spec (ranks from 1;
+relevant = finds any group; `k` an int ≥ 1, a `k` beyond the list allowed; RR cut off at `k`,
+first relevant hit only; exact `Fraction` results; an empty set or a question listed twice is a
+`ValueError`). Strict-xfail tests: `tests/evalset/test_metrics.py`, 38 tests / 142 cases,
+hand-computed literals, property tests on hand-chosen records. Checked against a scratch reference
+kept outside the repository (deleted afterwards) and 19 deliberately wrong variants (0-based
+ranks, the wrong n, hits counted as groups, no cut-off, float results, …), each failing at least
+one test. Guide: `docs/learning/m2-metrics.md`; its §5 lists the open decisions (D1 any or all
+groups, D2 MRR's depth, D3 `Fraction`, D4 which questions count, D5 time-box 2 h on
+`m2/metrics`, D6 the metric's k against the search's k), each with a recommended default the code
+follows today.
+
+**Review fixes (2026-10-22; ananya, kenji, maya).** Records are built from the search's ranked list
+before the score threshold (`AnswerRun.hits`, never `AnswerRun.evidence`), so hit@k and MRR@k do
+not move with `rag_min_score`; unscorable questions are PR 8's third count, taken out before
+`ranked_relevance`. New cases: a non-int `k` (`5.0`, `"5"`) for all five functions, a repeated
+question id with a different record (in both modules), and a 2/3 and 4/9 mean with type checks.
+Checked again against a scratch reference (115 of 115 passed; deleted afterwards) and three more
+wrong variants (a float inside a `Fraction`, duplicates found by record equality, a hand-rolled
+`k < 1` check), each failing at least one new case. Guide: scored n in the small-n example
+(intervals now a proposal), MRR is not a proportion, clustered questions, the naming of hit@k,
+`x of n` for counts, explain-back questions without printed answers.
+
+**Test gaps closed (2026-10-22, noah).** A bad `k` is now also refused for an empty hit list in
+all five functions (an early "no hits" return before `check_k` passed before; 25 → 50 cases); an
+MRR of 30191/3027273 (ranks 97, 101, 103 at k = 103), whose denominator a float mean rounded back
+with `limit_denominator()` cannot recover (2/3 and 4/9 it can; the comment saying otherwise is
+fixed); a 3-group `[0, 0, 1]` that is not "all groups" at k = 3. Checked against a scratch
+reference (142 of 142 passed with `--runxfail`; deleted afterwards): each early-return variant
+fails only the new empty-list cases, the `limit_denominator()` variant only the new MRR test, and
+counting hits as groups now fails 3 tests instead of 2.
+- **[decided 2026-10-22]** (shesha) D1–D4 and D6 as recommended: hit@k = any group, plus
+  `all_groups_at_k` reported as `x of n` for questions with two or more groups; MRR@k at the same
+  k as hit@k (k = 5); exact `Fraction` results; every question with at least one evidence group
+  is scored; PR 8 asserts every metric k ≤ the search's k. shesha writes the bodies on
+  `m2/metrics` (time-box 2 h). For PR 8's report, every retrieval rate carries an interval
+  (Wilson for hit@k counts, a bootstrap over questions for MRR). There is also an "evidence
+  complete" count (`all_groups_at_k` on the prompt's evidence) for `multi_hop` and `ambiguous`,
+  and questions unscorable at a config are a third count, never dropped.
+
 ## PR 8 — `m2/eval-harness` (noah)
-- The eval harness and the baseline report: hit@5, MRR and correctness, each with dataset
-  version, commit, model ids and config, reproducible from the commit. The fake embedder's numbers
-  are never reported as results.
+- The eval harness and the baseline report: hit@5, MRR@5 (H2, decided 2026-10-22) and
+  correctness, each with dataset version, commit, model ids and config, reproducible from the
+  commit. The fake embedder's numbers are never reported as results.
+- Every metric k is at most the k passed to the search, asserted per run; the report names both.
+- Every retrieval rate carries an interval (Wilson for hit@k counts, a bootstrap over questions
+  for MRR) next to its `x of n`; plus an "evidence complete" count for `multi_hop` and
+  `ambiguous` (decided 2026-10-22).
 - A hit is relevant by content (`evalset/relevance.py`: `hit_matches_key`, `matched_groups`):
   same business, same `(source_id, version)`, and its normalised text contains the anchor; any
   key of a group finds the group. `SearchHit` has no business id: the harness fills

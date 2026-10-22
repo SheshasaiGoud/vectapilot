@@ -13,9 +13,9 @@ an evidence key when
 That holds at any chunk size and survives reindexing. A hit finds an evidence group when it
 matches any key of the group (the keys of a group are interchangeable).
 
-`matched_groups` turns one ranked hit into the groups it finds; PR 8 turns a question's ranked
-hits into a ranked list of those. What hit@k and MRR make of that list is shesha's H2
-(`[HAND-WRITE]`), and is not here.
+`matched_groups` turns one ranked hit into the groups it finds; `ranking.ranked_relevance` turns
+a question's ranked hits into a ranked list of those. What hit@k and MRR make of that list is
+shesha's H2 (`[HAND-WRITE]`, `metrics.py`), and is not here.
 """
 
 from dataclasses import dataclass, field

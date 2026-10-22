@@ -157,9 +157,11 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - **M2 (ingestion, vector search, cited answers, eval v0) — in progress** (ADRs 0008–0012; plan
   `docs/plans/m2-pr-checks.md`). Merged 2026-10-21/22: #23 ADRs · #24 DB roles + RLS · #25 canary
   suite in CI · #26 ingestion · #27 embeddings · #28 KB endpoints · #29 H1 scaffold · #30 one
-  approved version · #31 search + cited answers. H1 (shesha's `vector_search`) not yet written
-  (strict xfail). PR 7 (eval v0: corpus, schema, checks; 0 questions, which are shesha's and
-  friends') in review. Next: H2 metrics, PR 8 harness, PR 9 shesha's live run.
+  approved version · #31 search + cited answers · #32 eval v0 (corpus, format, frozen split; 0
+  questions yet, which are shesha's and friends'). H1 (shesha's `vector_search`) not yet written
+  (strict xfail). H2 scaffold (hit@k, MRR; `m2/metrics-scaffold`) in review; shesha writes the
+  bodies on `m2/metrics`. Next: H2, PR 8 harness + baseline report, PR 9 close-out (shesha's
+  live run).
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -236,3 +238,7 @@ Planned: `packages/mcp_server/`, `scripts/`.
   per-call latency never compared with the §6 target.
 - M1 · live cap: worst-case reservation before each call; the typed cap only catches mistakes (the
   real control is the key never reaching an agent); `summary.md`'s status line, not exit 0, decides.
+- M2 · retrieval metrics: hit@k (anything relevant in the top k) vs recall@k (share of evidence
+  groups found) vs precision@k (share of the top k that is relevant); MRR@k counts only the first
+  relevant hit; exact `Fraction`, not float or `Decimal` (1/3); "n scored, m not scored" next to
+  every number; why small n needs counts and an interval, never a bare percentage.

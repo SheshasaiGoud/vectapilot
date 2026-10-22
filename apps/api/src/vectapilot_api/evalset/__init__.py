@@ -9,12 +9,15 @@ Pure modules over text and values, plus one I/O shell (`files.py`) and a CLI (`c
   readiness, the coverage report, the correctness-label schema
 - `relevance` — when a retrieved chunk is evidence for a question (by content; PR 8 scores with
   it)
+- `ranking` — one question's ranked groups (`RankedRelevance`), built from `relevance`, and which
+  questions are scored for retrieval at all
+- `metrics` — hit@k and MRR on those ranked groups: shesha's H2 (`[HAND-WRITE]`), stubs until then
 - `split` — the test-split rule, its balance check, content hashes, `freeze.json`
 - `checks` — one stage-aware check of a version, the split preview, and the freeze
 - `personal_data` — the fail-closed screen for phone numbers, Aadhaar numbers and e-mail addresses
 - `files`, `cli` — reading and writing the files; the command line
 
 The questions themselves are human-written (decided 2026-10-21); nothing here writes one. The
-retrieval metrics (hit@k, MRR) are shesha's H2 (`[HAND-WRITE]`): they take the ranked groups
-`relevance.matched_groups` yields, and are not here.
+retrieval metrics (hit@k, MRR) are shesha's H2 (`[HAND-WRITE]`, `metrics.py`): they take the
+ranked groups `relevance.matched_groups` yields, as `ranking.RankedRelevance` records.
 """
