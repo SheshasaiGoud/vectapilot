@@ -82,6 +82,19 @@ canary suite grows to cover them as they arrive.
   `test_a_session_level_business_does_not_survive_the_pool` then XPASSes and its strict xfail is
   removed. The red proof: without the hook, the test fails. diego documents which hook he picks
   and why.
+  - Done 2026-10-23 (M3 PR 1, diego). The hook is SQLAlchemy's pool `reset` event
+    (`db.reset_business_on_return`, installed by `db.create_api_engine`, which `create_app`
+    uses). It rolls back any open transaction, then sends `RESET app.business_id` outside a
+    transaction. The rollback comes first because SQLAlchemy runs the event before its own
+    rollback, and Postgres undoes a `RESET` with the transaction it ran in. Why not `checkin`: a
+    failing `checkin` listener loses the pool slot and the error reaches the request. A failing
+    `reset` is logged by SQLAlchemy, and the connection is invalidated (closed, never pooled
+    again), so it fails closed. asyncpg's own reset query runs only in asyncpg's pool, which
+    SQLAlchemy does not use. Proven against Postgres in `tests/canary/test_leakage.py`, with two
+    red proofs (no hook; the hook without its rollback) and a failed-reset check.
+  - 2026-10-23 (shesha): `verify_role` also refuses a new connection whose `app.business_id` is
+    already set (a default from the role, the database or the connection options), because the
+    `RESET` would restore it. The refusal is fixed text and never contains the value.
 - **A stricter canary gate** (M3 PR 3). `scripts/canary_gate.py` refuses any xfail under
   `tests.canary` that is not a pending `[HAND-WRITE]` mark (`PENDING_HAND_WRITE`), with a red
   proof. There is no allowlist of known gaps (that was D10 (b)).

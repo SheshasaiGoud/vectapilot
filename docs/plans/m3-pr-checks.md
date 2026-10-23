@@ -6,8 +6,8 @@
 > renumbered the PRs (now PR 0–9) and moved the judge and reranking to stretch items, S1 and S2.
 > shesha decided D1–D16 the same day ("Decided 2026-10-23"). One question is open now: who writes
 > H1 (D16 is looked at again after M2's dev run, as decided). PR 0 (this file,
-> [ADR 0014](../adr/0014-hybrid-retrieval.md) and the amendments) is in review; nothing else is
-> built.
+> [ADR 0014](../adr/0014-hybrid-retrieval.md) and the amendments) is merged (#38); PR 1 (guards)
+> is in review.
 > M2 is **not closed**: `support_qa` v0.1 has no questions yet (`manifest.json` says
 > `stage: collecting`, `questions.jsonl` has 0 lines), and there is no live run and no baseline
 > ([`m2-close-out.md`](m2-close-out.md)). M3 can be built now. Anything that compares against M2's
@@ -271,6 +271,25 @@ Three small, independent changes. None needs M2's baseline.
   returns to the pool; diego picks the hook and documents why.
   `test_a_session_level_business_does_not_survive_the_pool` then XPASSes and its xfail is removed.
   Red proof: without the hook, the test fails. The canary suite stays green.
+- **Built (2026-10-23, diego).** In review; nothing merged.
+  - Telemetry: `main.TELEMETRY_OFF` is passed to `FastAPI(telemetry=...)`.
+    `tests/test_fastapi_telemetry.py` makes the recorders the process-wide providers (FastAPI's
+    default source, restored by `monkeypatch`), not a `create_app` parameter. It has one test per
+    signal and a red proof with FastAPI's defaults, where every recorder fills, the canary
+    included. It imports `opentelemetry-api` directly: declaring it is shesha's call under rule 11.
+  - Opt-in: `config.API_PAID_PROVIDERS` holds `llm_provider` and `embeddings_provider`, with one
+    refusal test per provider. A drift test fails while any `*_provider` setting is missing. The
+    eval harness and the measurement CLI never call the rule (only `create_app` does), and a test
+    covers each loader.
+  - `RESET`: SQLAlchemy's pool `reset` event (ADR 0009 amendment, "Done"). The strict xfail is
+    removed. The red proofs are tests, and one more run with the hook never installed failed as
+    expected.
+- **[decided 2026-10-23]** (shesha) `opentelemetry-api` is declared as a direct dev dependency
+  (rule 11; already locked at 1.45.1 through fastapi, so `uv.lock` only gains the project's own
+  requirement). The startup role check also refuses a connection that starts with a default
+  `app.business_id` (server settings or a role default; ADR 0009 amendment). A statement timeout
+  for every DB statement, the RESET included, comes later (M9/M10). The opt-in error type is the
+  generic `paid_provider_not_opted_in`.
 
 ## PR 2 — `m3/fulltext-column` (diego; ananya pairs on ingestion, zara reviews) · S
 - **[D2] Migration 0005:** adds `ts_config regconfig` and `tsv tsvector GENERATED ALWAYS AS

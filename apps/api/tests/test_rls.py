@@ -22,7 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from tests.conftest import integration, make_settings
 from tests.test_business_header import UNKNOWN, probe_app
 from vectapilot_api.config import MigrationSettings, Settings
-from vectapilot_api.db import APP_ROLE, Database, UnsafeDatabaseRole, business_transaction
+from vectapilot_api.db import (
+    APP_ROLE,
+    DEFAULT_BUSINESS_REFUSED,
+    Database,
+    UnsafeDatabaseRole,
+    business_transaction,
+)
 from vectapilot_api.db_provision import provision, set_login_password
 from vectapilot_api.gateway.types import CallRecord
 from vectapilot_api.main import create_app
@@ -485,6 +491,41 @@ async def test_startup_accepts_the_app_role() -> None:
     database = await start(app_url())
 
     assert database.role_verified is True
+
+
+# A default business (shesha, 2026-10-23): the app role itself, but every new connection already
+# has `app.business_id`. The pool-return RESET would go back to it, so the role check refuses it.
+
+
+async def test_the_role_check_refuses_a_connection_that_starts_with_a_business() -> None:
+    default = f"canary-default-{secrets.token_hex(4)}"
+    engine = create_async_engine(
+        app_url(), connect_args={"server_settings": {"app.business_id": default}}
+    )
+    database = Database(engine)
+    try:
+        async with engine.connect() as connection:  # the positive control: the default is there
+            assert await connection.scalar(CURRENT_BUSINESS) == default
+        with pytest.raises(UnsafeDatabaseRole) as error:
+            await database.verify_role()
+    finally:
+        await engine.dispose()
+
+    assert str(error.value) == DEFAULT_BUSINESS_REFUSED
+    assert default not in str(error.value)
+    assert database.role_verified is False
+
+
+async def test_startup_refuses_a_role_with_a_default_business(owner_engine: AsyncEngine) -> None:
+    default = f"canary-default-{secrets.token_hex(4)}"  # hex only: safe inside the literal
+    async with throwaway_login(owner_engine) as url:
+        name = make_url(url).username
+        async with owner_engine.begin() as connection:  # dropped with the role
+            await connection.exec_driver_sql(f"ALTER ROLE {name} SET app.business_id = '{default}'")
+        with pytest.raises(UnsafeDatabaseRole) as error:
+            await start(url)
+
+    assert str(error.value) == DEFAULT_BUSINESS_REFUSED
 
 
 # ── Provisioning and the X-Business-Id dependency ────────────────────────────────────────────

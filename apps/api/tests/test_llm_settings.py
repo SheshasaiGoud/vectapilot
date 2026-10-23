@@ -15,7 +15,13 @@ from pydantic import ValidationError
 
 from tests.conftest import TEST_SETTINGS_FIELDS, make_settings
 from vectapilot_api import llm_cli
-from vectapilot_api.config import ANTHROPIC_SDK_ENV_VARS, TLS_ENV_VARS, Settings
+from vectapilot_api.config import (
+    ANTHROPIC_SDK_ENV_VARS,
+    API_PAID_PROVIDERS,
+    TLS_ENV_VARS,
+    Settings,
+)
+from vectapilot_api.evalrun import cli as evalrun_cli
 from vectapilot_api.gateway.providers.fake import FakeProvider
 from vectapilot_api.gateway.types import RetryPolicy
 from vectapilot_api.main import create_app
@@ -299,28 +305,86 @@ def test_pydantic_settings_debug_output_never_reaches_the_logs(
     assert logging.getLogger("pydantic_settings").getEffectiveLevel() == logging.WARNING
 
 
-# ── The API server's opt-in to a paid provider (decided 2026-10-22, ADR 0006 Exposure) ───────
-# `create_app` is only called here, never started: the lifespan (clients, the gateway) never runs,
-# so nothing is built and nothing is sent.
+# ── The API server's opt-in to every paid provider (2026-10-22; D9 2026-10-23; ADR 0006) ──────
+# `create_app` is only called here, never started: the lifespan (clients, the gateway, the
+# embedder) never runs, so nothing is built and nothing is sent. One refusal test per provider in
+# `API_PAID_PROVIDERS`; a later paid provider (a reranker) adds its own.
+
+PAID_EMBEDDINGS: dict[str, Any] = {
+    "environment": "local",
+    "embeddings_provider": "voyage",
+    "voyage_api_key": CANARY,
+}
+"""Valid Settings for the paid embedder (ADR 0008's rules pass), with the fake answer model."""
 
 
-def test_the_api_refuses_a_paid_provider_without_the_opt_in() -> None:
-    settings = make_settings(database_url=CANARY_DSN, **PAID)  # valid Settings, opt-in off
+def refused_by_the_api(**overrides: Any) -> ValidationError:
+    """Valid Settings (with a canary DSN) that `create_app` refuses; the error, checked to hide
+    the canaries in every form that may be logged."""
+    settings = make_settings(database_url=CANARY_DSN, **overrides)  # valid Settings, opt-in off
 
     with pytest.raises(ValidationError) as caught:
         create_app(settings)  # at startup, in the factory: before any request is served
 
-    message = assert_hides(caught.value)  # neither the key nor the DSN password
-    assert message == (
+    texts = [str(caught.value), repr(caught.value), str(caught.value.errors())]
+    for text in texts:  # neither a key nor the DSN password; even with the input (none passed)
+        assert CANARY not in text
+    return caught.value
+
+
+def opt_in_message(setting: str) -> str:
+    return (
         "api_allow_paid_llm (VECTAPILOT_API_ALLOW_PAID_LLM) must be true for the API server to use"
-        " a paid llm_provider (any but 'fake'): it has no budgets until M7"
+        f" a paid {setting} (any but 'fake'): it has no budgets until M7"
     )
-    [detail] = caught.value.errors()  # even with the input: none was ever passed in
-    assert (detail["loc"], detail["type"], detail["input"]) == (
-        ("api_allow_paid_llm",),
-        "paid_llm_not_opted_in",
+
+
+def test_the_api_refuses_a_paid_llm_provider_without_the_opt_in() -> None:
+    error = refused_by_the_api(**PAID)
+
+    [detail] = error.errors()
+    assert (detail["loc"], detail["type"], detail["input"], detail["msg"]) == (
+        ("api_allow_paid_llm",),  # the setting to change, never the provider's value
+        "paid_provider_not_opted_in",
         None,
+        opt_in_message("llm_provider"),
     )
+
+
+def test_the_api_refuses_a_paid_embeddings_provider_without_the_opt_in() -> None:
+    # D9: `GET /v1/kb/search` embeds every question, so Voyage is a paid path without any answer.
+    error = refused_by_the_api(**PAID_EMBEDDINGS)
+
+    [detail] = error.errors()
+    assert (detail["loc"], detail["type"], detail["input"], detail["msg"]) == (
+        ("api_allow_paid_llm",),
+        "paid_provider_not_opted_in",
+        None,
+        opt_in_message("embeddings_provider"),
+    )
+
+
+def test_the_api_names_every_paid_provider_it_refuses() -> None:
+    error = refused_by_the_api(**(PAID | PAID_EMBEDDINGS))
+
+    assert [d["msg"] for d in error.errors()] == [
+        opt_in_message("llm_provider"),
+        opt_in_message("embeddings_provider"),
+    ]
+
+
+def test_every_provider_setting_is_covered_by_the_opt_in() -> None:
+    # The drift guard for "any later paid provider" (D9): a new `*_provider` setting (a reranker)
+    # fails here until it is added to API_PAID_PROVIDERS, and so refused without the opt-in.
+    providers = {name for name in Settings.model_fields if name.endswith("_provider")}
+
+    assert providers == set(API_PAID_PROVIDERS)
+
+
+def test_the_api_accepts_a_paid_embeddings_provider_with_the_opt_in() -> None:
+    app = create_app(make_settings(**PAID_EMBEDDINGS, api_allow_paid_llm=True))
+
+    assert app.state.settings.embeddings_provider == "voyage"
 
 
 def test_an_injected_provider_does_not_bypass_the_opt_in() -> None:
@@ -366,3 +430,28 @@ def test_the_measurement_cli_does_not_need_the_opt_in(
     # The same Settings stop the API server:
     with pytest.raises(ValidationError, match="VECTAPILOT_API_ALLOW_PAID_LLM"):
         create_app(live)
+
+
+def test_the_eval_harness_does_not_need_the_opt_in(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ADR 0013 decision 4: the harness's live run has its own cap for both paid providers, and the
+    # API's opt-in does not apply. Its loader reads the same Settings; only `create_app` applies
+    # the rule (the harness's live wiring with both paid providers and the opt-in off is run in
+    # tests/evalrun/test_harness.py and test_cli.py).
+    for name in [k for k in os.environ if k.startswith("VECTAPILOT_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.chdir(tmp_path)  # no .env here
+    monkeypatch.setenv("VECTAPILOT_ENVIRONMENT", "local")
+    monkeypatch.setenv("VECTAPILOT_LLM_PROVIDER", "anthropic")
+    monkeypatch.setenv("VECTAPILOT_ANTHROPIC_API_KEY", CANARY)
+    monkeypatch.setenv("VECTAPILOT_EMBEDDINGS_PROVIDER", "voyage")
+    monkeypatch.setenv("VECTAPILOT_VOYAGE_API_KEY", CANARY)
+    monkeypatch.setenv("VECTAPILOT_DATABASE_URL", "postgresql+asyncpg://u:p@127.0.0.1:1/db")
+    monkeypatch.setenv("VECTAPILOT_REDIS_URL", "redis://127.0.0.1:1/0")
+
+    live = evalrun_cli.load_settings(True)  # the harness's real loader, reading that environment
+
+    assert (live.embeddings_provider, live.api_allow_paid_llm) == ("voyage", False)
+    with pytest.raises(ValidationError, match="paid embeddings_provider"):
+        create_app(live)  # the same Settings stop the API server
