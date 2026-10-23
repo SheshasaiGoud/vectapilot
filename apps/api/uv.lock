@@ -1405,6 +1405,7 @@ dependencies = [
 dev = [
     { name = "coverage" },
     { name = "mypy" },
+    { name = "opentelemetry-api" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -1427,6 +1428,7 @@ requires-dist = [
 dev = [
     { name = "coverage", specifier = ">=7.16.2" },
     { name = "mypy", specifier = ">=2.4.0" },
+    { name = "opentelemetry-api", specifier = ">=1.45.1" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.10" },
 ]

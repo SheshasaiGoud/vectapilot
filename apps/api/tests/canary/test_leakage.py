@@ -15,15 +15,17 @@ leaks runs as the app role.
 """
 
 import secrets
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from typing import Final
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import Connection, event, text
+from sqlalchemy.engine.interfaces import AdaptedConnection, DBAPIConnection
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import ConnectionPoolEntry, NullPool, PoolResetState
 
 from tests.canary import checks
 from tests.canary.catalog import (
@@ -43,8 +45,9 @@ from tests.canary.read_paths import (
 )
 from tests.canary.write_paths import WRITE_PATHS
 from tests.conftest import integration
+from vectapilot_api import db
 from vectapilot_api.config import MigrationSettings, Settings
-from vectapilot_api.db import APP_ROLE, business_transaction
+from vectapilot_api.db import APP_ROLE, business_transaction, create_api_engine
 from vectapilot_api.embeddings.base import EmbeddingSpec
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.fake import fake_vector
@@ -134,8 +137,19 @@ async def fresh_engine() -> AsyncIterator[AsyncEngine]:
 
 @pytest.fixture
 async def pooled_engine() -> AsyncIterator[AsyncEngine]:
-    """The app role through one pooled connection, reused by every checkout (as main.py's)."""
+    """The app role through one pooled connection, reused by every checkout, WITHOUT the
+    pool-return reset: the reused-connection tests prove `business_transaction`'s
+    transaction-local `set_config` on its own, and the red proofs need the bare pool."""
     engine = create_async_engine(app_url(), pool_pre_ping=True, pool_size=1, max_overflow=0)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def api_pooled_engine() -> AsyncIterator[AsyncEngine]:
+    """The app role as main.py's engine (`db.create_api_engine`, with the pool-return reset),
+    through one pooled connection reused by every checkout."""
+    engine = create_api_engine(app_url(), pool_size=1, max_overflow=0)
     yield engine
     await engine.dispose()
 
@@ -411,28 +425,189 @@ async def test_red_proof_a_write_into_another_business_is_caught(
     assert await sql_on_every_business_table(fresh_engine, b) != before
 
 
-@pytest.mark.xfail(
-    raises=AssertionError,
-    strict=True,
-    reason="known gap (PR 2 nit 3, shesha decides): nothing RESETs app.business_id when a"
-    " connection returns to the pool, so a session-level set_config/SET survives into the next"
-    " checkout. business_transaction never does one; this turns red (XPASS) once a RESET lands.",
-)
+# ── The pool-return reset (M3 PR 1, ADR 0009 amendment): a session-level business ───────────
+# `business_transaction` never sets one; these tests do it on purpose (the bug), return the
+# connection to the pool and check it out again.
+
+
+@dataclass(frozen=True)
+class NextCheckout:
+    same_backend: bool
+    """The same Postgres backend as before the return (False: the pool opened a new one)."""
+    seen: dict[str, set[str]]
+    """Per business table, the business ids the next checkout can see."""
+
+
+async def after_a_session_level_business(engine: AsyncEngine, business: Planted) -> NextCheckout:
+    """Set `business` for the whole session (`false`), commit, return the connection; then what
+    the next checkout sees."""
+    async with engine.begin() as connection:
+        pid = await connection.scalar(BACKEND_PID)
+        await connection.execute(
+            text("SELECT set_config('app.business_id', :b, false)"), {"b": business.business_id}
+        )
+
+    async with engine.connect() as connection:
+        same = await connection.scalar(BACKEND_PID) == pid
+        return NextCheckout(same, await visible_businesses(connection))
+
+
+def nothing_visible(seen: dict[str, set[str]]) -> bool:
+    return bool(seen) and all(ids == set() for ids in seen.values())
+
+
 async def test_a_session_level_business_does_not_survive_the_pool(
+    api_pooled_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    after = await after_a_session_level_business(api_pooled_engine, planted[0])
+
+    assert after.same_backend, "not the same connection: the test proves nothing"
+    assert nothing_visible(after.seen), after.seen
+
+
+async def test_red_proof_without_the_pool_reset_a_session_level_business_survives(
     pooled_engine: AsyncEngine, planted: tuple[Planted, Planted]
 ) -> None:
     a, _ = planted
-    async with pooled_engine.begin() as connection:  # the bug: `false` = for the whole session
+    after = await after_a_session_level_business(pooled_engine, a)  # the bare pool: no reset
+
+    assert after.same_backend, "not the same connection: the test proves nothing"
+    assert only(after.seen, a), after.seen  # the next checkout is still business a
+
+
+async def test_a_failed_pool_reset_throws_the_connection_away(
+    api_pooled_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Postgres refuses an unknown parameter, so the hook raises on the real connection.
+    monkeypatch.setattr(db, "RESET_BUSINESS", "RESET vectapilot_no_such_setting")
+
+    after = await after_a_session_level_business(api_pooled_engine, planted[0])
+
+    # SQLAlchemy logged it and invalidated the connection: the next checkout is a new backend.
+    assert "Exception during reset or similar" in caplog.text
+    assert not after.same_backend
+    assert nothing_visible(after.seen), after.seen
+
+
+def leave_a_transaction_open(business_id: str) -> Callable[[Connection], int]:
+    """Through the DBAPI connection (SQLAlchemy's `Connection` never sees a transaction): set the
+    business for the session and commit it, then start a new transaction and return the
+    connection with it still open. The pool's own rollback then comes after the reset hook."""
+
+    def run(connection: Connection) -> int:
+        dbapi = connection.connection.dbapi_connection
+        assert dbapi is not None
+        cursor = dbapi.cursor()
+        cursor.execute(
+            "SELECT pg_backend_pid(), set_config('app.business_id', $1, false)", (business_id,)
+        )
+        row = cursor.fetchone()
+        assert row is not None
+        dbapi.commit()
+        cursor.execute("SELECT 1")  # a new transaction, left open
+        return int(row[0])
+
+    return run
+
+
+async def after_a_transaction_left_open(engine: AsyncEngine, business: Planted) -> NextCheckout:
+    async with engine.connect() as connection:
+        pid = await connection.run_sync(leave_a_transaction_open(business.business_id))
+
+    async with engine.connect() as connection:
+        same = await connection.scalar(BACKEND_PID) == pid
+        return NextCheckout(same, await visible_businesses(connection))
+
+
+async def test_the_pool_reset_is_not_undone_by_the_pools_own_rollback(
+    api_pooled_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    after = await after_a_transaction_left_open(api_pooled_engine, planted[0])
+
+    assert after.same_backend, "not the same connection: the test proves nothing"
+    assert nothing_visible(after.seen), after.seen
+
+
+async def test_red_proof_a_reset_inside_the_open_transaction_is_rolled_back(
+    pooled_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    # The hook without its rollback: the RESET runs inside the open transaction, the pool rolls
+    # that back after the hook, and Postgres undoes the RESET with it.
+    def reset_only(
+        dbapi_connection: DBAPIConnection,
+        connection_record: ConnectionPoolEntry,
+        reset_state: PoolResetState,
+    ) -> None:
+        assert isinstance(dbapi_connection, AdaptedConnection)
+        dbapi_connection.run_async(lambda connection: connection.execute(db.RESET_BUSINESS))
+
+    event.listen(pooled_engine.sync_engine, "reset", reset_only)
+    a, _ = planted
+    after = await after_a_transaction_left_open(pooled_engine, a)
+
+    assert after.same_backend, "not the same connection: the test proves nothing"
+    assert only(after.seen, a), after.seen
+
+
+async def after_a_close_without_commit(engine: AsyncEngine, business: Planted) -> NextCheckout:
+    """Set `business` for the session and commit, then leave a new transaction open on the
+    `Connection` and close it. `Connection.close()` rolls that back itself and tells the pool
+    (`transaction_was_reset=True`), so the pool skips its own rollback. The commit is needed:
+    Postgres undoes a session-level `set_config` with the transaction it ran in, and the test
+    would then pass without any hook."""
+    async with engine.connect() as connection:
         pid = await connection.scalar(BACKEND_PID)
         await connection.execute(
-            text("SELECT set_config('app.business_id', :b, false)"), {"b": a.business_id}
+            text("SELECT set_config('app.business_id', :b, false)"), {"b": business.business_id}
         )
+        await connection.commit()
+        await connection.execute(text("SELECT 1"))  # autobegin: a new transaction, never committed
+        assert connection.in_transaction()
 
-    async with pooled_engine.connect() as connection:
-        if await connection.scalar(BACKEND_PID) != pid:
-            pytest.fail("not the same connection: the test proves nothing")  # not an xfail
-        counts = await row_counts(connection)
-    assert set(counts.values()) == {0}, counts
+    async with engine.connect() as connection:
+        same = await connection.scalar(BACKEND_PID) == pid
+        return NextCheckout(same, await visible_businesses(connection))
+
+
+def record_reset_states(engine: AsyncEngine) -> list[bool]:
+    """`transaction_was_reset` of every pool return, in order (a listener after the hook)."""
+    states: list[bool] = []
+
+    def record(
+        dbapi_connection: DBAPIConnection,
+        connection_record: ConnectionPoolEntry,
+        reset_state: PoolResetState,
+    ) -> None:
+        states.append(reset_state.transaction_was_reset)
+
+    event.listen(engine.sync_engine, "reset", record)
+    return states
+
+
+async def test_the_pool_reset_runs_when_the_connection_rolled_back_itself(
+    api_pooled_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    states = record_reset_states(api_pooled_engine)
+
+    after = await after_a_close_without_commit(api_pooled_engine, planted[0])
+
+    assert states[0] is True, "not the path where the Connection rolled back: proves nothing"
+    assert after.same_backend, "not the same connection: the test proves nothing"
+    assert nothing_visible(after.seen), after.seen
+
+
+async def test_red_proof_a_close_without_commit_keeps_a_committed_session_business(
+    pooled_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    # The bare pool: the Connection's own rollback does not undo the committed session setting.
+    a, _ = planted
+    after = await after_a_close_without_commit(pooled_engine, a)
+
+    assert after.same_backend, "not the same connection: the test proves nothing"
+    assert only(after.seen, a), after.seen
 
 
 # ── Proved on purpose: break one protection, the same check turns red ────────────────────────

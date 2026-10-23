@@ -40,6 +40,9 @@ build-backend = "uv_build"
 dev = [
     "coverage>=7.16.2",
     "mypy>=2.4.0",
+    # Declared, rule 11 (shesha, 2026-10-23): tests/test_fastapi_telemetry.py imports it directly.
+    # Not a new package: `fastapi` already pulls it in; the lower bound is the locked version.
+    "opentelemetry-api>=1.45.1",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
 ]

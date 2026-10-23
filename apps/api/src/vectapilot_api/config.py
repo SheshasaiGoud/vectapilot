@@ -41,12 +41,18 @@ PROCESS_ENV_ONLY: Final = {
 """API keys read from the process environment only: in the `.env` file they stop startup (ADR 0007,
 ADR 0008). Field name → variable name."""
 
-API_PAID_LLM_REFUSED: Final = (
+API_PAID_PROVIDERS: Final = ("llm_provider", "embeddings_provider")
+"""Every setting that picks a provider the API server builds (ADR 0006 Exposure, D9 2026-10-23).
+Any value but 'fake' counts as paid, so the rule fails closed: a new paid value is refused until
+opted in. A later provider setting (a paid reranker) is added here; a test fails while a
+`*_provider` setting is missing from this tuple."""
+
+API_PAID_REFUSED: Final = (
     "api_allow_paid_llm (VECTAPILOT_API_ALLOW_PAID_LLM) must be true for the API server to use a"
-    " paid llm_provider (any but 'fake'): it has no budgets until M7"
+    " paid {setting} (any but 'fake'): it has no budgets until M7"
 )
-"""The API server's refusal (decided 2026-10-22, ADR 0006 Exposure). Fixed text: it names the
-setting and the rule, never a value."""
+"""The API server's refusal (decided 2026-10-22, extended by D9 2026-10-23), filled with a name
+from `API_PAID_PROVIDERS`. Fixed text: it names settings and the rule, never a value."""
 
 # With PYDANTIC_SETTINGS_DEBUG set, pydantic-settings logs every raw source value (the API key and
 # the DSN passwords included) at DEBUG on this logger, before any validator runs. Pinned at WARNING
@@ -99,11 +105,12 @@ class Settings(BaseSettings):
     """`VECTAPILOT_ANTHROPIC_API_KEY`, from the process environment only (a `.env` one stops
     startup, see `settings_customise_sources`). Prints as '**********'."""
     api_allow_paid_llm: bool = False
-    """`VECTAPILOT_API_ALLOW_PAID_LLM`: the API server's opt-in to a paid `llm_provider` (decided
-    2026-10-22, ADR 0006 Exposure). Until M7 adds budgets, every answer with evidence is an
-    uncapped call, so `create_app` refuses any provider but the fake while this is false
-    (`require_api_paid_llm_opt_in`). The measurement CLI never reads it: its `--live` run has its
-    own `--max-usd` reservation cap."""
+    """`VECTAPILOT_API_ALLOW_PAID_LLM`: the API server's opt-in to every paid provider it builds,
+    `llm_provider` (decided 2026-10-22, ADR 0006 Exposure) and `embeddings_provider` (D9,
+    2026-10-23; the name stays). Until M7 adds budgets, every answer with evidence and every search
+    is an uncapped paid call, so `create_app` refuses any provider in `API_PAID_PROVIDERS` but the
+    fake while this is false (`require_api_paid_provider_opt_in`). The measurement CLI and the eval
+    harness never read it: their `--live` runs have their own `--max-usd` reservation cap."""
 
     # ── Embeddings (ADR 0008) ──
     embeddings_provider: EmbeddingsProvider = "fake"
@@ -231,24 +238,30 @@ class Settings(BaseSettings):
                 )
         return problems
 
-    def require_api_paid_llm_opt_in(self) -> None:
-        """The API server's startup rule (2026-10-22): a paid provider needs `api_allow_paid_llm`.
+    def require_api_paid_provider_opt_in(self) -> None:
+        """The API server's startup rule (2026-10-22, D9 2026-10-23): a paid provider, any setting
+        in `API_PAID_PROVIDERS`, needs `api_allow_paid_llm`.
 
-        Not one of `_llm_rules`: the measurement CLI builds the same Settings, and its `--live` run
-        must keep working under its own cap, so only `create_app` calls this. Every provider but
-        the fake counts as paid, so a provider added later is refused until opted in. Raised as a
-        ValidationError like every other settings rule, from fixed text (no value is passed in).
+        Not one of `_llm_rules`: the measurement CLI and the eval harness build the same Settings,
+        and their `--live` runs must keep working under their own cap, so only `create_app` calls
+        this. Every value but the fake counts as paid, so a provider added later is refused until
+        opted in. Raised as a ValidationError like every other settings rule, one error per paid
+        setting, from fixed text: only setting names from the tuple are passed in, never a value.
         """
-        if self.llm_provider == "fake" or self.api_allow_paid_llm:
+        paid = [name for name in API_PAID_PROVIDERS if getattr(self, name) != "fake"]
+        if not paid or self.api_allow_paid_llm:
             return
         raise ValidationError.from_exception_data(
             type(self).__name__,
             [
                 {
-                    "type": PydanticCustomError("paid_llm_not_opted_in", API_PAID_LLM_REFUSED),
+                    "type": PydanticCustomError(
+                        "paid_provider_not_opted_in", API_PAID_REFUSED, {"setting": name}
+                    ),
                     "loc": ("api_allow_paid_llm",),
                     "input": None,
                 }
+                for name in paid
             ],
             hide_input=True,
         )

@@ -7,16 +7,17 @@ Or directly:  uv run uvicorn --factory vectapilot_api.main:create_app
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Final
 
 from fastapi import FastAPI
+from fastapi.telemetry import TelemetryConfig
 from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from vectapilot_api import __version__
 from vectapilot_api.answer.router import router as answer_router
 from vectapilot_api.answer.service import ANSWER_ALIAS, AnswerService, RagConfig
 from vectapilot_api.config import Settings
-from vectapilot_api.db import Database
+from vectapilot_api.db import Database, create_api_engine
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.factory import build_embedder
 from vectapilot_api.embeddings.runner import EmbeddingRunner, batch_deadline_s
@@ -34,6 +35,25 @@ from vectapilot_api.retrieval.search import SearchService
 
 logger = logging.getLogger("vectapilot_api")
 
+TELEMETRY_OFF: Final[TelemetryConfig] = {
+    "tracing": False,
+    "metrics": False,
+    "logs": False,
+    "operation_spans": False,
+    "auto_configure": False,
+}
+"""FastAPI's built-in OpenTelemetry, every part off (M3 PR 1, ADR 0007 amendment).
+
+FastAPI 0.143.0 turns tracing, metrics and logs on by default (`applications.py:1033-1045`) and
+uses the process-wide providers. Once any provider exists (an SDK, `opentelemetry-instrument`), it
+would record `url.query` (our `?q=` question), keep the body of a failed validation and log stack
+traces with their messages, and read a client's `traceparent` as the parent span
+(`telemetry/_asgi.py`), while ADR 0011 decision 9 keeps the trace id server-made. With the three
+signals off, `FastAPI.__call__` never enters its telemetry layer (`NativeTelemetry.enabled()`).
+`operation_spans` and `auto_configure` add nothing while every signal is off; they are pinned so
+that turning one signal back on later is a deliberate change. The span comes with M9 (D12).
+`tests/test_fastapi_telemetry.py` proves it, and proves the defaults would record."""
+
 
 def create_app(
     settings: Settings | None = None, *, llm_provider: Provider | None = None
@@ -44,14 +64,16 @@ def create_app(
     tests pass a scripted fake. Without it, `llm_provider = "fake"` gives the fake with an empty
     script, so an answer that reaches the model step fails (500) until a test scripts it.
 
-    A paid `llm_provider` in Settings needs `api_allow_paid_llm` (2026-10-22, ADR 0006 Exposure),
-    injected provider or not: the rule reads Settings only.
+    Every paid provider in Settings (`llm_provider`, `embeddings_provider`) needs
+    `api_allow_paid_llm` (ADR 0006 Exposure, 2026-10-22 and D9 2026-10-23), injected provider or
+    not: the rule reads Settings only.
     """
     settings = settings or Settings()  # values come from the environment
     configure_logging(settings.log_level)
-    # Fail fast (ADR 0006, amended 2026-10-22): until M7 adds budgets, every answer is an uncapped
-    # paid call, so a paid provider without the opt-in stops the server here.
-    settings.require_api_paid_llm_opt_in()
+    # Fail fast (ADR 0006, amended 2026-10-22 and 2026-10-23): until M7 adds budgets, every answer
+    # and every search is an uncapped paid call, so a paid provider without the opt-in stops the
+    # server here.
+    settings.require_api_paid_provider_opt_in()
     # Fail fast (ADR 0006): an invalid catalog, or an alias whose model has no price, stops the
     # app here, before it serves anything. The answer's alias must exist too (M2 PR 6).
     catalog = load_catalog()
@@ -68,11 +90,9 @@ def create_app(
         # Clients connect lazily, so the API starts even when a dependency is down:
         # /healthz stays green and /readyz reports the problem.
         # The secret DSNs are unwrapped only here, straight into the clients — never into a log.
-        # `hide_parameters`: a database error's text never carries the bound values (document
-        # text, vectors) into a log or a traceback.
-        engine = create_async_engine(
-            str(settings.database_url.get_secret_value()), pool_pre_ping=True, hide_parameters=True
-        )
+        # `create_api_engine`: bound values never in an error's text, and the pool-return reset
+        # of `app.business_id` (M3 PR 1, ADR 0009 amendment).
+        engine = create_api_engine(str(settings.database_url.get_secret_value()))
         database = Database(engine)
         # ADR 0009: a role that could skip or switch off RLS (superuser, BYPASSRLS, owner of a
         # relation, or a member of such a role) stops startup here (UnsafeDatabaseRole).
@@ -113,7 +133,9 @@ def create_app(
         await app.state.db_engine.dispose()
         logger.info("shutdown")
 
-    app = FastAPI(title="VectaPilot API", version=__version__, lifespan=lifespan)
+    app = FastAPI(
+        title="VectaPilot API", version=__version__, lifespan=lifespan, telemetry=TELEMETRY_OFF
+    )
     app.state.settings = settings
     app.state.catalog = catalog
     app.include_router(health_router)
