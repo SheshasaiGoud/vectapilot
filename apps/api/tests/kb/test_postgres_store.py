@@ -11,10 +11,12 @@ approved version per business and source id, so all of it is valid for H1's test
 """
 
 import asyncio
+import logging
 import secrets
+import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
-from typing import Any, Final, cast
+from typing import Any, Final, NamedTuple, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -27,10 +29,13 @@ from tests.conftest import integration
 from tests.embeddings.scripted import FAKE_SPEC
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import Database, business_transaction
+from vectapilot_api.embeddings.runner import EMBEDDING_CALL
 from vectapilot_api.ingestion.types import SourceType
+from vectapilot_api.kb.router import ERRORS
 from vectapilot_api.kb.store import PostgresKbStore, is_one_approved_violation
 from vectapilot_api.kb.types import (
     ApprovalConflict,
+    AudienceConflict,
     ContentKind,
     DocumentStatus,
     NewChunk,
@@ -456,6 +461,94 @@ async def test_another_language_under_a_stored_version_is_a_language_conflict(
     # Nothing changed: the document's language, and each chunk's ts_config and tsv.
     assert await stored_language(app_engine, business) == before
     assert await counts(app_engine, business) == (1, len(before))
+
+
+DOCUMENT_ROWS: Final = text(
+    "SELECT id, version, status, language, audience, content_sha256 FROM documents"
+    " WHERE business_id = :b ORDER BY source_id, version"
+)
+
+
+class DocumentRow(NamedTuple):
+    id: uuid.UUID
+    version: str
+    status: str
+    language: str
+    audience: str
+    content_sha256: str
+
+
+async def document_rows(engine: AsyncEngine, business: str) -> list[DocumentRow]:
+    """Every document row of the business, read as that business (under RLS)."""
+    async with business_transaction(engine, business) as connection:
+        rows = (await connection.execute(DOCUMENT_ROWS, {"b": business})).all()
+    return [DocumentRow(*row) for row in rows]
+
+
+AUDIENCE_CONFLICT: Final = ERRORS[AudienceConflict][2]
+
+
+def embedding_calls(caplog: pytest.LogCaptureFixture) -> list[object]:
+    """The `embedding_call` records captured so far: one per embedding call (one batch)."""
+    return [getattr(r, EMBEDDING_CALL) for r in caplog.records if r.getMessage() == EMBEDDING_CALL]
+
+
+@pytest.mark.parametrize(
+    ("stored", "requested"),
+    [("public", "staff_only"), ("staff_only", "public")],
+    ids=["public to staff_only", "staff_only to public"],
+)
+async def test_another_audience_under_a_stored_version_is_an_audience_conflict(
+    api: TestClient,
+    business: str,
+    app_engine: AsyncEngine,
+    caplog: pytest.LogCaptureFixture,
+    stored: str,
+    requested: str,
+) -> None:
+    caplog.set_level(logging.INFO)
+    first = ingest(api, business, audience=stored)
+    embedded = embedding_calls(caplog)
+    documents = await document_rows(app_engine, business)
+    chunks = await stored_language(app_engine, business)
+    caplog.clear()
+
+    again = ingest(api, business, audience=requested)  # the same bytes, version, status, language
+
+    assert first["status"] == 201
+    # The fixed body only: nothing of the request (its audience included) is echoed.
+    assert again == {"status": 409, "error": "audience_conflict", "detail": AUDIENCE_CONFLICT}
+    # Refused before loading: nothing embedded, so no cost (the first upload's record shows that
+    # the count sees this app's embedding calls).
+    assert embedded and embedding_calls(caplog) == []
+    assert [row.audience for row in documents] == [stored] and chunks
+    # Nothing changed: the document row (its audience included) and every chunk.
+    assert await document_rows(app_engine, business) == documents
+    assert await stored_language(app_engine, business) == chunks
+    assert await counts(app_engine, business) == (1, len(chunks))
+    # The stored audience is still the no-op it was.
+    same = ingest(api, business, audience=stored)
+    assert (same["status"], same["document_id"]) == (200, first["document_id"])
+
+
+async def test_both_reads_of_a_stored_version_return_its_stored_audience(
+    business: str, app_engine: AsyncEngine
+) -> None:
+    """The service compares what the store read: `find_document` before loading, and the row
+    `save_document` finds when the same version was stored meanwhile (its rolled-back write)."""
+    store = PostgresKbStore(Database(app_engine))
+    staff_only = document("1", "approved").model_copy(update={"audience": "staff_only"})
+    await store.save_document(business, staff_only, [CHUNK], model=MODEL, dimension=1024)
+
+    found = await store.find_document(business, SOURCE, "1")
+    meanwhile = await store.save_document(
+        business, document("1", "approved"), [CHUNK], model=MODEL, dimension=1024
+    )  # `document` is public: as when the service's check missed a version stored a moment later
+
+    assert found is not None and (found.created, found.audience) == (False, "staff_only")
+    assert (meanwhile.created, meanwhile.audience) == (False, "staff_only")
+    assert [row.audience for row in await document_rows(app_engine, business)] == ["staff_only"]
+    assert await counts(app_engine, business) == (1, 1)
 
 
 async def test_the_index_allows_one_approved_version_per_source_and_any_number_of_others(

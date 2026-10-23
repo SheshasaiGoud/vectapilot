@@ -97,6 +97,7 @@ class InMemoryKbStore:
             content_sha256=document.content_sha256,
             status=document.status,
             language=document.language,
+            audience=document.audience,
             created=True,
             retired_version=retired,
         )
@@ -132,5 +133,6 @@ def _existing(document_id: uuid.UUID, document: NewDocument) -> StoredDocument:
         content_sha256=document.content_sha256,
         status=document.status,
         language=document.language,
+        audience=document.audience,
         created=False,
     )

@@ -150,6 +150,48 @@ async def test_a_language_changed_under_a_stored_version_is_refused_by_name() ->
     assert "LanguageConflict" in str(refused.value) and "--fresh" in str(refused.value)
 
 
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("file", "audience", "named"),
+    [
+        ("faq.md", "staff_only", "(faq 2026-10)"),
+        ("staff-handbook.md", "public", "(staff-handbook 2026-10)"),
+    ],
+    ids=["public to staff_only", "staff_only to public"],
+)
+async def test_an_audience_changed_under_a_stored_version_is_refused_by_name(
+    file: str, audience: str, named: str
+) -> None:
+    target = kb()
+    await ingest_corpus(target.service, CORPUS, MAPPING, read_file)
+    documents, chunks = dict(target.store.documents), dict(target.store.chunks)
+    batches = len(target.embedder.batches)
+    sunrise = CORPUS.manifests[SUNRISE]
+    relabelled = sunrise.model_copy(
+        update={
+            "sources": tuple(
+                source.model_copy(update={"audience": audience}) if source.file == file else source
+                for source in sunrise.sources
+            )
+        }
+    )
+    changed = Corpus(
+        [relabelled, *(m for b, m in CORPUS.manifests.items() if b != SUNRISE)],
+        [document for b in sorted(CORPUS.business_ids) for document in CORPUS.documents(b)],
+    )
+
+    with pytest.raises(IngestRefused) as refused:
+        await ingest_corpus(target.service, changed, MAPPING, read_file)
+    assert f"sunrise-clinic/{file} {named}" in str(refused.value)
+    assert "AudienceConflict" in str(refused.value) and "--fresh" in str(refused.value)
+    assert target.store.documents == documents  # the stored audience is unchanged
+    assert target.store.chunks == chunks
+    # Refused before loading: no batch embedded (no cost); the first ingest's batches show that
+    # the count sees this embedder.
+    after = len(target.embedder.batches)  # a count: a failure prints no corpus text
+    assert batches and after == batches
+
+
 @pytest.fixture
 async def ingested() -> InMemoryKbStore:
     target = kb()

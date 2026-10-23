@@ -350,6 +350,35 @@ Three small, independent changes. None needs M2's baseline.
   (`ingestion/language_map.py`; ADR 0014 decision 2 amended). After adding a migration, `make up`
   runs before `make migrate` (CLAUDE.md).
 
+### PR 2 follow-up — `m3/audience-conflict` (diego) · XS
+- **[decided 2026-10-23]** (shesha) A same-bytes re-upload of a stored version with another
+  `audience` (`public` against `staff_only`, either way) is a 409 `audience_conflict` with a fixed
+  message that echoes no input, like `status_conflict` and `language_conflict`. A document meant
+  to become staff-only must never silently keep answering customers. To make an approved public
+  version staff-only, upload the content as a new version with status approved: that retires the
+  public one in the same transaction. A new draft does not, and the approved public version keeps
+  answering customers until an approved version replaces it (ADR 0010, amendment 2026-10-23).
+- **Built (2026-10-23, diego).** In review; nothing merged. No migration, no new grant, no new
+  dependency.
+  - `kb/types.py`: `AudienceConflict`; `StoredDocument.audience` is required, and both of the
+    store's reads return it (`find_document`, and the row `save_document` finds when the version
+    was stored meanwhile).
+  - The order of the checks (`kb/service.py` docstring): bytes, then status, then language, then
+    audience. A re-upload that differs in several gets the first.
+  - `evalrun/ingest.py` turns it into `IngestRefused`, naming `AudienceConflict` and `--fresh`,
+    like the language case.
+  - Tests, both directions: through the route with the in-memory store (409, nothing stored,
+    changed or embedded; the same audience is still a 200 no-op; the order); against Postgres
+    (the fixed 409 body and no `embedding_call` record for the refused request; the stored row
+    and chunks unchanged; both store reads return the stored audience); the eval ingest refusal
+    (nothing stored, changed or embedded). With the check removed, 8 of `tests/kb` and
+    `tests/evalrun` (Postgres included) fail, all audience tests; with it, all 411 pass.
+  - Review (zara, 2026-10-23): the code and the 409 text stand; the hint after a 409 now says a
+    draft retires nothing (ADR 0010 amendment, `AudienceConflict` docstring, the decided line
+    above). The Postgres and eval-ingest audience tests now also fail when the refusal comes
+    only after loading and embedding (a paid embedding with Voyage), and the Postgres one when
+    the detail echoes input. Retiring without a replacement is open (business-context §9, Q12).
+
 ## PR 3 — `m3/hybrid-scaffold` (ananya; zara pairs on the canary part) · M
 The same shape as M2's H1 scaffold, plus the canary hardening that must precede H1. The specs
 follow D6 and ADR 0014; the time-boxes are in H1 and H2.

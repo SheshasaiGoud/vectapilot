@@ -1,15 +1,22 @@
 """Ingest and reindex (M2 PR 5): load → chunk → embed → store, synchronous (workers are M9).
 
 **Idempotent ingestion.** A business's (source id, version) is stored once (the database's unique
-key). Re-sending the same bytes under the same version, with the same status and language, returns
-the stored document and embeds nothing (no cost); different bytes under a stored version are a
-`VersionConflict` (a change needs a new version), the same bytes with another status a
-`StatusConflict` (an upload never changes a stored version's status, for example re-approving a
-retired one: that is a new version), and the same bytes and status with another language a
-`LanguageConflict` (the language decides the chunks' `ts_config` and `tsv`, migration 0005; the
-tag is compared exactly as stored, so `en-IN` against a stored `en` is a conflict too). They are
-checked in that order. The check runs before loading, and again inside the write (two concurrent
-uploads).
+key). Re-sending the same bytes under the same version, with the same status, language and
+audience, returns the stored document and embeds nothing (no cost). Anything else is refused and
+changes nothing; a change needs a new version:
+1. different bytes: `VersionConflict`;
+2. the same bytes, another status: `StatusConflict` (an upload never changes a stored version's
+   status, for example re-approving a retired one);
+3. the same bytes and status, another language: `LanguageConflict` (the language decides the
+   chunks' `ts_config` and `tsv`, migration 0005; the tag is compared exactly as stored, so `en-IN`
+   against a stored `en` is a conflict too);
+4. the same bytes, status and language, another audience: `AudienceConflict` (`public` against
+   `staff_only`, either way: a document meant to become staff-only must never silently keep
+   answering customers; decided 2026-10-23).
+
+They are checked in that order (bytes, then status, then language, then audience), so a re-upload
+that differs in several reports the first. The check runs before loading, and again inside the
+write (two concurrent uploads).
 
 **One approved version per source (ADR 0010).** Uploading a new version as approved retires the
 source's previously approved version in the store's same transaction (`IngestResult.
@@ -31,6 +38,7 @@ from vectapilot_api.ingestion.loaders import DEFAULT_LIMITS, load_document
 from vectapilot_api.ingestion.types import Chunk, ChunkingConfig, LoadLimits, SourceType
 from vectapilot_api.kb.store import KbStore
 from vectapilot_api.kb.types import (
+    AudienceConflict,
     ChunkEmbedding,
     IngestParams,
     IngestResult,
@@ -140,12 +148,16 @@ class KbService:
 
 
 def _already_stored(stored: StoredDocument, sha256: str, params: IngestParams) -> IngestResult:
+    """The no-op result for a re-upload of `stored`, or its conflict: bytes, then status, then
+    language, then audience (the module docstring's order)."""
     if stored.content_sha256 != sha256:
         raise VersionConflict()
     if stored.status != params.status:
         raise StatusConflict()
     if stored.language != params.language:  # as stored, not through the language map
         raise LanguageConflict()
+    if stored.audience != params.audience:
+        raise AudienceConflict()
     return IngestResult(
         document_id=stored.document_id,
         source_id=params.source_id,
