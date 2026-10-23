@@ -6,8 +6,8 @@
 > renumbered the PRs (now PR 0–9) and moved the judge and reranking to stretch items, S1 and S2.
 > shesha decided D1–D16 the same day ("Decided 2026-10-23"). One question is open now: who writes
 > H1 (D16 is looked at again after M2's dev run, as decided). PR 0 (this file,
-> [ADR 0014](../adr/0014-hybrid-retrieval.md) and the amendments) is merged (#38); PR 1 (guards)
-> is in review.
+> [ADR 0014](../adr/0014-hybrid-retrieval.md) and the amendments) is merged (#38), PR 1 (guards)
+> too (#39); PR 2 (full-text column) is in review.
 > M2 is **not closed**: `support_qa` v0.1 has no questions yet (`manifest.json` says
 > `stage: collecting`, `questions.jsonl` has 0 lines), and there is no live run and no baseline
 > ([`m2-close-out.md`](m2-close-out.md)). M3 can be built now. Anything that compares against M2's
@@ -317,6 +317,38 @@ Three small, independent changes. None needs M2's baseline.
   - the canary catalog checks (RLS, FORCE, keys) stay green unchanged.
 - **Canary bait:** `test_leakage.plant` sets `ts_config`, and both businesses' bait chunks share one
   rare token, so a leaking full-text leg would have something to leak (zara S2).
+- **Built (2026-10-23, diego).** In review; nothing merged.
+  - Migration `0005_chunk_full_text_columns.py`: `ts_config` added nullable, backfilled (the map
+    written out; the join names `business_id` and `id`), `SET NOT NULL`, then `tsv ... STORED`.
+    No default and no index. Its errors name a column, a config or a size, so no `DO` block.
+  - The map is `ingestion/language_map.py`, a Python module rather than TOML (two entries, typed,
+    no loader; a change needs a migration anyway). The line above says "data file": keeping the
+    module is a question for shesha. Only the primary language subtag counts,
+    lower-cased. `en-IN` → `english`, `hi-Latn` → `hindi`, and `te`, `eng`, `und` → `simple`.
+    `ts_debug` on the local stack shows that `hindi` stems Latin-letter words with
+    `english_stem`, so romanized Hinglish gets `english`'s lexemes. A test fails when the map
+    changes without a migration that writes out the new copy.
+  - `kb/store.py` binds `CAST(:ts_config AS regconfig)`. Every direct chunk insert in the tests
+    names it too (`test_rls`, H1's vector tests, PR 6's Postgres tests, the canary `plant`).
+  - Canary bait: `BAIT` holds `BAIT_WORD` (`zq7bait3`). Postgres reads it as a `numword`, which
+    `english`, `hindi` and `simple` all keep unchanged. No file under `data/sample` or
+    `evals/datasets` contains it. An owner query without a business clause returns both baits;
+    the app role gets its own only.
+  - The M10 guard is proven both ways. With a non-superuser owner under FORCE RLS, `SET NOT NULL`
+    stops with 23502, and the message names no business. With BYPASSRLS, both businesses are
+    backfilled.
+  - Observed: asyncpg binds `CAST($1 AS regconfig)` as `regconfig` with a text codec, and a raw
+    select returns a `str`. "Nothing selects it raw" stays the rule. `pg_upgrade` 18 refuses a
+    `regconfig` column in a user table, and the column cannot be retyped in one step: a question
+    for shesha before M10, with the options in ADR 0014, "Built".
+  - `make migrate` reuses the image built before 0005, so the head stayed at 0004. 0005 was
+    applied with `uv run alembic upgrade head` as the owner.
+- **[decided 2026-10-23]** (shesha) Keep `regconfig` (D2); at M10's first major upgrade, dump and
+  restore, or run 0005's downgrade and upgrade around `pg_upgrade` (which refuses `reg*` columns).
+  A same-bytes re-upload with a different `language` is a 409 `language_conflict` (the stored tag
+  is compared exactly). `hi-Latn` (Hinglish) maps to `hindi`. The map is a Python module
+  (`ingestion/language_map.py`; ADR 0014 decision 2 amended). After adding a migration, `make up`
+  runs before `make migrate` (CLAUDE.md).
 
 ## PR 3 — `m3/hybrid-scaffold` (ananya; zara pairs on the canary part) · M
 The same shape as M2's H1 scaffold, plus the canary hardening that must precede H1. The specs
@@ -726,8 +758,13 @@ elsewhere in this file are not covered by these decisions.
 - **Isolation.** A full-text leg without its business clause passes the app-role canary, because
   RLS hides it. The owner-connection checks and the stricter gate land in PR 3, before H1. PR 1's
   `RESET` closes the known-gap xfail [D10 (a)].
-- **Text search quality.** `hindi` has no stop list, so OR queries match many Hindi chunks. There is
-  no lexical match across scripts, and romanized Hinglish relies on English stemming.
+- **Text search quality.** `hindi` and the fallback `simple` have no stop list, so OR queries match
+  many chunks of those languages on function words (and `simple` chunks that contain English, e.g.
+  a mis-tagged `eng` or `und` document, on English ones). `data/sample` has no fallback-language
+  document today (17 `en`, 1 `hi`).
+  There is no lexical match across scripts, and romanized Hinglish relies on English stemming.
+  Guard: PR 3's guide puts one `simple` chunk that shares only stop words with a question into
+  H1's mini corpus.
 - **RLS and indexes.** Non-leakproof `@@` and `<=>` may keep any GIN or HNSW index unused by the app
   role. Measure as the app role, never as the superuser owner.
 - **Telemetry.** FastAPI's spans, metrics and logs would record `?q=`, request bodies and stack

@@ -3,7 +3,8 @@
 - **Status:** accepted · 2026-10-23 · chosen by shesha (M3 plan decisions D2, D6, D7, D8, D13 and
   D15: every recommendation, D15 (iii) with shesha's own number; `docs/plans/m3-pr-checks.md`,
   "Decided 2026-10-23"). Drafted by maya-tech-lead from research by ananya-rag, noah-evals,
-  diego-backend and zara-safety. Built in M3 PR 2–5 and H1/H2; nothing in it is built yet.
+  diego-backend and zara-safety. Decisions 1 and 2 are built in M3 PR 2 (in review); the rest
+  comes in PR 3–5 and H1/H2.
 
 **Context.** M2 retrieves by meaning only: H1's `vector_search` ranks a business's approved chunks
 by exact cosine distance, with `business_id` in the statement's `WHERE` and RLS underneath (ADR
@@ -42,6 +43,9 @@ cosine gate, one snapshot, and no reranking in M3. Each part:
    `hindi`, anything else → `simple`. It names no business (rule 9), and a Postgres test checks
    that every mapped config exists. A stored `tsv` does not follow a later map change, so any
    change needs its own backfill migration.
+   Amended 2026-10-23 (shesha): one platform module (`ingestion/language_map.py`), not a data
+   file. It has two entries, is typed and read by mypy, and needs no loader; a change needs a
+   migration anyway, so a file editable without a code change would add a hazard, not a benefit.
 3. **`text_search`** (D6 (a); H1, `[HAND-WRITE]`; who writes it is still open). One bound
    statement with `c.business_id = :business_id` in its `WHERE`. It returns approved chunks within
    the reader's audiences, of the question's embedding model. `c.tsv` is matched against an OR of
@@ -101,10 +105,42 @@ cosine gate, one snapshot, and no reranking in M3. Each part:
   the stricter canary gate lands before H1 (PR 3).
 - The vector path, the API's response shapes and `score` stay as in M2, so M2's tests and baseline
   stay valid.
-- Migration 0005 rewrites `chunks` (small today). `hindi` has no stop list, so OR queries match
-  many Hindi chunks. There is no lexical match across scripts, and romanized Hinglish in an `en`
-  chunk relies on English stemming.
+- Migration 0005 rewrites `chunks` (small today). `hindi` and the fallback `simple` have no stop
+  list, so OR queries match many chunks of those languages on function words (and `simple` chunks
+  that contain English, e.g. a mis-tagged `eng` or `und` document, on English ones). There is no
+  lexical match across scripts, and romanized Hinglish in an `en` chunk relies on English
+  stemming.
 - Hybrid adds a statement and a fuse to every search. Its latency is measured locally in PR 8,
   not claimed here.
 - On v0.1, "no measurable difference" is a likely and acceptable result. Hybrid becomes the
   default only through D15's rule, recorded with `compare`'s counts.
+
+**Built 2026-10-23 (M3 PR 2, diego; in review).** Decisions 1 and 2: migration 0005 and
+`ingestion/language_map.py` (decision 2 as amended above). These facts came up while building and
+reviewing it. None changes a decision: shesha kept decision 1 after the `pg_upgrade` finding below,
+and added the language rule for re-uploads (both 2026-10-23).
+- The map reads only a tag's primary language subtag, lower-cased: `en-IN` → `english`,
+  `hi-Latn` → `hindi`, and `eng` or `und` → `simple`. Postgres' `hindi` stems Latin-letter words
+  with `english_stem` and Devanagari with `hindi_stem` (`ts_debug`, PostgreSQL 18.6). Romanized
+  Hinglish therefore gets the same lexemes under `hindi` as under `english`.
+- `pg_upgrade` (PostgreSQL 18) refuses a cluster that has a `regconfig` column in a user table
+  ("Checking for reg* data types in user tables"). Dump and restore are not affected: `pg_dump`
+  writes `ts_config` by name and leaves `tsv` out, so the restore recomputes it. The column
+  cannot be converted in one step: Postgres refuses to retype a column that a generated column
+  uses, and `to_tsvector(ts_config::regconfig, content)` on a `text` column is "not immutable"
+  (both checked on PostgreSQL 18.6 in a rolled-back transaction).
+  Decided 2026-10-23 (shesha): keep `regconfig` (D2 as decided). At M10's first major upgrade,
+  upgrade by dump and restore, or run 0005's downgrade before `pg_upgrade` and its upgrade after
+  (a table rewrite; both columns hold derived values only; 0005's RLS caveat applies). Not chosen:
+  storing the name as `text` (`tsv`'s expression would spell the map out and change with it, and
+  a misspelt name would be stored silently), or leaving it to an M10 checklist alone.
+- Re-uploading the same bytes under a stored version with another `language` is a typed
+  `409 language_conflict` (decided 2026-10-23, shesha), like `status_conflict`: an upload never
+  changes a stored version's language, and nothing is stored or changed. The tag is compared as
+  stored, not through the map, so `en-IN` against a stored `en` is a conflict although both get
+  `english`: the document's metadata is what would change. Status is checked first, then
+  language.
+- Splitting non-ASCII text into words depends on the database's locale (`lc_ctype`: en_US.utf8
+  locally; CI runs the same image with no locale override). M10 checks the target's locale, or
+  reruns `test_an_hi_chunk_gets_hindi` and the `te` case of `test_an_unknown_language_gets_simple`
+  against it.

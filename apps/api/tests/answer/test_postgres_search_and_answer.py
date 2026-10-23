@@ -33,6 +33,7 @@ from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import business_transaction
 from vectapilot_api.embeddings.fake import fake_vector
+from vectapilot_api.ingestion.language_map import text_search_config
 from vectapilot_api.kb.store import vector_literal
 from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.types import MAX_K
@@ -60,10 +61,13 @@ INSERT_DOCUMENT: Final = text(
 )
 INSERT_CHUNK: Final = text(
     "INSERT INTO chunks (business_id, document_id, chunk_index, content, embedding,"
-    " embedding_model, embedding_dim)"
-    " VALUES (:b, :document_id, 0, :content, CAST(:embedding AS vector), :model, 1024)"
+    " embedding_model, embedding_dim, ts_config)"
+    " VALUES (:b, :document_id, 0, :content, CAST(:embedding AS vector), :model, 1024,"
+    " CAST(:ts_config AS regconfig))"
     " RETURNING id"
 )
+TS_CONFIG: Final = text_search_config("en")
+"""INSERT_DOCUMENT's language through the map (migration 0005)."""
 
 
 def h1_pending(test: Any) -> Any:
@@ -143,6 +147,7 @@ async def plant(engine: AsyncEngine, business: str, *rows: Row) -> dict[str, str
                         "content": row.content,
                         "embedding": vector_literal(fake_vector(row.content, 1024)),
                         "model": row.model,
+                        "ts_config": TS_CONFIG,
                     },
                 )
             ).scalar_one()

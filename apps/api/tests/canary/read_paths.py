@@ -13,7 +13,10 @@ app with that business's `X-Business-Id`). Add yours here, with no other change.
 embedding model, the fake embedder's vector of `BAIT`), titled with that business's own canary,
 and PR 6's API paths ask `BAIT`. The other business's bait is then a same-model candidate that
 scores 1.0, above any answer threshold: a route that leaked across businesses would return it,
-and its title, the other canary, would show in the hits, the prompt and the sources.
+and its title, the other canary, would show in the hits, the prompt and the sources. Since M3 PR 2
+(migration 0005) each bait chunk also carries a `ts_config` (its document's language through the
+platform map) and `BAIT` holds `BAIT_WORD`, a word no other chunk has, so a full-text leg (H1's
+`text_search`, wired here in PR 3) has the other business's bait to leak as well (zara's S2).
 
 **A path that runs a [HAND-WRITE] stub** names it in `NEEDS_HAND_WRITE`, and a stub that still
 raises NotImplementedError is listed in `PENDING_HAND_WRITE`. While it is, the canary test marks
@@ -50,7 +53,17 @@ ReadPath = Callable[[AsyncEngine, Planted], Awaitable[Mapping[str, str]]]
 CANARY_EMBEDDING: Final = (0.0,) * 1023 + (1.0,)
 """The direction `test_leakage.plant` stores every canary chunk with (its `VECTOR`)."""
 
-BAIT: Final = "Bait for the canary suite: the same question and chunk text for every business."
+BAIT_WORD: Final = "zq7bait3"
+"""The rare word both bait chunks share. Letters and digits, so Postgres' parser reads it as a
+`numword`, which `english`, `hindi` and `simple` all keep as this one unchanged lexeme: a full-text
+query matches both bait chunks whatever config each is stored or parsed with. No file of the sample
+corpus or the eval datasets holds it (tests/test_canary_checks.py), so with a missing business
+clause the other business's bait is among the very few matches, not lost in a ranked list."""
+
+BAIT: Final = (
+    "Bait for the canary suite: the same question and chunk text for every business,"
+    f" with one rare word, {BAIT_WORD}."
+)
 """The text of each business's `bait` chunk (`test_leakage.plant`) and the question PR 6's API
 read paths ask. Shared on purpose; it holds no business id and no canary."""
 

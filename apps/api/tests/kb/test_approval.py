@@ -39,6 +39,7 @@ from vectapilot_api.kb.types import (
     ApprovalConflict,
     ContentKind,
     DocumentStatus,
+    LanguageConflict,
     NewChunk,
     NewDocument,
     StatusConflict,
@@ -49,6 +50,9 @@ pytestmark = pytest.mark.anyio
 SOURCE: Final = PARAMS["source_id"]
 SECRET_SOURCE: Final = f"src-{CANARY}"
 """A source id that must never come back in an error body."""
+LANGUAGE: Final = PARAMS["language"]
+CANARY_LANGUAGE: Final = "hi-Zq91c2"
+"""A valid tag (a made-up region subtag) that must never come back in an error body."""
 
 
 @pytest.fixture
@@ -66,10 +70,10 @@ def upload(
     body: bytes = MARKDOWN,
     source: str = SOURCE,
     business: str = A,
+    language: str = LANGUAGE,
 ) -> Any:
-    return kb.post(
-        body, params={"source_id": source, "version": version, "status": status}, business=business
-    )
+    params = {"source_id": source, "version": version, "status": status, "language": language}
+    return kb.post(body, params=params, business=business)
 
 
 # ── Through the route: approving retires, nothing else does ─────────────────────────────────
@@ -175,6 +179,62 @@ def test_other_bytes_stay_a_version_conflict_whatever_the_status(kb: Kb) -> None
     assert kb.store.statuses(A, SOURCE) == {"1": "retired"}
 
 
+@pytest.mark.parametrize("language", [LANGUAGE, "en-IN", "hi"])
+def test_the_same_bytes_status_and_language_again_are_a_no_op(kb: Kb, language: str) -> None:
+    first = upload(kb, "1", "approved", language=language)
+    again = upload(kb, "1", "approved", language=language)
+
+    assert (first.status_code, again.status_code) == (201, 200), again.text
+    assert again.json()["created"] is False
+    assert again.json()["document_id"] == first.json()["document_id"]
+    assert len(kb.embedder.batches) == 1
+
+
+@pytest.mark.parametrize("race", [False, True], ids=["checked first", "found on write"])
+@pytest.mark.parametrize(
+    "language",
+    ["hi", "en-IN", "en-in", CANARY_LANGUAGE],
+    ids=["another language", "same config", "case only", "never echoed"],
+)
+def test_the_same_bytes_with_another_language_are_a_language_conflict(
+    kb: Kb, race: bool, language: str
+) -> None:
+    """Compared as stored, never through the map: `en-IN` (also `english`) and a spelling that
+    differs in case only are conflicts too. Nothing is stored or changed."""
+    stored_language = "en-IN" if language == "en-in" else LANGUAGE
+    upload(kb, "1", "approved", language=stored_language)
+    documents, chunks = dict(kb.store.documents), set(kb.store.chunks)
+    batches = len(kb.embedder.batches)
+    kb.store.hide_from_find = race
+
+    response = upload(kb, "1", "approved", language=language)
+
+    assert_error(response, 409, "language_conflict")
+    assert response.json()["detail"] == ERRORS[LanguageConflict][2]
+    assert "Zq91c2" not in response.text
+    assert (kb.store.documents, set(kb.store.chunks)) == (documents, chunks)
+    [(_, document)] = kb.store.documents.values()
+    assert document.language == stored_language
+    # Checked first: refused before loading, nothing embedded. Found on write (a concurrent
+    # upload stored it after the check): embedded once more, then refused, nothing written.
+    assert len(kb.embedder.batches) == batches + race
+
+
+def test_another_status_is_reported_before_another_language(kb: Kb) -> None:
+    upload(kb, "1", "draft")
+
+    assert_error(upload(kb, "1", "approved", language="hi"), 409, "status_conflict")
+    assert kb.store.statuses(A, SOURCE) == {"1": "draft"}
+
+
+def test_other_bytes_are_reported_before_another_language(kb: Kb) -> None:
+    upload(kb, "1", "draft")
+
+    response = upload(kb, "1", "draft", body=MARKDOWN + b"\nchanged\n", language="hi")
+
+    assert_error(response, 409, "version_conflict")
+
+
 def test_a_concurrent_approval_is_a_typed_409_that_echoes_nothing(kb: Kb) -> None:
     upload(kb, "1", "approved", source=SECRET_SOURCE)
     kb.store.fail_on_save = ApprovalConflict()  # migration 0004's index refused the insert
@@ -188,6 +248,7 @@ def test_a_concurrent_approval_is_a_typed_409_that_echoes_nothing(kb: Kb) -> Non
 
 def test_the_conflicts_have_their_own_stable_codes() -> None:
     assert ERRORS[StatusConflict][:2] == (409, "status_conflict")
+    assert ERRORS[LanguageConflict][:2] == (409, "language_conflict")
     assert ERRORS[ApprovalConflict][:2] == (409, "approval_conflict")
 
 
@@ -269,6 +330,7 @@ class FoundRow:
         self.id = uuid.uuid4()
         self.content_sha256 = "b" * 64
         self.status = status
+        self.language = "hi"  # not `new_document`'s "en": the stored row's value must come back
 
 
 def new_document(status: DocumentStatus, version: str = "2") -> NewDocument:
@@ -331,7 +393,7 @@ async def test_a_version_stored_meanwhile_rolls_the_retire_back() -> None:
     assert connection.statements == ["retire", "insert_document", "find"]
     assert database.outcomes == ["rollback"]  # the retire of version 1 is undone
     assert (stored.created, stored.status, stored.document_id) == (False, "draft", row.id)
-    assert stored.retired_version is None
+    assert stored.language == "hi" and stored.retired_version is None
 
 
 async def test_the_index_refusing_the_insert_is_an_approval_conflict_without_its_text() -> None:

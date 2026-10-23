@@ -6,6 +6,7 @@ on the real catalog, and break real tables on purpose, in tests/canary/test_leak
 Kept outside tests/canary/ on purpose: scripts/canary_gate.py must not count these as the suite.
 """
 
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
 from typing import Any, Final, cast
@@ -30,6 +31,7 @@ from tests.canary.checks import (
 )
 from tests.canary.read_paths import (
     BAIT,
+    BAIT_WORD,
     NEEDED_OUTSIDE_READ_PATHS,
     NEEDS_HAND_WRITE,
     PENDING_HAND_WRITE,
@@ -52,6 +54,9 @@ PRINTED: Final = "(business_id = NULLIF(current_setting('app.business_id'::text,
 """How Postgres prints ADR 0009's policy back (`pg_get_expr`): parenthesised, NULLIF upper-case."""
 
 SAFE_ROLE: Final = RoleFacts(False, False, False, False, 0)
+REPO_ROOT: Final = Path(__file__).parents[3]
+CORPORA: Final = (REPO_ROOT / "data" / "sample", REPO_ROOT / "evals" / "datasets")
+"""What gets ingested or asked: the sample corpus and the eval datasets."""
 A: Final = Planted("canary-a-0001", "canary-aaaaaaaaaaaaaaaa")
 B: Final = Planted("canary-b-0002", "canary-bbbbbbbbbbbbbbbb")
 
@@ -402,6 +407,17 @@ async def test_red_proof_an_api_read_path_over_a_leaking_search_is_caught(
     outputs = await path(cast(AsyncEngine, None), A)
 
     assert any(B.canary in problem for problem in canary_leaks(outputs, A, B))
+
+
+def test_the_bait_word_is_rare_and_part_of_the_bait() -> None:
+    # Letters and digits (Postgres' `numword`): one unchanged lexeme in every config (M3 PR 2).
+    assert re.fullmatch(r"[a-z]+[0-9][a-z0-9]*", BAIT_WORD)
+    assert re.search(rf"\b{BAIT_WORD}\b", BAIT)
+    # Rare: nothing that gets ingested or asked holds it, in any case (the parser lower-cases).
+    word = BAIT_WORD.encode()
+    files = [p for root in CORPORA for p in sorted(root.rglob("*")) if p.is_file()]
+    assert files, "found no corpus files: the check would pass by not looking"
+    assert [p for p in files if word in p.read_bytes().lower()] == []
 
 
 def test_a_written_stub_has_no_marks_and_a_pending_one_exactly_one() -> None:

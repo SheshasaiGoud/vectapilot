@@ -31,6 +31,7 @@ from vectapilot_api.db import (
 )
 from vectapilot_api.db_provision import provision, set_login_password
 from vectapilot_api.gateway.types import CallRecord
+from vectapilot_api.ingestion.language_map import text_search_config
 from vectapilot_api.main import create_app
 
 pytestmark = [integration, pytest.mark.anyio]
@@ -69,9 +70,12 @@ INSERT_DOCUMENT = text(
 )
 INSERT_CHUNK = text(
     "INSERT INTO chunks (business_id, document_id, chunk_index, content, page, embedding,"
-    " embedding_model, embedding_dim)"
-    " VALUES (:b, :document_id, 0, :content, 1, CAST(:embedding AS vector), 'fake', 1024)"
+    " embedding_model, embedding_dim, ts_config)"
+    " VALUES (:b, :document_id, 0, :content, 1, CAST(:embedding AS vector), 'fake', 1024,"
+    " CAST(:ts_config AS regconfig))"
 )
+TS_CONFIG: Final = text_search_config("en")
+"""INSERT_DOCUMENT's language through the map (migration 0005)."""
 INSERT_LLM_CALL = text(
     "INSERT INTO llm_calls (business_id, record_version, alias, model_requested, catalog_version,"
     " outcome, attempts, retries, repairs, attempt_timeouts, input_tokens, output_tokens,"
@@ -125,7 +129,13 @@ async def seed(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Business:
         document_id = await connection.scalar(INSERT_DOCUMENT, {"b": business_id, "title": canary})
         await connection.execute(
             INSERT_CHUNK,
-            {"b": business_id, "document_id": document_id, "content": canary, "embedding": VECTOR},
+            {
+                "b": business_id,
+                "document_id": document_id,
+                "content": canary,
+                "embedding": VECTOR,
+                "ts_config": TS_CONFIG,
+            },
         )
         await connection.execute(INSERT_LLM_CALL, {"b": business_id, "operation": canary})
     return Business(business_id, canary, document_id)
@@ -207,10 +217,18 @@ async def test_a_business_cannot_write_another_businesss_rows(
         document_id=b.document_id,
         content="x",
         embedding=VECTOR,
+        ts_config=TS_CONFIG,
     )
     # A's own chunk pointing at B's document: refused by the composite foreign key.
     assert "violates foreign key constraint" in await refused(
-        app_engine, me, INSERT_CHUNK, b=me, document_id=b.document_id, content="x", embedding=VECTOR
+        app_engine,
+        me,
+        INSERT_CHUNK,
+        b=me,
+        document_id=b.document_id,
+        content="x",
+        embedding=VECTOR,
+        ts_config=TS_CONFIG,
     )
     # Moving A's row to B: refused by WITH CHECK (documents: the app role may UPDATE them).
     move = text("UPDATE documents SET business_id = :other WHERE business_id = :b")
@@ -396,6 +414,7 @@ async def test_vectors_round_trip_as_text(
         document_id=a.document_id,
         content="x",
         embedding="[1,2,3]",
+        ts_config=TS_CONFIG,
     )
     assert "expected 1024 dimensions" in wrong
 

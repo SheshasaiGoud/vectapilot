@@ -32,6 +32,7 @@ from tests.conftest import integration
 from tests.retrieval.vectors import Q, toward
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import business_transaction
+from vectapilot_api.ingestion.language_map import text_search_config
 from vectapilot_api.kb.store import vector_literal
 from vectapilot_api.kb.types import ContentKind
 from vectapilot_api.retrieval.types import MAX_K, Reader, SearchHit, VectorQuery
@@ -59,9 +60,9 @@ INSERT_DOCUMENT: Final = text(
 )
 INSERT_CHUNK: Final = text(
     "INSERT INTO chunks (id, business_id, document_id, chunk_index, content, page, embedding,"
-    " embedding_model, embedding_dim)"
+    " embedding_model, embedding_dim, ts_config)"
     " VALUES (:id, :b, :document_id, :chunk_index, :content, :page, CAST(:embedding AS vector),"
-    " :model, 1024)"
+    " :model, 1024, CAST(:ts_config AS regconfig))"
     " RETURNING id"
 )
 CHUNKS_OF: Final = text("SELECT count(*) FROM chunks WHERE business_id = :b")
@@ -212,6 +213,7 @@ async def plant(
                         "page": row.page,
                         "embedding": vector_literal(row.embedding),
                         "model": row.model,
+                        "ts_config": text_search_config(row.language),  # migration 0005
                     },
                 )
             ).scalar_one()

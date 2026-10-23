@@ -1,12 +1,15 @@
 """Ingest and reindex (M2 PR 5): load → chunk → embed → store, synchronous (workers are M9).
 
 **Idempotent ingestion.** A business's (source id, version) is stored once (the database's unique
-key). Re-sending the same bytes under the same version, with the same status, returns the stored
-document and embeds nothing (no cost); different bytes under a stored version are a
-`VersionConflict` (a change needs a new version), and the same bytes with another status a
+key). Re-sending the same bytes under the same version, with the same status and language, returns
+the stored document and embeds nothing (no cost); different bytes under a stored version are a
+`VersionConflict` (a change needs a new version), the same bytes with another status a
 `StatusConflict` (an upload never changes a stored version's status, for example re-approving a
-retired one: that is a new version). The check runs before loading, and again inside the write
-(two concurrent uploads).
+retired one: that is a new version), and the same bytes and status with another language a
+`LanguageConflict` (the language decides the chunks' `ts_config` and `tsv`, migration 0005; the
+tag is compared exactly as stored, so `en-IN` against a stored `en` is a conflict too). They are
+checked in that order. The check runs before loading, and again inside the write (two concurrent
+uploads).
 
 **One approved version per source (ADR 0010).** Uploading a new version as approved retires the
 source's previously approved version in the store's same transaction (`IngestResult.
@@ -31,6 +34,7 @@ from vectapilot_api.kb.types import (
     ChunkEmbedding,
     IngestParams,
     IngestResult,
+    LanguageConflict,
     NewChunk,
     NewDocument,
     ReindexResult,
@@ -140,6 +144,8 @@ def _already_stored(stored: StoredDocument, sha256: str, params: IngestParams) -
         raise VersionConflict()
     if stored.status != params.status:
         raise StatusConflict()
+    if stored.language != params.language:  # as stored, not through the language map
+        raise LanguageConflict()
     return IngestResult(
         document_id=stored.document_id,
         source_id=params.source_id,

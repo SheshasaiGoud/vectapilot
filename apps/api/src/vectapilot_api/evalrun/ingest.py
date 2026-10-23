@@ -5,8 +5,8 @@
 `POST /v1/kb/documents` does (the same loader, chunker, embedding runner and store), into that
 business's eval namespace (`namespace.py`), in manifest order, with the manifest's upload
 parameters. `KbService` is built with the run's `ChunkingConfig`. Re-uploading a stored version
-with the same bytes and status costs nothing and changes nothing (PR 5), so `run` can always
-ingest first.
+with the same bytes, status and language costs nothing and changes nothing (PR 5, M3 PR 2), so
+`run` can always ingest first.
 
 **Then the stored chunks are checked against the corpus at the run's config** (`verify_stored`):
 for every listed document, the stored status and audience are the manifest's, and the stored
@@ -24,7 +24,12 @@ from vectapilot_api.evalrun.store import StoredChunk
 from vectapilot_api.evalset.corpus import Corpus
 from vectapilot_api.ingestion.types import ChunkingConfig
 from vectapilot_api.kb.service import KbService
-from vectapilot_api.kb.types import ApprovalConflict, StatusConflict, VersionConflict
+from vectapilot_api.kb.types import (
+    ApprovalConflict,
+    LanguageConflict,
+    StatusConflict,
+    VersionConflict,
+)
 
 FRESH_HINT = (
     "rerun the same command with --fresh (it deletes only this config's eval businesses'"
@@ -71,9 +76,9 @@ async def ingest_corpus(
     each document (the run's cap stop rule, set by a paid call, M1's "stop right after the call
     that tripped it"): once true, nothing more is uploaded and the counts so far are returned, the
     business in progress with the documents it uploaded. Raises `IngestRefused` when a stored
-    version holds other bytes or another status (the corpus changed under an old version, or the
-    namespace was filled differently), and lets every other error propagate (embedding, database,
-    `evalrun.budget.CapReached`).
+    version holds other bytes, another status or another language (the corpus changed under an
+    old version, or the namespace was filled differently), and lets every other error propagate
+    (embedding, database, `evalrun.budget.CapReached`).
     """
     counts: list[IngestCount] = []
     for business_id, eval_id in mapping.items():
@@ -90,7 +95,12 @@ async def ingest_corpus(
             refused: str | None = None
             try:
                 result = await kb.ingest(eval_id, data, source.format, source.ingest_params())
-            except (VersionConflict, StatusConflict, ApprovalConflict) as conflict:
+            except (
+                VersionConflict,
+                StatusConflict,
+                LanguageConflict,
+                ApprovalConflict,
+            ) as conflict:
                 refused = type(conflict).__name__
             if refused is not None:  # outside the `except`: nothing chained
                 raise IngestRefused(

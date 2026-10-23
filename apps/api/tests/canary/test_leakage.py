@@ -39,6 +39,7 @@ from tests.canary.catalog import (
 from tests.canary.checks import Planted
 from tests.canary.read_paths import (
     BAIT,
+    BAIT_WORD,
     READ_PATHS,
     read_path_params,
     sql_on_every_business_table,
@@ -51,6 +52,7 @@ from vectapilot_api.db import APP_ROLE, business_transaction, create_api_engine
 from vectapilot_api.embeddings.base import EmbeddingSpec
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.fake import fake_vector
+from vectapilot_api.ingestion.language_map import text_search_config
 from vectapilot_api.kb.store import ONE_APPROVED_INDEX, vector_literal
 from vectapilot_api.main import create_app
 
@@ -60,6 +62,8 @@ KNOWN_TABLES: Final = {"businesses", "documents", "chunks", "llm_calls"}
 """A floor, not the list: the catalog must find at least these (proves the query works)."""
 
 VECTOR: Final = "[" + ",".join(["0"] * 1023 + ["1"]) + "]"
+PLANT_LANGUAGE: Final = "en"
+"""Every planted document's language; its chunks get the map's config for it (migration 0005)."""
 CURRENT_BUSINESS = text("SELECT current_setting('app.business_id', true)")
 BACKEND_PID = text("SELECT pg_backend_pid()")
 
@@ -70,30 +74,33 @@ BACKEND_PID = text("SELECT pg_backend_pid()")
 # whose text is the shared BAIT, stored under the configured embedding model with the fake
 # embedder's vector of BAIT. PR 6's API read paths ask BAIT, so the other business's bait is a
 # same-model candidate scoring 1.0: a leaking route would show its title, the other canary.
+# Every chunk's `ts_config` is its document's language through the map (M3 PR 2), and both baits
+# share BAIT_WORD, so a full-text leg has the other business's bait to leak too.
 PLANT: Final = (
     text(
         "INSERT INTO documents (business_id, source_id, version, title, source_type,"
         " content_kind, language, status, audience, content_sha256)"
-        " VALUES (:b, 'canary', '1', :canary, 'markdown', 'faq', 'en', 'approved', 'public',"
+        " VALUES (:b, 'canary', '1', :canary, 'markdown', 'faq', :language, 'approved', 'public',"
         " repeat('c', 64))"
     ),
     text(
         "INSERT INTO chunks (business_id, document_id, chunk_index, content, embedding,"
-        " embedding_model, embedding_dim)"
-        " SELECT :b, id, 0, :canary, CAST(:embedding AS vector), 'fake', 1024 FROM documents"
+        " embedding_model, embedding_dim, ts_config)"
+        " SELECT :b, id, 0, :canary, CAST(:embedding AS vector), 'fake', 1024,"
+        " CAST(:ts_config AS regconfig) FROM documents"
         " WHERE business_id = :b AND source_id = 'canary'"
     ),
     text(
         "INSERT INTO documents (business_id, source_id, version, title, source_type,"
         " content_kind, language, status, audience, content_sha256)"
-        " VALUES (:b, 'bait', '1', :canary, 'markdown', 'faq', 'en', 'approved', 'public',"
+        " VALUES (:b, 'bait', '1', :canary, 'markdown', 'faq', :language, 'approved', 'public',"
         " repeat('d', 64))"
     ),
     text(
         "INSERT INTO chunks (business_id, document_id, chunk_index, content, embedding,"
-        " embedding_model, embedding_dim)"
+        " embedding_model, embedding_dim, ts_config)"
         " SELECT :b, id, 0, :bait, CAST(:bait_embedding AS vector), :model,"
-        " CAST(:dimension AS integer)"
+        " CAST(:dimension AS integer), CAST(:ts_config AS regconfig)"
         " FROM documents WHERE business_id = :b AND source_id = 'bait'"
     ),
     text(
@@ -175,6 +182,8 @@ async def plant(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Planted:
         "bait_embedding": vector_literal(fake_vector(BAIT, spec.dimension)),
         "model": spec.model,
         "dimension": spec.dimension,
+        "language": PLANT_LANGUAGE,
+        "ts_config": text_search_config(PLANT_LANGUAGE),
     }
     async with business_transaction(owner, planted.business_id) as connection:
         await connection.execute(text("INSERT INTO businesses (business_id) VALUES (:b)"), params)
@@ -363,6 +372,42 @@ async def test_no_read_path_shows_another_businesss_canary(
     outputs = await READ_PATHS[path](fresh_engine, mine)
 
     assert checks.canary_leaks(outputs, mine, other) == []
+
+
+# ── The bait's full-text word (M3 PR 2, zara's S2) ────────────────────────────────────────────
+# Until PR 3 wires H1's `text_search` in as a read path: the planted rows give a full-text leg
+# something to leak. ts_config is never selected raw (asyncpg's regconfig codec is not relied on).
+
+BAIT_MATCHES: Final = text(
+    "SELECT d.title FROM chunks c"
+    " JOIN documents d ON d.business_id = c.business_id AND d.id = c.document_id"
+    " WHERE c.tsv @@ CAST(:word AS tsquery)"
+)
+BAIT_CONFIG: Final = text(
+    "SELECT c.ts_config::text FROM chunks c"
+    " JOIN documents d ON d.business_id = c.business_id AND d.id = c.document_id"
+    " WHERE c.business_id = :b AND d.source_id = 'bait'"
+)
+
+
+async def test_without_a_business_clause_the_bait_word_matches_both_baits(
+    owner_engine: AsyncEngine, fresh_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    a, b = planted
+    params = {"word": BAIT_WORD}
+    # The app role, under RLS: a's own bait only (its title is a's canary).
+    async with business_transaction(fresh_engine, a.business_id) as connection:
+        mine = set((await connection.execute(BAIT_MATCHES, params)).scalars())
+        config = await connection.scalar(BAIT_CONFIG, {"b": a.business_id})
+    # A role that skips RLS (the owner, a superuser here) and no business clause: what a
+    # full-text leg without its clause returns. b's bait is there, titled with b's canary.
+    async with business_transaction(owner_engine, a.business_id) as connection:
+        assert await owner_is_superuser(connection), "needs an owner that skips RLS"
+        unclaused = set((await connection.execute(BAIT_MATCHES, params)).scalars())
+
+    assert mine == {a.canary}
+    assert config == text_search_config(PLANT_LANGUAGE)
+    assert {a.canary, b.canary} <= unclaused
 
 
 # ── Writes through the API: never another business's rows, never without a business ────────

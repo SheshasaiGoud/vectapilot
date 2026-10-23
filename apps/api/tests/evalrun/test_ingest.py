@@ -124,6 +124,32 @@ async def test_a_document_changed_under_a_stored_version_is_refused_by_name() ->
     assert "TEST-ONLY" not in str(refused.value)
 
 
+@pytest.mark.anyio
+async def test_a_language_changed_under_a_stored_version_is_refused_by_name() -> None:
+    target = kb()
+    await ingest_corpus(target.service, CORPUS, MAPPING, read_file)
+    sunrise = CORPUS.manifests[SUNRISE]
+    relabelled = sunrise.model_copy(
+        update={
+            "sources": tuple(
+                source.model_copy(update={"language": "en-IN"})
+                if source.file == "faq.md"
+                else source
+                for source in sunrise.sources
+            )
+        }
+    )
+    changed = Corpus(
+        [relabelled, *(m for b, m in CORPUS.manifests.items() if b != SUNRISE)],
+        [document for b in sorted(CORPUS.business_ids) for document in CORPUS.documents(b)],
+    )
+
+    with pytest.raises(IngestRefused) as refused:
+        await ingest_corpus(target.service, changed, MAPPING, read_file)
+    assert "sunrise-clinic/faq.md (faq 2026-10)" in str(refused.value)
+    assert "LanguageConflict" in str(refused.value) and "--fresh" in str(refused.value)
+
+
 @pytest.fixture
 async def ingested() -> InMemoryKbStore:
     target = kb()
