@@ -426,6 +426,38 @@ async def test_re_approving_a_retired_version_is_a_status_conflict(
     assert await statuses(app_engine, business) == {"1": "retired", "2": "approved"}
 
 
+STORED_LANGUAGE: Final = text(
+    "SELECT d.language, c.id, c.ts_config::text AS ts_config, c.tsv::text AS tsv"
+    " FROM documents AS d JOIN chunks AS c"
+    " ON c.business_id = d.business_id AND c.document_id = d.id"
+    " WHERE d.business_id = :b ORDER BY c.chunk_index"
+)
+
+
+async def stored_language(engine: AsyncEngine, business: str) -> list[tuple[object, ...]]:
+    """Each chunk's (document language, chunk id, ts_config, tsv), as text."""
+    async with business_transaction(engine, business) as connection:
+        rows = (await connection.execute(STORED_LANGUAGE, {"b": business})).all()
+    return [tuple(row) for row in rows]
+
+
+@pytest.mark.parametrize("language", ["hi", "en-IN"], ids=["another config", "same config"])
+async def test_another_language_under_a_stored_version_is_a_language_conflict(
+    api: TestClient, business: str, app_engine: AsyncEngine, language: str
+) -> None:
+    first = ingest(api, business)  # PARAMS' language, "en"
+    before = await stored_language(app_engine, business)
+
+    again = ingest(api, business, language=language)  # the same bytes, version and status
+
+    assert first["status"] == 201
+    assert (again["status"], again["error"]) == (409, "language_conflict")
+    assert {(row[0], row[2]) for row in before} == {("en", "english")} and before
+    # Nothing changed: the document's language, and each chunk's ts_config and tsv.
+    assert await stored_language(app_engine, business) == before
+    assert await counts(app_engine, business) == (1, len(before))
+
+
 async def test_the_index_allows_one_approved_version_per_source_and_any_number_of_others(
     business: str, other_business: str, app_engine: AsyncEngine
 ) -> None:

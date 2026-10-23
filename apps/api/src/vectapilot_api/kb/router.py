@@ -40,6 +40,7 @@ from vectapilot_api.kb.types import (
     IngestParams,
     IngestResult,
     KbError,
+    LanguageConflict,
     ReindexResult,
     StatusConflict,
     VersionConflict,
@@ -87,6 +88,11 @@ ERRORS: Final[dict[type[Exception], tuple[int, str, str]]] = {
         409,
         "status_conflict",
         "this source id and version are stored with another status: upload it as a new version",
+    ),
+    LanguageConflict: (
+        409,
+        "language_conflict",
+        "this source id and version are stored with another language: upload it as a new version",
     ),
     ApprovalConflict: (
         409,
@@ -145,7 +151,10 @@ ERROR_RESPONSES: Final[dict[int | str, dict[str, object]]] = {
 @router.post(
     "/documents",
     status_code=status.HTTP_201_CREATED,
-    responses={200: {"description": "already stored (same bytes and status)"}, **ERROR_RESPONSES},
+    responses={
+        200: {"description": "already stored (same bytes, status and language)"},
+        **ERROR_RESPONSES,
+    },
 )
 async def ingest_document(
     request: Request,
@@ -155,8 +164,10 @@ async def ingest_document(
     service: Annotated[KbService, Depends(get_kb_service)],
 ) -> IngestResult:
     """Ingest one file (the raw body) for the business: load, chunk, embed, store. 201 when it
-    was stored now, 200 when this source id and version already hold the same bytes and status.
-    An approved upload retires the source's previously approved version (ADR 0010)."""
+    was stored now, 200 when this source id and version already hold the same bytes, status and
+    language; 409 when they hold other bytes, another status or another language (a change is a
+    new version). An approved upload retires the source's previously approved version (ADR
+    0010)."""
     source_type = source_type_of(request.headers.get("content-type"))
     data = await read_body(request, service.limits.max_bytes)
     try:

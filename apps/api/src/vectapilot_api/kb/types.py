@@ -62,8 +62,8 @@ class IngestResult(BaseModel):
     source_id: str
     version: str
     created: bool
-    """False when this business already had this source id and version with the same bytes and
-    status."""
+    """False when this business already had this source id and version with the same bytes,
+    status and language."""
     chunks_written: int
     """0 for an existing document: nothing was loaded, embedded or written."""
     embedding_model: str | None
@@ -115,6 +115,8 @@ class StoredDocument(BaseModel):
     document_id: uuid.UUID
     content_sha256: str
     status: DocumentStatus
+    language: str
+    """The BCP 47 tag as the uploader sent it (`documents.language`)."""
     created: bool
     retired_version: str | None = None
     """Set only when this write approved a new version and retired the previous one."""
@@ -170,6 +172,15 @@ class StatusConflict(Exception):
     """This source id and version exist with the same bytes but another status (for example a
     retired version uploaded again as approved). An upload never changes a stored version's
     status: approving it again means a new version (PR 5b's default, ADR 0010)."""
+
+
+class LanguageConflict(Exception):
+    """This source id and version exist with the same bytes (and status) but another `language`
+    (decided 2026-10-23, shesha). An upload never changes a stored version's language, and the
+    chunks' `ts_config` and `tsv` follow it (migration 0005): a corrected language is a new
+    version. The stored tag is compared as stored, character for character, not through the
+    language map: `en-IN` against a stored `en` is a conflict although both get `english`, because
+    the document's metadata is what would change."""
 
 
 class ApprovalConflict(Exception):
