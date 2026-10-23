@@ -98,9 +98,12 @@ reference to a secret store. 🟡
 | 🟡 Language detection | Reply in the customer's language when supported; otherwise the default language plus an offer of a human. |
 | 🟡 Knowledge per language | Each document is tagged with its language. |
 
-❓ Q6: May the assistant answer in one language using a source written in another (translation),
-or only from sources in the reply language? Code-mixed messages (e.g. Hinglish) need their own
-evaluation cases either way.
+✅ Q6 (answered by shesha 2026-10-23, M3 plan D1 (a)): May the assistant answer in one language
+using a source written in another (translation), or only from sources in the reply language?
+**Translation is allowed:** no language filter; the answer is in the question's language and the
+citation shows the source's language. A per-business setting may follow once a config loader
+exists (D1 (c)); M7 may tighten it for safety content. Code-mixed messages (e.g. Hinglish) need
+their own evaluation cases either way.
 
 ### 3.4 Knowledge sources ✅
 

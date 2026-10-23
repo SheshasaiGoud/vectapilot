@@ -87,3 +87,24 @@ are in India and other countries (Q4b: which), and prompts may later hold health
 **Consequences.** No dashboard in M1: stdout JSON lines and, per live run, one committed directory
 (the summary and its two inputs). No Langfuse dependencies yet; OTLP stays vendor-neutral.
 Summaries rely on the record contract; span due in M3.
+
+**Amended 2026-10-23 (shesha, M3 plan D12; `docs/plans/m3-pr-checks.md`).** The text above stands;
+these lines supersede it where they differ.
+- ⚠ **The trace span moves to M9** (D12 (a)), whatever Q4b's answer. The span, its exporter and the
+  W3C `traceresponse` header (ADR 0011 decision 9 (c)) land together. This replaces the
+  conditional slip above ("only if the exporter or region (Q4b) is still open when M3 closes")
+  with a decision, so the Consequences' "span due in M3" now reads M9. Why: M3's measurements need
+  stage durations, not a span tree, and `trace_id` already joins the records.
+- **Stage durations instead** (M3 PR 4). `rag_answer` gains optional, metadata-only fields: the
+  retrieval mode, hits per leg, FTS-only hits, and per-stage durations (embed, transaction, each
+  leg, fuse) on a monotonic clock. They are additive, so `record_version` stays 1 (ADR 0011
+  amendment).
+- **FastAPI's built-in telemetry pinned off** (M3 PR 1). FastAPI 0.143.0 turns tracing, metrics and
+  logs on by default. Once any OpenTelemetry provider exists, they would record `url.query`, the
+  bodies of failed validations and stack traces, and read an inbound `traceparent`. So
+  `create_app` passes `telemetry=` with every signal off, and a test proves no span, metric or log
+  record is made. No `opentelemetry-sdk` without a rule-11 yes.
+- **Route errors and timeouts** (carried from `m1-pr-checks.md`, "Handed on to M3"). Route handlers
+  keep logging only `type(exc).__name__` for gateway errors. No route-level timeout is added
+  around `complete()`; if one ever is, its expiry is recorded as `cancelled`, not
+  `deadline_exceeded`.

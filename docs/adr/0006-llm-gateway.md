@@ -92,3 +92,24 @@ changelogs we must read; retry and timeout code we own; two hung attempts use up
 extra paid request per repair; prices go stale unless rechecked; one business can exhaust the shared
 limit. Deferred: `llm_calls` table + RLS, registry check (M2); prompt caching, Citations, trace span
 (M3); model choice (M4); budgets, PII masking, pre-flight limits (M7); Redis cache (M9).
+
+**Amended 2026-10-23 (shesha, M3 plan D3, D9, D11, D14; `docs/plans/m3-pr-checks.md`).** The text
+above stands; these lines supersede it where they differ.
+- **Exposure** (D9 (a), built in M3 PR 1). The API's paid opt-in covers every paid provider the API
+  builds, not only `llm_provider`. Until PR 1, `create_app` builds the configured embedder without
+  it, so `GET /v1/kb/search` with `embeddings_provider = voyage` is an ungated paid path. From PR 1
+  the server refuses `embeddings_provider = voyage`, and any later paid reranker, unless
+  `VECTAPILOT_API_ALLOW_PAID_LLM` is true. The setting keeps its name, and the error names the
+  setting, never a value. The harness is unaffected (ADR 0013 decision 4).
+- **Deferred to M3, now decided** (the Consequences' list):
+  - Prompt caching moves to M9's cost work (D14): it changes cost, not answers. Anthropic's minimum
+    cacheable prompt length is unverified; check it, with URL and date, before any caching work.
+  - Native Citations are declined for M3 (D11 (a); ADR 0011 amendment).
+  - Native structured output is still decided by M1's live run. If triggered, the change merges
+    only after M3's last live answer run (proposal: M9), because the output mode is not part of
+    the eval fingerprint (D14).
+  - The trace span moves to M9 (ADR 0007 amendment).
+- **Catalog freeze** (D3 (a); ADR 0013 amendment). From M2's first live dev run to M3's last live
+  answer run, nothing merges that changes `models.toml` or the gateway's output path. If a price
+  changes inside that window, shesha chooses then: keep the old catalog (the note marks those
+  costs stale), or bump `catalog_version` and re-run M2's vector dev run (paid).

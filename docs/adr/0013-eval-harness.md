@@ -108,3 +108,38 @@ leak can never be averaged away. The price: more code to read; namespaces accumu
 `--fresh` or a reset; the test-run ledger is honest only if test runs go through the harness and
 the ledger is committed with each test folder; comparing two chunk configs over the questions
 scorable under both is done from the two folders' results.jsonl (no command does it yet).
+
+**Amended 2026-10-23 (shesha, M3 plan D3, D4, D14, D15; `docs/plans/m3-pr-checks.md`).** Built in
+M3 PR 5–7; nothing below is built yet.
+- **The measurement window** (D3 (a)), from M2's first live dev run to M3's last live answer run:
+  - No change to `gateway/models.toml`, `PROMPT_VERSION` or the gateway's output path. A catalog
+    or prompt bump changes every fingerprint and refuses the test run, and the output mode is not
+    hashed at all.
+  - M2's test run runs on M2's dev code: the branch that adds only the dev folder on top of the
+    dev run's commit.
+  - No `make reset-db`, volume prune or other deletion of the eval namespaces. M3's hybrid runs
+    reuse M2's chunks and embeddings, and a re-ingest is a paid re-embed.
+  - Tripwire: a fingerprint pin test that reads the live catalog and prompt versions (PR 5).
+- **The retrieval block** (PR 5). `ConfigInfo` gains an optional `retrieval` block (mode, candidate
+  k, RRF k, language-map version), omitted in vector mode so M2's fingerprints do not change.
+  `--retrieval-mode` works like `--min-score`.
+- **Every list is checked** (PR 5). Decision 2's business, status and audience check runs on each
+  leg and on the fused list before the answer step: a leak that fusion drops is still a leak.
+  `results.jsonl` gains optional component lists per question (chunk ids, ranks, matched groups;
+  no text).
+- **`compare`** (PR 6). `evalrun compare <run A> <run B>` takes two runs of one dataset, version,
+  freeze, split, embedding model and chunk config. It reports discordant pairs by question id over
+  the questions scorable under both, as counts and intervals only. Test folders come only from the
+  ledger and are labelled held-out. Comparing two chunk configs stays manual (D14), so the
+  Consequences' last sentence stays true.
+- **Faithfulness labels** (PR 7; the file format is a proposal). A human `faithful | unfaithful`
+  label per shown answer, kept apart from correctness. `summarize` reports `x of n` with Wilson,
+  and a §6 ≥ 95 % verdict only under decision 10.
+- **No LLM judge in M3** (D4 (b)). Both judges wait for the first dataset with at least 30 human
+  labels on distinct shown answers (v0.2 or a pilot). M3 reports human labels only, a deviation
+  from M2's decision 4 and from §6's correctness method.
+- **Spend across M3's runs** (D15 (iii)). Every run keeps decision 4's $1.00 cap, and all of M3's
+  paid runs together stay within $5.00. PR 5 sums `cost.total_usd` over M3's committed live
+  folders, shows it before the cap prompt, and refuses a cap above what is left (details: the
+  plan, PR 5). Like the typed cap, this only catches mistakes. The providers' own limits stay the
+  real cap across runs (ADR 0007; Voyage's spend limit is unverified, ADR 0008).

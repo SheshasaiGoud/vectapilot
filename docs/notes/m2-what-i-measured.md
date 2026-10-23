@@ -93,7 +93,7 @@ unlabelled. A release needs every business to meet it. Quote a verdict only with
 | correctness | business sunrise-clinic | _(copy)_ | _to fill_ | _to fill_ |
 | correctness | business paws-and-co | _(copy)_ | _to fill_ | _to fill_ |
 
-Not measured in M2 (keep the sentence): faithfulness (the judge is M3), safety-escalation recall
+Not measured in M2 (keep the sentence): faithfulness (human faithfulness labels from M3's PR 7; LLM judges deferred, M3 D4 (b)), safety-escalation recall
 (router M4, gated from M7). Cross-business isolation in this run: _(the run's leak check: aborted
 or not; the canary suite runs in CI)_
 

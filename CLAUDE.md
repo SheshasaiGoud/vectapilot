@@ -131,13 +131,14 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - [ADR 0004](docs/adr/0004-multi-business-isolation.md) — isolation between businesses: shared tables + `business_id` + Postgres row-level security
 - [ADR 0005](docs/adr/0005-local-stack-docker-compose.md) — local stack with Docker Compose; no Langfuse in M0
 - [ADR 0006](docs/adr/0006-llm-gateway.md) — LLM gateway: the only path to a model; `anthropic` 1.x, gateway-owned retries and deadlines, Decimal cost by answering model, 95 % combined + branch-only coverage gate
-- [ADR 0007](docs/adr/0007-llm-observability.md) — LLM observability: metadata-only `llm_call` record; trace span in M3; no India API region; key never in the repo
+- [ADR 0007](docs/adr/0007-llm-observability.md) — LLM observability: metadata-only `llm_call` record; trace span moved to M9 (amended 2026-10-23); no India API region; key never in the repo
 - [ADR 0008](docs/adr/0008-embeddings.md) — embeddings: Voyage AI over REST (`voyage-4`, 1024 dims), model id per chunk, exact search, fake embedder in CI
 - [ADR 0009](docs/adr/0009-db-roles-and-rls.md) — app role without `BYPASSRLS`, `FORCE` RLS, business set per transaction, `X-Business-Id` until M8, canary suite as hard gate
 - [ADR 0010](docs/adr/0010-one-approved-version-per-source.md) — one approved version per source: partial unique index (migration 0004, `business_id` first), approving retires the previous version in the same transaction
 - [ADR 0011](docs/adr/0011-cited-answers-v0.md) — cited answers v0: answer only from retrieved chunks, any unverified citation drops the answer, no model call below the provisional score threshold
 - [ADR 0012](docs/adr/0012-eval-dataset-v0.md) — eval dataset v0: synthetic two-business corpus, human-written JSONL questions, evidence groups of `source_id` + `version` + anchor keys, 30 % test split fixed before any question, freeze pins, labels per run
 - [ADR 0013](docs/adr/0013-eval-harness.md) — eval harness: `evalrun` package, every hit checked for business and audience before the answer step (exit 4), eval businesses per model + chunk config, one cap for embeddings and answers, test runs ledgered once per config, Wilson for counts and a seeded bootstrap for MRR
+- [ADR 0014](docs/adr/0014-hybrid-retrieval.md) — hybrid retrieval: Postgres full-text search with a per-chunk config next to vector search, fused by RRF (k = 60, exact); the evidence gate stays cosine; one snapshot per search; vector stays the default until a paired dev comparison; no reranking in M3
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
@@ -163,18 +164,26 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - **Paid model calls are human-only** (ADR 0007). Agents never pass `--live` and never read or
   handle the key. It never sits in the repo tree (`.env` included), a shell profile or history:
   shesha enters it with `read -s` in a separate terminal without Claude Code or Cursor, then closes it.
-- **M2 (ingestion, vector search, cited answers, eval v0) — in progress** (ADRs 0008–0013; plan
-  `docs/plans/m2-pr-checks.md`). Merged 2026-10-21/22: #23 ADRs · #24 DB roles + RLS · #25 canary
-  suite in CI · #26 ingestion · #27 embeddings · #28 KB endpoints · #29 H1 scaffold · #30 one
-  approved version · #31 search + cited answers · #32 eval v0 (corpus, format, frozen split; 0
-  questions yet, which are shesha's and friends'; stage `collecting`) · #33 H2 scaffold (hit@k,
-  MRR) · #34 eval harness (PR 8, ADR 0013). PR 9 prepared on `m2/close-out-prep`. Docker Desktop
-  is unreachable on the Mac, so Postgres tests run in CI only for now. No baseline yet.
+- **M2 (ingestion, vector search, cited answers, eval v0) — code merged, 2026-10-23** (ADRs
+  0008–0013; plan `docs/plans/m2-pr-checks.md`). #23 ADRs · #24 DB roles + RLS · #25 canary suite
+  in CI · #26 ingestion · #27 embeddings · #28 KB endpoints · #29 H1 scaffold · #30 one approved
+  version · #31 search + cited answers · #32 eval v0 (corpus, format, frozen split) · #33 H2
+  scaffold · #34 eval harness · #35 close-out prep · #36 H2 hit@k/MRR · #37 H1 `vector_search`
+  (H1 and H2 written by Claude at shesha's request, 2026-10-22). Docker works locally again
+  (2026-10-23), so `make up` and `make test-integration` run here. No baseline yet.
 - **M2 remaining, shesha only** (in order, with commands and signals: `docs/plans/m2-close-out.md`):
-  the H1 and H2 explain-backs (both written by Claude at shesha's request, 2026-10-22:
-  H2 #36, H1 on `m2/retrieval`; `PENDING_HAND_WRITE` is empty); the questions, friends' round-trip, `faq-hi` review and freeze; Voyage and
-  Anthropic accounts and keys; the live run (dev, then test once: `docs/learning/m2-eval-run.md`);
-  the note (skeleton: `docs/notes/m2-what-i-measured.md`); H1/H2 explain-backs; close-out quiz.
+  the questions (0 yet, stage `collecting`), friends' round-trip, `faq-hi` review and freeze; Voyage
+  and Anthropic accounts and keys; the live runs (dev, then test once: `docs/learning/m2-eval-run.md`);
+  labels; the note (skeleton: `docs/notes/m2-what-i-measured.md`); H1/H2 explain-backs; quiz.
+- **M3 (RAG v2: hybrid search, abstention) — planned and decided 2026-10-23**
+  (`docs/plans/m3-pr-checks.md`, ADR 0014); PR 0 in review.
+  - Can start now: PR 1 guards, PR 2 full-text column, PR 6 `compare`, PR 7 faithfulness labels.
+  - shesha writes H2 `rrf_fuse`; who writes H1 `text_search` is open.
+  - No reranking and no LLM judge in M3.
+  - Live spend: $5.00 for all of M3's paid runs, each still ≤ $1.00.
+  - **Measurement window** (D3): from M2's first live dev run to M3's last live answer run, nothing
+    merges that changes `gateway/models.toml`, `PROMPT_VERSION` or the gateway's output path, and
+    there is no `make reset-db` or Docker volume prune.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -193,7 +202,11 @@ Planned: `packages/mcp_server/`, `scripts/`.
   since step 5: `TestClient` uses `httpx2`, pytest runs with plain warnings-as-errors, classic `httpx`
   is gone (Langfuse's SDK would bring it back, ADR 0007), and TLS uses the OS trust store
   (`truststore`) instead of `certifi`.
-- Docker Desktop must be running for `make up` / `make test-integration`.
+- Docker Desktop must be running for `make up` / `make test-integration`. Its engine died around
+  2026-10-16 and works again since 2026-10-23. If `docker info` cannot connect, run
+  `docker desktop stop --force`, then `docker desktop start`. The likely trigger is the nearly full
+  disk (data volume 93 % used, 14 GiB free, 2026-10-23). Free space outside Docker's volumes: no
+  `make reset-db` or volume prune during M3's measurement window.
 - `Secret[...]` masks the DSNs in `Settings` (step A), not the plain string handed to SQLAlchemy and
   redis-py: pytest's default traceback can print it if those libraries fail. Tests only ever use
   dev/CI DSNs; when M9 adds an error tracker, turn off frame-variable capture and add a canary test.
