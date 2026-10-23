@@ -8,10 +8,10 @@ The chunks carry the fake embedder's own vectors (`fake_vector` of their text, m
 `fake-embedding-1024`), so a question that repeats a chunk's text scores 1 against it and about 0
 against any other text.
 
-**Waiting for H1.** Every test that reaches `vector_search` carries `H1_PENDING`, the strict xfail
-of `tests/canary/read_paths.pending_hand_write("vector_search")`: one switch with H1's canary
-path. When shesha removes "vector_search" from `PENDING_HAND_WRITE` (H1's step 3), these turn into
-plain tests at once. The `reindex_required` tests stop before the search, so they run now.
+**H1.** Every test that reaches `vector_search` carries `H1_PENDING`,
+`tests/canary/read_paths.pending_hand_write("vector_search")`: one switch with H1's canary path.
+H1 is written (2026-10-22) and "vector_search" is out of `PENDING_HAND_WRITE`, so it gives no
+marks and these are plain tests.
 """
 
 import secrets

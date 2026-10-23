@@ -1,15 +1,8 @@
 """H1 tests without a database: `vector_search` sends ONE statement with every value bound.
 
-`vector_search` is [HAND-WRITE]: shesha writes it. Until then it raises NotImplementedError, so the
-whole module is marked `xfail(strict=True, raises=NotImplementedError)`:
-
-- not implemented yet          → "xfailed" (expected);
-- implemented, wrong answer    → a normal failure (only NotImplementedError counts as expected);
-- implemented, right answer    → "XPASS(strict)", a failure on purpose: that is your signal.
-
-When no test here is xfailed any more, delete the xfail entry of `pytestmark` below (keep
-`anyio`) and run again: every test must then simply pass. Do not edit the tests to make them
-pass; change the code.
+`vector_search` is [HAND-WRITE], written by Claude at shesha's request (2026-10-22). The module's
+strict xfail was removed with it, so these are plain tests. Do not edit a test to make it pass;
+change the code.
 
 This module needs no Postgres, so it runs everywhere: the quickest signal while writing H1, but
 only about the statement's shape and bindings. A recording stand-in for the connection records
@@ -35,11 +28,6 @@ from vectapilot_api.retrieval.vector import vector_search
 
 pytestmark = [
     pytest.mark.anyio,
-    pytest.mark.xfail(
-        strict=True,
-        raises=NotImplementedError,
-        reason="H1: shesha implements vector_search — see docs/learning/m2-retrieval.md",
-    ),
 ]
 
 BUSINESS: Final = "binding-check-clinic"

@@ -1,8 +1,8 @@
 # M2 — acceptance checks per PR
 
 > **Status (2026-10-22):** PR 0–8, PR 5b and the H1 and H2 scaffolds merged (GitHub #23–#34; PR 8
-> is #34). PR 9 prepared (#35). H2's bodies written by Claude at shesha's request (`m2/metrics`).
-> What remains is shesha's: H1, the H2 explain-back, the questions
+> is #34). PR 9 prepared (#35). H2 (#36) and H1 (`m2/retrieval`) written by Claude at shesha's
+> request. What remains is shesha's: the H1/H2 explain-backs, the questions
 > and freeze, accounts and keys, the live run, the note, the explain-backs and the quiz, in order
 > in [`m2-close-out.md`](m2-close-out.md).
 
@@ -228,6 +228,13 @@ like H1's (see the H1 proposal above).
   message (nothing is retired by guesswork). Same bytes with another status is
   `409 status_conflict` (to roll back, upload as a new version; revisit with M8's approve step).
   The response keeps `retired_version`.
+- **Written (2026-10-22, Claude at shesha's request, `m2/retrieval`).** One bound `SELECT`:
+  chunks joined to documents on both keys; business, model, approved and audience filters in
+  the `WHERE`; score = 1 − cosine distance; ORDER BY the distance, then `source_id` and
+  `version` `COLLATE "C"`, then `chunk_index`; `LIMIT :k`. The binding test passes locally;
+  the three switches are removed, so the Postgres cases first run in CI. ananya removed her
+  PR 6 test that asserted H1's stub error (its premise ended with H1). shesha's explain-back
+  is still due.
 
 ## PR 6 — `m2/search-and-answer` (ananya)
 - `GET /v1/kb/search?q=` returns only the business's approved public chunks.

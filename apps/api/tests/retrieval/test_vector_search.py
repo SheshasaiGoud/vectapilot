@@ -1,15 +1,8 @@
 """H1 tests against real Postgres: `vector_search` (guide: docs/learning/m2-retrieval.md).
 
-`vector_search` is [HAND-WRITE]: shesha writes it. Until then it raises NotImplementedError, so the
-whole module is marked `xfail(strict=True, raises=NotImplementedError)`:
-
-- not implemented yet          → "xfailed" (expected);
-- implemented, wrong answer    → a normal failure (only NotImplementedError counts as expected);
-- implemented, right answer    → "XPASS(strict)", a failure on purpose: that is your signal.
-
-When no test here is xfailed any more, delete the xfail entry of `pytestmark` below (keep
-`integration` and `anyio`) and run again: every test must then simply pass. Do not edit the tests
-to make them pass; change the code.
+`vector_search` is [HAND-WRITE], written by Claude at shesha's request (2026-10-22). The module's
+strict xfail was removed with it, so these are plain tests (`integration`: real Postgres, CI). Do
+not edit a test to make it pass; change the code.
 
 Integration (like tests/kb/test_postgres_store.py): these need real Postgres. CI runs them; locally
 `make test-integration` once Docker runs. Without RUN_INTEGRATION=1 every test here is skipped.
@@ -47,11 +40,6 @@ from vectapilot_api.retrieval.vector import vector_search
 pytestmark = [
     integration,
     pytest.mark.anyio,
-    pytest.mark.xfail(
-        strict=True,
-        raises=NotImplementedError,
-        reason="H1: shesha implements vector_search — see docs/learning/m2-retrieval.md",
-    ),
 ]
 
 MODEL: Final = "test-model-a"

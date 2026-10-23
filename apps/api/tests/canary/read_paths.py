@@ -163,13 +163,13 @@ NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {}
 stub → who waits. None today: H2's `evalset/metrics.py` was the only one until it was written
 (2026-10-22)."""
 
-PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"vector_search"})
-"""[HAND-WRITE] stubs still raising NotImplementedError, one switch each:
+PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset()
+"""[HAND-WRITE] stubs still raising NotImplementedError, one switch each. None today; for the
+record:
 
-- H1: remove "vector_search" once `retrieval/vector.py` is written (its canary tests show
-  XPASS(strict)). That one line turns on every check that runs it: the read paths above, PR 6's
-  Postgres tests (`tests/answer/test_postgres_search_and_answer.py`) and PR 8's harness tests
-  that search, which all ask `pending_hand_write` / `pending_hand_writes`.
+- H1: done (2026-10-22, written by Claude at shesha's request). "vector_search" is removed, so
+  every check that runs it is a plain test: the read paths above, PR 6's Postgres tests
+  (`tests/answer/test_postgres_search_and_answer.py`) and PR 8's harness tests that search.
 - H2: done (2026-10-22, written by Claude at shesha's request). "retrieval_metrics" is removed, so
   H2's own tests (`tests/evalset/test_metrics.py`) and PR 8's harness tests that score with H2
   (`tests/evalrun/`) run as plain tests."""
