@@ -63,7 +63,7 @@ class IngestResult(BaseModel):
     version: str
     created: bool
     """False when this business already had this source id and version with the same bytes,
-    status and language."""
+    status, language and audience."""
     chunks_written: int
     """0 for an existing document: nothing was loaded, embedded or written."""
     embedding_model: str | None
@@ -117,6 +117,8 @@ class StoredDocument(BaseModel):
     status: DocumentStatus
     language: str
     """The BCP 47 tag as the uploader sent it (`documents.language`)."""
+    audience: Audience
+    """Who may retrieve the document (`documents.audience`), as stored."""
     created: bool
     retired_version: str | None = None
     """Set only when this write approved a new version and retired the previous one."""
@@ -181,6 +183,15 @@ class LanguageConflict(Exception):
     version. The stored tag is compared as stored, character for character, not through the
     language map: `en-IN` against a stored `en` is a conflict although both get `english`, because
     the document's metadata is what would change."""
+
+
+class AudienceConflict(Exception):
+    """This source id and version exist with the same bytes (status and language) but another
+    `audience`, `public` against `staff_only` either way (decided 2026-10-23, shesha). An upload
+    never changes a stored version's audience: a document meant to become staff-only must never
+    silently keep answering customers, nor a staff-only one silently start to. To change the
+    audience, upload the content as a new version, approved to replace the approved one (a draft
+    retires nothing)."""
 
 
 class ApprovalConflict(Exception):

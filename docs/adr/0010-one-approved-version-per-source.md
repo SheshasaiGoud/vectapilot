@@ -58,3 +58,16 @@ version stays approved. No new privilege: the app role had `UPDATE` on `document
 - *Response:* `retired_version` stays (empty when nothing was retired).
 - *Approving without an upload* (a review step, `approved by` / `approved on` from §3.4) is not
   built; it belongs with M8's auth and admin screen and would use the same retire.
+
+**Amended 2026-10-23 (shesha; M3 PR 2 follow-up, `docs/plans/m3-pr-checks.md`).** The decision
+and details above stand.
+- *Same bytes, other audience* (`public` against `staff_only`, either way):
+  `409 audience_conflict`, a fixed message that echoes no input, like `status_conflict` and ADR
+  0014's `language_conflict`. An upload never changes a stored version's audience: a document
+  meant to become staff-only must never silently keep answering customers. Nothing is stored or
+  changed. To make an approved public version staff-only, upload the content as a new version
+  with status approved: that retires the public one in the same transaction. A new draft does
+  not, and the approved public version keeps answering customers until an approved version
+  replaces it. (Retiring without a replacement is open: `docs/business-context.md` §9, Q12.)
+- The same-bytes checks run in this order: bytes (`version_conflict`), then status, then language,
+  then audience. A re-upload that differs in several gets the first.

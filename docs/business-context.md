@@ -346,3 +346,9 @@ escalation:
 9. **Outside staff hours:** what should escalations do?
 10. **Live data:** which systems hold prices, stock, orders and appointment slots for each business
     type (e.g. a shop platform, a clinic calendar)?
+12. **Retire without replacing** (added 2026-10-23, proposal from the `audience_conflict` review,
+    ADR 0010): today an approved version stops answering only when another approved version of
+    the same source replaces it (a draft retires nothing). Is a retire-only step needed before
+    M8's approve step, e.g. for an urgent "stop showing this to customers"?
+    *Left open for M8 by shesha (2026-10-23): it belongs with the approve step and admin screen;
+    nothing is built before then.*

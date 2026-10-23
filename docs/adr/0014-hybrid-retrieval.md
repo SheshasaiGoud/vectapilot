@@ -139,7 +139,8 @@ and added the language rule for re-uploads (both 2026-10-23).
   changes a stored version's language, and nothing is stored or changed. The tag is compared as
   stored, not through the map, so `en-IN` against a stored `en` is a conflict although both get
   `english`: the document's metadata is what would change. Status is checked first, then
-  language.
+  language; since 2026-10-23 (shesha) audience comes last, as `409 audience_conflict` (ADR 0010,
+  amendment 2026-10-23).
 - Splitting non-ASCII text into words depends on the database's locale (`lc_ctype`: en_US.utf8
   locally; CI runs the same image with no locale override). M10 checks the target's locale, or
   reruns `test_an_hi_chunk_gets_hindi` and the `te` case of `test_an_unknown_language_gets_simple`

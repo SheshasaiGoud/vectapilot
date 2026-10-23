@@ -37,6 +37,7 @@ from vectapilot_api.ingestion.types import (
 from vectapilot_api.kb.service import KbService
 from vectapilot_api.kb.types import (
     ApprovalConflict,
+    AudienceConflict,
     IngestParams,
     IngestResult,
     KbError,
@@ -93,6 +94,11 @@ ERRORS: Final[dict[type[Exception], tuple[int, str, str]]] = {
         409,
         "language_conflict",
         "this source id and version are stored with another language: upload it as a new version",
+    ),
+    AudienceConflict: (
+        409,
+        "audience_conflict",
+        "this source id and version are stored with another audience: upload it as a new version",
     ),
     ApprovalConflict: (
         409,
@@ -152,7 +158,7 @@ ERROR_RESPONSES: Final[dict[int | str, dict[str, object]]] = {
     "/documents",
     status_code=status.HTTP_201_CREATED,
     responses={
-        200: {"description": "already stored (same bytes, status and language)"},
+        200: {"description": "already stored (same bytes, status, language and audience)"},
         **ERROR_RESPONSES,
     },
 )
@@ -164,10 +170,10 @@ async def ingest_document(
     service: Annotated[KbService, Depends(get_kb_service)],
 ) -> IngestResult:
     """Ingest one file (the raw body) for the business: load, chunk, embed, store. 201 when it
-    was stored now, 200 when this source id and version already hold the same bytes, status and
-    language; 409 when they hold other bytes, another status or another language (a change is a
-    new version). An approved upload retires the source's previously approved version (ADR
-    0010)."""
+    was stored now, 200 when this source id and version already hold the same bytes, status,
+    language and audience; 409 when they hold other bytes, another status, another language or
+    another audience, reported in that order (a change is a new version). An approved upload
+    retires the source's previously approved version (ADR 0010)."""
     source_type = source_type_of(request.headers.get("content-type"))
     data = await read_body(request, service.limits.max_bytes)
     try:

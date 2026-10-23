@@ -37,6 +37,7 @@ from vectapilot_api.kb.store import (
 )
 from vectapilot_api.kb.types import (
     ApprovalConflict,
+    AudienceConflict,
     ContentKind,
     DocumentStatus,
     LanguageConflict,
@@ -53,6 +54,7 @@ SECRET_SOURCE: Final = f"src-{CANARY}"
 LANGUAGE: Final = PARAMS["language"]
 CANARY_LANGUAGE: Final = "hi-Zq91c2"
 """A valid tag (a made-up region subtag) that must never come back in an error body."""
+AUDIENCE: Final = PARAMS["audience"]
 
 
 @pytest.fixture
@@ -71,8 +73,15 @@ def upload(
     source: str = SOURCE,
     business: str = A,
     language: str = LANGUAGE,
+    audience: str = AUDIENCE,
 ) -> Any:
-    params = {"source_id": source, "version": version, "status": status, "language": language}
+    params = {
+        "source_id": source,
+        "version": version,
+        "status": status,
+        "language": language,
+        "audience": audience,
+    }
     return kb.post(body, params=params, business=business)
 
 
@@ -131,7 +140,7 @@ def test_approving_retires_only_that_source_of_that_business(kb: Kb) -> None:
     assert kb.store.statuses(B, SOURCE) == {"1": "approved"}
 
 
-# ── Re-uploading a stored version: same bytes and status = no-op, else 409 ──────────────────
+# ── Re-uploading a stored version: same bytes, status, language, audience = no-op, else 409 ──
 
 
 @pytest.mark.parametrize("status", ["draft", "approved", "retired"])
@@ -235,6 +244,70 @@ def test_other_bytes_are_reported_before_another_language(kb: Kb) -> None:
     assert_error(response, 409, "version_conflict")
 
 
+@pytest.mark.parametrize("audience", ["public", "staff_only"])
+def test_the_same_bytes_status_language_and_audience_again_are_a_no_op(
+    kb: Kb, audience: str
+) -> None:
+    first = upload(kb, "1", "approved", audience=audience)
+    again = upload(kb, "1", "approved", audience=audience)
+
+    assert (first.status_code, again.status_code) == (201, 200), again.text
+    assert again.json()["created"] is False and again.json()["chunks_written"] == 0
+    assert again.json()["document_id"] == first.json()["document_id"]
+    [(_, document)] = kb.store.documents.values()
+    assert document.audience == audience
+    assert len(kb.embedder.batches) == 1
+
+
+@pytest.mark.parametrize("race", [False, True], ids=["checked first", "found on write"])
+@pytest.mark.parametrize(
+    ("stored", "requested"),
+    [("public", "staff_only"), ("staff_only", "public")],
+    ids=["public to staff_only", "staff_only to public"],
+)
+def test_the_same_bytes_with_another_audience_are_an_audience_conflict(
+    kb: Kb, race: bool, stored: str, requested: str
+) -> None:
+    """A document meant to become staff-only must never silently keep answering customers, nor a
+    staff-only one silently start to (decided 2026-10-23). Nothing is stored or changed, and the
+    body is the fixed message (the planted source id never comes back)."""
+    upload(kb, "1", "approved", source=SECRET_SOURCE, audience=stored)
+    documents, chunks = dict(kb.store.documents), set(kb.store.chunks)
+    batches = len(kb.embedder.batches)
+    kb.store.hide_from_find = race
+
+    response = upload(kb, "1", "approved", source=SECRET_SOURCE, audience=requested)
+
+    assert_error(response, 409, "audience_conflict")
+    assert response.json() == {"detail": ERRORS[AudienceConflict][2], "error": "audience_conflict"}
+    assert (kb.store.documents, set(kb.store.chunks)) == (documents, chunks)
+    [(_, document)] = kb.store.documents.values()
+    assert (document.audience, document.status) == (stored, "approved")
+    # Checked first: refused before loading, nothing embedded. Found on write: embedded once
+    # more, then refused, nothing written.
+    assert len(kb.embedder.batches) == batches + race
+
+
+@pytest.mark.parametrize(
+    ("change", "code"),
+    [
+        ({"body": MARKDOWN + b"\nchanged\n"}, "version_conflict"),
+        ({"status": "draft"}, "status_conflict"),
+        ({"language": "hi"}, "language_conflict"),
+    ],
+    ids=["other bytes", "another status", "another language"],
+)
+def test_bytes_status_and_language_are_each_reported_before_another_audience(
+    kb: Kb, change: dict[str, Any], code: str
+) -> None:
+    upload(kb, "1", "approved")
+    documents = dict(kb.store.documents)
+    arguments: dict[str, Any] = {"status": "approved", "audience": "staff_only", **change}
+
+    assert_error(upload(kb, "1", **arguments), 409, code)
+    assert kb.store.documents == documents
+
+
 def test_a_concurrent_approval_is_a_typed_409_that_echoes_nothing(kb: Kb) -> None:
     upload(kb, "1", "approved", source=SECRET_SOURCE)
     kb.store.fail_on_save = ApprovalConflict()  # migration 0004's index refused the insert
@@ -249,6 +322,7 @@ def test_a_concurrent_approval_is_a_typed_409_that_echoes_nothing(kb: Kb) -> Non
 def test_the_conflicts_have_their_own_stable_codes() -> None:
     assert ERRORS[StatusConflict][:2] == (409, "status_conflict")
     assert ERRORS[LanguageConflict][:2] == (409, "language_conflict")
+    assert ERRORS[AudienceConflict][:2] == (409, "audience_conflict")
     assert ERRORS[ApprovalConflict][:2] == (409, "approval_conflict")
 
 
@@ -330,7 +404,9 @@ class FoundRow:
         self.id = uuid.uuid4()
         self.content_sha256 = "b" * 64
         self.status = status
-        self.language = "hi"  # not `new_document`'s "en": the stored row's value must come back
+        # Not `new_document`'s "en" and "public": the stored row's values must come back.
+        self.language = "hi"
+        self.audience = "staff_only"
 
 
 def new_document(status: DocumentStatus, version: str = "2") -> NewDocument:
@@ -372,7 +448,7 @@ async def test_an_approved_save_retires_first_then_inserts_in_one_transaction() 
     assert database.outcomes == ["commit"]
     assert connection.params[0] == {"business_id": A, "source_id": SECRET_SOURCE, "version": "2"}
     assert (stored.created, stored.status, stored.retired_version) == (True, "approved", "1")
-    assert stored.document_id == document_id
+    assert (stored.document_id, stored.audience) == (document_id, "public")
 
 
 @pytest.mark.parametrize("status", ["draft", "retired"])
@@ -394,6 +470,7 @@ async def test_a_version_stored_meanwhile_rolls_the_retire_back() -> None:
     assert database.outcomes == ["rollback"]  # the retire of version 1 is undone
     assert (stored.created, stored.status, stored.document_id) == (False, "draft", row.id)
     assert stored.language == "hi" and stored.retired_version is None
+    assert stored.audience == "staff_only"
 
 
 async def test_the_index_refusing_the_insert_is_an_approval_conflict_without_its_text() -> None:

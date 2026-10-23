@@ -116,7 +116,7 @@ class _StoredMeanwhile(Exception):
 
 
 _FIND_DOCUMENT: Final = text(
-    "SELECT id, content_sha256, status, language FROM documents"
+    "SELECT id, content_sha256, status, language, audience FROM documents"
     " WHERE business_id = :business_id AND source_id = :source_id AND version = :version"
 )
 # Never the version being written: only "the previously approved version" leaves the index.
@@ -244,6 +244,7 @@ class PostgresKbStore:
             content_sha256=document.content_sha256,
             status=document.status,
             language=document.language,
+            audience=document.audience,
             created=True,
             retired_version=retired,
         )
@@ -280,12 +281,14 @@ class PostgresKbStore:
         return changed
 
 
-def _existing(row: Row[tuple[uuid.UUID, str, str, str]]) -> StoredDocument:
-    """A stored document read by `_FIND_DOCUMENT` (id, content_sha256, status, language)."""
+def _existing(row: Row[tuple[uuid.UUID, str, str, str, str]]) -> StoredDocument:
+    """A stored document read by `_FIND_DOCUMENT` (id, content_sha256, status, language,
+    audience)."""
     return StoredDocument(
         document_id=row.id,
         content_sha256=row.content_sha256,
         status=row.status,
         language=row.language,
+        audience=row.audience,
         created=False,
     )
