@@ -72,3 +72,20 @@ canary suite grows to cover them as they arrive.
   a client-chosen id.
 - Each check breaks its protection once per CI run in a rolled-back transaction and must turn
   red; `scripts/canary_gate.py` fails CI when the suite did not run.
+
+**Amended 2026-10-23 (shesha, M3 plan D10; `docs/plans/m3-pr-checks.md`).**
+- **Pool-return reset** (D10 (a), built in M3 PR 1 by diego). A pool hook resets `app.business_id`
+  whenever a connection returns to the pool, so a session-level `SET` cannot reach the next
+  request. This is defence in depth: the transaction-local `set_config` stays the rule. On
+  2026-10-21 shesha decided the reset waits until it can be proven against Postgres. Docker works
+  again (2026-10-23) and CI has Postgres, so it can be proven now.
+  `test_a_session_level_business_does_not_survive_the_pool` then XPASSes and its strict xfail is
+  removed. The red proof: without the hook, the test fails. diego documents which hook he picks
+  and why.
+- **A stricter canary gate** (M3 PR 3). `scripts/canary_gate.py` refuses any xfail under
+  `tests.canary` that is not a pending `[HAND-WRITE]` mark (`PENDING_HAND_WRITE`), with a red
+  proof. There is no allowlist of known gaps (that was D10 (b)).
+- **Owner-connection clause checks in the suite** (M3 PR 3, before H1 `text_search`). The checks
+  that run `vector_search`, `text_search` and the retire on approve (ADR 0010) on the owner's
+  connection, where RLS cannot help, move into `tests/canary`. The gate then covers each
+  statement's business clause, not only RLS.

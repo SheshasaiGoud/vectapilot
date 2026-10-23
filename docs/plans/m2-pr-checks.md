@@ -1,10 +1,13 @@
 # M2 — acceptance checks per PR
 
-> **Status (2026-10-22):** PR 0–8, PR 5b and the H1 and H2 scaffolds merged (GitHub #23–#34; PR 8
-> is #34). PR 9 prepared (#35). H2 (#36) and H1 (`m2/retrieval`) written by Claude at shesha's
-> request. What remains is shesha's: the H1/H2 explain-backs, the questions
-> and freeze, accounts and keys, the live run, the note, the explain-backs and the quiz, in order
-> in [`m2-close-out.md`](m2-close-out.md).
+> **Status (2026-10-23): all M2 code merged** (GitHub #23–#37). That is PR 0–8, PR 5b, the H1 and
+> H2 scaffolds, PR 9's prep (#35), H2 (#36) and H1 (#37). H1 and H2 were written by Claude at
+> shesha's request. **The close-out is in progress, and it is shesha's**, in order in
+> [`m2-close-out.md`](m2-close-out.md): the questions and freeze, accounts and keys, the live
+> runs, the labels, the note, the H1/H2 explain-backs and the quiz. Docker works locally again
+> (2026-10-23).
+> [M3's plan](m3-pr-checks.md) takes on two items from this plan: the pool-return `RESET` (M3
+> PR 1) and the owner-connection canary checks (M3 PR 3).
 
 ADRs 0008 (embeddings) and 0009 (database roles and RLS) record the decisions and their sources.
 This file holds what each M2 PR must prove; each PR copies its section into its own acceptance

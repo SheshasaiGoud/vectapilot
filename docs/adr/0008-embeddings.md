@@ -56,3 +56,15 @@ the opt-out is done). Hindi quality is measured by eval v0, not assumed; Telugu 
 A model change costs a full reindex. Exact search grows linearly with chunks per business.
 
 [platform.claude.com/docs/en/build-with-claude/embeddings]: https://platform.claude.com/docs/en/build-with-claude/embeddings
+
+**Amended 2026-10-23 (shesha, M3 plan D14; `docs/plans/m3-pr-checks.md`): the ANN revisit is
+pending PR 8's measurement.** Nothing is measured yet, so exact search stands.
+- M3 PR 8 measures at pilot size only. It runs `EXPLAIN (ANALYZE, BUFFERS)` of the vector and
+  full-text statements as `vectapilot_app` inside a business transaction, labelled local Docker on
+  an 8 GB Mac. It also records whether the planner uses any index for `<=>` or `@@` under RLS.
+  Its result amends this ADR again: exact search kept or not, with the numbers.
+- The synthetic-scale measurement moves to M9. Its throwaway business then needs ADR 0013
+  decision 3's delete guards (a reserved id form, checked at the delete, never in production) and
+  a printed free-disk check.
+- Revisit trigger: any business above 10,000 chunks, or the search transaction's measured p95
+  above 300 ms (a target, not a measurement).

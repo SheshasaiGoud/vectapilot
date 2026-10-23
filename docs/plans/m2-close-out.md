@@ -1,14 +1,18 @@
 # M2 close-out: shesha's remaining steps (PR 9)
 
-> **Status (2026-10-22):** the team side of M2 is merged (plan PR 0–8, PR 5b and the H1 and H2
-> scaffolds; GitHub #23–#34).
-> Everything below is shesha's. Today: H1 and H2 are written (by Claude at shesha's request,
-> 2026-10-22: H2 #36, H1 on `m2/retrieval`; `PENDING_HAND_WRITE` is empty), so steps 3 and 4
-> leave only their explain-backs (step 18); `support_qa` v0.1 has no
-> questions (`stage: collecting`); `faq-hi` is `review: pending`; Docker Desktop is unreachable on
-> the Mac; no Voyage or Anthropic account or key is known to be set up. Prepared by maya on
-> `m2/close-out-prep`. Nothing in this file is a result, and no cost in it is a figure: the cost of
-> a run is the runbook's formula (`docs/learning/m2-eval-run.md` §3), printed by the CLI per run.
+> **Status (2026-10-23):** all M2 code is merged (plan PR 0–8, PR 5b, the H1 and H2 scaffolds and
+> this checklist, GitHub #23–#35; H2 #36 and H1 #37).
+> Everything below is shesha's. Today:
+> - H1 and H2 were written by Claude at shesha's request (2026-10-22), and `PENDING_HAND_WRITE` is
+>   empty, so steps 3 and 4 leave only their explain-backs (step 18).
+> - Docker works again (step 2 done, 2026-10-23).
+> - `support_qa` v0.1 has no questions (`stage: collecting`), and `faq-hi` is `review: pending`.
+> - No Voyage or Anthropic account or key is known to be set up.
+>
+> M3's decisions of 2026-10-23 (`docs/plans/m3-pr-checks.md`) add D1's Q6 answer to step 7 and
+> D3's measurement window to steps 11 and 13. Prepared by maya on `m2/close-out-prep` and updated
+> on `m3/plan`. Nothing in this file is a result, and no cost in it is a figure: the cost of a run
+> is the runbook's formula (`docs/learning/m2-eval-run.md` §3), printed by the CLI per run.
 
 Each step says what to do, the exact commands (checked against the `Makefile`, `pyproject.toml`
 and the two CLIs on 2026-10-22), **how you know it is done** (the signal to look for), who can
@@ -19,17 +23,17 @@ answer or label.
 ## Order of work
 
 ```
-Now, in parallel:  1 friends' brief · 2 Docker · 3 H2 · 5 faq-hi review · 6 own questions · 11 accounts
-Then:              4 H1 (after 2, recommended) · 7 labels (after 5, 6) · 8 friends' rows (after 1, 5)
+Done:              2 Docker · 3 H2 (#36) · 4 H1 (#37)
+Now, in parallel:  1 friends' brief · 5 faq-hi review · 6 own questions · 11 accounts · 18 explain-backs
+Then:              7 labels (after 5, 6) · 8 friends' rows (after 1, 5)
 Dataset:           9 ready → 10 freeze (after 5–8)
-Runs:              12 dry run (after 2–4) → 13 live dev (after 10–12) → 14 tune, commit dev
+Runs:              12 dry run → 13 live dev (after 10–12) → 14 tune, commit dev
                    → 15 live test → 16 label, summarize → 17 note → 19 quiz
-After 3 and 4 merge: 18 explain-backs
 ```
 
-The critical path is the dataset (1, 5–10: friends take days) and Docker: the dry and live runs
-need local Postgres; CI cannot stand in for them. Step 12 can run before the freeze (every question
-as `unassigned`); steps 13 and 15 cannot.
+The critical path is the dataset (1, 5–10: friends take days). The dry and live runs need local
+Postgres, which works again since 2026-10-23 (step 2); CI cannot stand in for them. Step 12 can run
+before the freeze (every question as `unassigned`); steps 13 and 15 cannot.
 
 > **Team items found in maya's review of this prep: both fixed in this PR (2026-10-22).**
 > - **T1 (fixed).** `tests/test_canary_checks.py` asserted exactly one mark from
@@ -49,6 +53,12 @@ as `unassigned`); steps 13 and 15 cannot.
 - **Help:** noah-evals (brief, template). **Needs:** nothing.
 
 ## 2. Get Docker Desktop working
+> **Done (2026-10-23).** Docker Desktop's engine had died around 2026-10-16. It was fixed with
+> `docker desktop stop --force`, then `docker desktop start`. `make up` came up healthy, and
+> `make test-integration` gave 2568 passed and 1 xfailed locally. The likely trigger is the
+> nearly full disk (data volume 93 % used, 14 GiB free). Use the same two commands if
+> `docker info` cannot connect again.
+
 - **Do:** quit Docker Desktop and open it again (or use its own Restart menu item), then wait until
   it reports that the engine is running. Agents make no system changes here: anything beyond a
   restart (Troubleshoot actions that clean or reset data, a reinstall, a local Postgres) is your
@@ -64,12 +74,13 @@ as `unassigned`); steps 13 and 15 cannot.
 - **Done when:** `make up` returns without error and `make test-integration` runs the Postgres
   tests (they show `passed` or `xfailed`, no longer `skipped`).
 - **Help:** sofia-frontend (Docker), diego-backend (the stack, migrations, roles). **Needs:** nothing.
-- **Open (rule 10):** the H1 guide's question (a) Docker first, (b) CI only with a longer time-box,
-  or (c) a local Postgres is still yours to answer; this step is option (a).
+- **Closed (2026-10-23):** the H1 guide's question, (a) Docker first, (b) CI only with a longer
+  time-box, or (c) a local Postgres, no longer needs an answer: Docker works, which is option (a).
 
 ## 3. H2: the retrieval metrics, on `m2/metrics` (`[HAND-WRITE]`, time-box 2 h)
 > **Done (2026-10-22):** written by Claude at shesha's request; 142 of 142 cases pass and
-> "retrieval_metrics" is out of `PENDING_HAND_WRITE`. The explain-back (step 18) remains.
+> "retrieval_metrics" is out of `PENDING_HAND_WRITE`. Merged as #36. The explain-back (step 18)
+> remains.
 
 - **Do:** write the five bodies in `apps/api/src/vectapilot_api/evalset/metrics.py`; guide
   `docs/learning/m2-metrics.md` (§1 workflow, §5 decisions as taken). No Docker needed.
@@ -101,7 +112,7 @@ as `unassigned`); steps 13 and 15 cannot.
 ## 4. H1: `vector_search`, on `m2/retrieval` (`[HAND-WRITE]`, time-box 3 h)
 > **Done (2026-10-22):** written by Claude at shesha's request; the binding test passes locally,
 > the three switches are removed, and the Postgres cases (H1's, PR 6's, PR 8's, the canary paths)
-> first run in this PR's CI. The explain-back (step 18) remains.
+> first run in this PR's CI. Merged as #37. The explain-back (step 18) remains.
 
 - **Do:** write the body in `apps/api/src/vectapilot_api/retrieval/vector.py`; guide
   `docs/learning/m2-retrieval.md` (§1 workflow, §5 decisions as taken).
@@ -165,6 +176,13 @@ as `unassigned`); steps 13 and 15 cannot.
   out_of_scope > ambiguous > multi_hop > policy > faq), `subtype`, `expected_outcome`,
   `expected_evidence` as groups of `(source_id, version, anchor)` keys, `split_group` for
   translations and twins, `reference_answer`, `id`. `split` stays `null`.
+- **Hindi or Hinglish with English-only evidence** (Q6, decided 2026-10-23: M3 plan D1 (a);
+  ADR 0011 amendment). Translation is allowed, so label such a Sunrise question by its category
+  and evidence, like any other. The language gap alone never makes it `handoff` or `dont_know`:
+  a question the English documents answer expects `answered`, with groups that point at the
+  English keys. The answer comes in the question's language, and the citation shows the source's
+  language. A question in a language its business does not list still expects `handoff`
+  (ADR 0012, 5).
 - **Commands:**
   ```bash
   uv run python -m vectapilot_api.evalset lookup sunrise-clinic "<words to find>"
@@ -218,6 +236,12 @@ as `unassigned`); steps 13 and 15 cannot.
   inference geo `global`; a key created in that workspace; prices of the `large` alias's model
   re-checked against `apps/api/src/vectapilot_api/gateway/models.toml` (a changed price lands
   through a PR, new `catalog_version`, before the run). Done already if M1's live run came first.
+- **Before step 13, land any catalog change** (M3 plan D3 (a), decided 2026-10-23). Step 13 opens
+  a measurement window that lasts until M3's last live answer run. In it, nothing merges that
+  changes `gateway/models.toml`, `PROMPT_VERSION` or the gateway's output path. A bump would
+  change the config fingerprint, so step 15's test run would be refused, and M3's runs would no
+  longer compare with yours. If a price changes inside the window, you choose then: keep the old
+  catalog (the note marks those costs stale), or bump it and re-run the vector dev run (paid).
 - **Key handling (ADR 0007):** keys live where no agent can read them: never in the repository
   tree, `apps/api/.env` (startup refuses them there), a shell profile or the history. On the day you
   enter them with `read -s` in a separate terminal that never runs Claude Code or Cursor (step 13),
@@ -240,6 +264,15 @@ as `unassigned`); steps 13 and 15 cannot.
 - **Do:** `docs/learning/m2-eval-run.md` §2. A clean tree on the commit to measure; `make up`; a
   separate terminal without Claude Code or Cursor; `cd apps/api` (`.env` provides the database and
   Redis URLs, never keys).
+- **From this run on, keep the measurement window** (M3 plan D3 (a), decided 2026-10-23; until
+  M3's last live answer run):
+  - No catalog, prompt or output-path change merges (step 11).
+  - Keep the local data: no `make reset-db`, Docker volume prune or other deletion of database
+    data. M3's hybrid runs reuse this run's chunks and embeddings, and a re-ingest is a paid
+    re-embed, perhaps with different vectors. If disk space runs short, free it outside the
+    database volume.
+  - Step 15 runs on this run's code: the branch that adds only the dev folder on top of this
+    run's commit (step 14), so M3's merges on `main` cannot affect it.
 - **Commands:**
   ```bash
   git status                                   # nothing to commit
@@ -309,10 +342,11 @@ as `unassigned`); steps 13 and 15 cannot.
 - **Help:** maya-tech-lead. **Needs:** steps 16–18.
 
 ## Not blockers for the close-out (recorded, owners named)
-- Pool-return `RESET app.business_id`: waits until it can be proven against Postgres (plan PR 2,
-  pinned by a strict xfail); possible once step 2 works.
-- After H1 (zara, ananya, you): mirror the owner-connection checks into `tests/canary` or make the
-  gate require them; a Postgres red proof that an API path turns red.
+- Pool-return `RESET app.business_id` (plan PR 2, pinned by a strict xfail): moved to M3 PR 1
+  (D10 (a), decided 2026-10-23), now that step 2 works.
+- After H1 (zara, ananya, you): mirror the owner-connection checks into `tests/canary`, with a
+  Postgres red proof that an API path turns red. Moved to M3 PR 3, together with the stricter
+  canary gate.
 - Redis and `compose.yaml` images pinned by digest; `db_provision.py` SCRAM verifier (by M10).
 
 ## M1 leftovers (also shesha's)

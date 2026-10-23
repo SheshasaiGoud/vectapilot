@@ -7,8 +7,9 @@ cited answer on top of it, and noah's harness (PR 8) measures it with your H2 me
 full-text search comes in M3, so H1 is vector search only.
 
 > **Status (2026-10-22).** `vector_search` is written, by Claude at shesha's request; its tests run
-> as plain tests and "vector_search" is out of `PENDING_HAND_WRITE`. The Postgres cases first run
-> in CI (Docker is unreachable locally). This guide stays as the reference for the explain-back,
+> as plain tests and "vector_search" is out of `PENDING_HAND_WRITE`. The Postgres cases first ran
+> in CI (#37); since Docker works again (2026-10-23) they also run locally with
+> `make test-integration`. This guide stays as the reference for the explain-back,
 > which is still part of acceptance.
 
 ## Your task
@@ -31,8 +32,9 @@ full-text search comes in M3, so H1 is vector search only.
 
 ## 1. How to work
 
-> **Postgres right now (2026-10-22):** Docker is unreachable on the Mac, so the 21 Postgres cases
-> and the 2 canary cases run **only in CI**; locally they show `skipped`. The 2 binding cases need
+> **Postgres (history):** on 2026-10-22 Docker was unreachable on the Mac, so the 21 Postgres
+> cases and the 2 canary cases ran **only in CI**. Docker works again since 2026-10-23 (option (a)
+> below), and `make test-integration` runs them locally. The 2 binding cases need
 > no database and run everywhere: a fast local signal, but only about the statement's shape.
 
 > **While Docker is down.** The binding test checks only the statement's shape and bindings (one
@@ -273,7 +275,8 @@ explain-back stays part of acceptance.
   carry several model ids is refused by PR 6 (`require_one_model`), not here; a past `review_by`
   date does not hide a document.
 
-**Still open:** how you run the Postgres tests while Docker is down, (a), (b) or (c) from §1.
+**Resolved (2026-10-23):** option (a) from §1: Docker Desktop works again, and `make
+test-integration` runs the Postgres tests locally.
 
 ## 6. Explain it back (part of acceptance)
 - RLS already filters every row, so why does `vector_search` name the business in its `WHERE`

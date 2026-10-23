@@ -105,3 +105,30 @@ record and `AnswerRun` become a contract that PR 8's harness reads; changing the
 new `record_version`. With decision 11, the API server is not a path to paid model calls unless
 someone opts in on purpose; once opted in, each answer with evidence is still an uncapped call
 until M7's budgets.
+
+**Amended 2026-10-23 (shesha, M3 plan D1, D3, D7, D8, D11, D12; `docs/plans/m3-pr-checks.md`;
+[ADR 0014](0014-hybrid-retrieval.md)).** The decisions above stand except where these lines say
+otherwise.
+- **Decision 4 is no longer provisional.** Q6 (business-context §9) is answered (D1 (a)):
+  translation is allowed. Retrieval has no language filter, the answer is in the question's
+  language, and each source shows its own `language`, as the sources already do. This is a
+  platform default and needs no code. Per business (D1 (c)) once a configuration loader exists;
+  zara may tighten it for safety content in M7. A question in a language its business does not
+  list still expects `handoff` (ADR 0012, 5).
+- **Decision 5 in hybrid mode** (D8 (a); ADR 0014 decision 6). The search transaction is
+  REPEATABLE READ READ ONLY. With two legs, an approval committed between them could otherwise put
+  a retired and a new version of one source into one answer. Vector mode stays READ COMMITTED.
+- **The threshold under hybrid** (D7 (a); ADR 0014 decision 7). Evidence is still the hits whose
+  cosine is at least `rag_min_score`, re-tuned on dev only. `score` stays the cosine and is never
+  the RRF score.
+- **Native Citations are revisited and declined for M3** (D11 (a)). Our own chunk ids stay: a prompt
+  or output-path change would end comparability with M2's baseline (D3). Per-claim citations
+  return with M7's grounding check.
+- **`traceresponse`** (decision 9 (c)) follows the trace span to M9 (D12 (a); ADR 0007 amendment).
+  An inbound `traceparent` stays unread, so the trace id stays server-made; revisited with M8's
+  widget.
+- **The `rag_answer` record** (a proposal, confirmed in M3 PR 4). New optional, metadata-only fields
+  (retrieval mode, hits per leg, FTS-only hits, per-stage durations) keep `record_version` 1.
+  ADR 0007's rule ("additive; a breaking change bumps it") governs the Consequences' "changing
+  them later needs a new `record_version`": only a breaking change needs one. A test shows that
+  M2's records still validate.
