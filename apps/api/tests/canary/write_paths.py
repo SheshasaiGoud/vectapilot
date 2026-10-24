@@ -51,8 +51,8 @@ def approve_a_new_version(client: TestClient, business_id: str | None) -> httpx2
     the new document and its chunks and retires version 1, in one transaction (ADR 0010). The
     other business's `canary` source is approved under the same source id. Under RLS (the app
     role) this proves approving retires none of its rows; the store's own `WHERE business_id` is
-    proven on the owner's connection in
-    tests/kb/test_postgres_store.py::test_the_retire_names_the_business_even_where_rls_cannot_help.
+    proven on the owner's connection, under the canary gate, by
+    `test_approving_retires_only_the_businesss_own_version_where_rls_cannot_help` (M3 PR 3).
     """
     return client.post(
         "/v1/kb/documents",

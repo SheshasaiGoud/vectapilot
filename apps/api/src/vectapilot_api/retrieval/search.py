@@ -32,46 +32,26 @@ import secrets
 from collections.abc import Awaitable, Callable, Sequence
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from typing import Annotated, Final, Protocol
+from typing import Final, Protocol
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from vectapilot_api.embeddings.guard import require_one_model
 from vectapilot_api.embeddings.runner import EmbeddingRunner
 from vectapilot_api.kb.store import stored_models_in
 from vectapilot_api.kb.types import ContentKind
-from vectapilot_api.retrieval.types import Reader, SearchHit, VectorQuery
-from vectapilot_api.retrieval.vector import vector_search
 
-MAX_QUESTION_CHARS: Final = 2000
-"""The longest question accepted, in characters, counted before stripping. A platform default, not
-measured: generous for a customer's question, far below the embedding model's context (32,000
-tokens, ADR 0008), and it bounds what one request can put into a prompt."""
+# `Question`, its check and its limit live in retrieval/types.py since M3 PR 3 (`TextQuery` holds a
+# `Question`); re-exported here, where the routes, the harness and the tests import them from.
+from vectapilot_api.retrieval.types import MAX_QUESTION_CHARS as MAX_QUESTION_CHARS
+from vectapilot_api.retrieval.types import Question as Question
+from vectapilot_api.retrieval.types import Reader, SearchHit, VectorQuery
+from vectapilot_api.retrieval.types import check_question as check_question
+from vectapilot_api.retrieval.vector import vector_search
 
 SEARCH_OPERATION: Final = "kb-search"
 """The `embedding_call` operation of `GET /v1/kb/search`."""
-
-
-def check_question(value: str) -> str:
-    """A question with text in it, stripped; encodable as UTF-8 (no lone surrogates, which the
-    embedding and model APIs would refuse). Messages never contain the value."""
-    stripped = value.strip()
-    if not stripped:
-        raise ValueError("must contain text, not only whitespace")
-    try:
-        stripped.encode("utf-8")
-    except UnicodeEncodeError:
-        raise ValueError("must be valid Unicode text") from None
-    return stripped
-
-
-Question = Annotated[
-    str,
-    StringConstraints(min_length=1, max_length=MAX_QUESTION_CHARS),
-    AfterValidator(check_question),
-]
-"""A customer's question as the API accepts it (`GET /v1/kb/search?q=`, `POST /v1/answer`)."""
 
 
 class BusinessTransactions(Protocol):

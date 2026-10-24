@@ -102,3 +102,15 @@ canary suite grows to cover them as they arrive.
   that run `vector_search`, `text_search` and the retire on approve (ADR 0010) on the owner's
   connection, where RLS cannot help, move into `tests/canary`. The gate then covers each
   statement's business clause, not only RLS.
+  - Built 2026-10-24 (M3 PR 3, zara; in review). pytest's JUnit report keeps only an xfail's
+    reason, not `strict` or `raises`. So the gate accepts exactly one reason format, which
+    `pending_hand_writes` builds through the gate's own `pending_reason`, and refuses every other
+    xfail. A static check (`tests/test_canary_checks.py`) refuses any `xfail` written in
+    `tests/canary` or `tests/conftest.py` outside `pending_hand_writes`, because a copied reason
+    on a hand-made mark without `raises`, or `pytest.xfail(...)` in a test, would pass the gate.
+    The read paths in `OWNER_CONNECTION_PATHS` (`vector_search`, `text_search`) also run on the
+    owner's connection, and the retire runs there through `PostgresKbStore`. M2's own clause
+    tests stay where they were and are mirrored in `tests/canary`, not moved (decided
+    2026-10-24, shesha). The API-level red proof over a leaking `text_search` lands in M3 PR 4,
+    with the hybrid routes (decided 2026-10-24, shesha). Not covered: an xfail built by
+    obfuscation or added by a plugin outside those files (review).

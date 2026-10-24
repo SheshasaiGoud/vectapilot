@@ -3,8 +3,8 @@
 - **Status:** accepted · 2026-10-23 · chosen by shesha (M3 plan decisions D2, D6, D7, D8, D13 and
   D15: every recommendation, D15 (iii) with shesha's own number; `docs/plans/m3-pr-checks.md`,
   "Decided 2026-10-23"). Drafted by maya-tech-lead from research by ananya-rag, noah-evals,
-  diego-backend and zara-safety. Decisions 1 and 2 are built in M3 PR 2 (in review); the rest
-  comes in PR 3–5 and H1/H2.
+  diego-backend and zara-safety. Decisions 1 and 2 are built in M3 PR 2 (merged, #40); the
+  scaffold for 3 and 4 is M3 PR 3 (in review); the rest comes in PR 4–5 and H1/H2.
 
 **Context.** M2 retrieves by meaning only: H1's `vector_search` ranks a business's approved chunks
 by exact cosine distance, with `business_id` in the statement's `WHERE` and RLS underneath (ADR
@@ -46,22 +46,31 @@ cosine gate, one snapshot, and no reranking in M3. Each part:
    Amended 2026-10-23 (shesha): one platform module (`ingestion/language_map.py`), not a data
    file. It has two entries, is typed and read by mypy, and needs no loader; a change needs a
    migration anyway, so a file editable without a code change would add a hazard, not a benefit.
-3. **`text_search`** (D6 (a); H1, `[HAND-WRITE]`; who writes it is still open). One bound
-   statement with `c.business_id = :business_id` in its `WHERE`. It returns approved chunks within
-   the reader's audiences, of the question's embedding model. `c.tsv` is matched against an OR of
-   the question's lexemes, parsed with each chunk's own `ts_config`, never `to_tsquery` on raw
-   text. Results are ranked by `ts_rank`, with ties in M2 H1's order (source id, version
-   `COLLATE "C"`, chunk index), and cut by `LIMIT :k`. `score` is the cosine to the question's
-   embedding, so ADR 0011's gate keeps its meaning. Why OR: an AND of every word of a natural
-   question rarely matches. Why `ts_rank`: it scores each chunk on its own, with no corpus
-   statistics, so no business can move another's ranking. That is an isolation property, not only
-   a simplification.
+3. **`text_search`** (D6 (a); H1, `[HAND-WRITE]`, written by shesha, D5, decided 2026-10-24).
+   One bound statement with `c.business_id = :business_id` in its `WHERE`. It returns approved
+   chunks within the reader's audiences, of the question's embedding model. `c.tsv` is matched
+   against an OR of the question's lexemes, parsed with each chunk's own `ts_config`, never
+   `to_tsquery` on raw text. Results are ranked by `ts_rank`, with ties in M2 H1's order (source
+   id, version `COLLATE "C"`, chunk index), and cut by `LIMIT :k`. `score` is the cosine to the
+   question's embedding, so ADR 0011's gate keeps its meaning. Why OR: an AND of every word of a
+   natural question rarely matches. Why `ts_rank`: it scores each chunk on its own, with no
+   corpus statistics, so no business can move another's ranking. That is an isolation property,
+   not only a simplification.
 4. **`rrf_fuse`** (D6 (a); H2, `[HAND-WRITE]`, written by shesha, D5). score(d) = Σ 1/(k + rank)
    over the lists that hold d, ranks from 1, k = 60 fixed (Cormack, Clarke and Büttcher, 2009) as
    an exact `Fraction`. Ties are broken by score, then best single rank, then M2 H1's order. A
    duplicate chunk raises `ValueError`. k is not tuned: about 28 dev questions would fit noise.
    `FusedHit` wraps an unchanged `SearchHit` and adds the RRF score and the rank in each list, so
    the types keep an RRF score (about 0.016–0.033) away from `rag_min_score`.
+   Corrected 2026-10-24: with two lists at k = 60 and `candidate_k` 20, an RRF score lies between
+   1/80 = 0.0125 (rank 20 in one list only) and 2/61 ≈ 0.033 (rank 1 in both), not 0.016–0.033.
+   Built 2026-10-24 (M3 PR 3, ananya and zara; in review), decisions 3 and 4 as stubs with strict
+   xfails. Proposals accepted by shesha the same day: `ts_rank` in its two-argument form (default
+   weights, no length normalisation); `rrf_fuse` raises `ValueError` for `k` or `limit` below 1;
+   `FusedHit` has `hit`, `rrf_score` and `ranks` (by input-list position, vector first, `None`
+   where absent); `Question` lives in `retrieval/types.py` (`TextQuery` holds one) and
+   `search.py` re-exports it. Postgres text cannot hold U+0000, so a question containing it
+   cannot be bound: not H1's to handle, see decision 5's amendment.
 5. **The hybrid search** (PR 4). The question is embedded once. One business transaction holds the
    model check, `vector_search` and `text_search` at `rag_candidate_k`, and `rrf_fuse` limited to
    it. The top `rag_context_k` fused hits go to the answer. `AnswerRun.hits` is the fused list in
@@ -69,6 +78,8 @@ cosine gate, one snapshot, and no reranking in M3. Each part:
    do not change. Settings are platform defaults, unmeasured: `rag_retrieval_mode` `vector | hybrid`
    (default `vector`), `rag_candidate_k` 20 (provisional; at least `rag_context_k` and 10, at most
    `MAX_K`), `rag_rrf_k` 60. Vector mode is M2's path unchanged.
+   Amended 2026-10-24 (shesha): `Question` refuses U+0000 with a 422 on both routes in both modes
+   (PR 4 or its own small PR, never H1).
 6. **One snapshot per search** (D8 (a)). In hybrid mode the transaction's first statement is
    `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY`, then `set_config` as today. Both
    legs then see the same committed data, so an approval between them cannot put a retired and a
@@ -115,7 +126,7 @@ cosine gate, one snapshot, and no reranking in M3. Each part:
 - On v0.1, "no measurable difference" is a likely and acceptable result. Hybrid becomes the
   default only through D15's rule, recorded with `compare`'s counts.
 
-**Built 2026-10-23 (M3 PR 2, diego; in review).** Decisions 1 and 2: migration 0005 and
+**Built 2026-10-23 (M3 PR 2, diego; merged as #40).** Decisions 1 and 2: migration 0005 and
 `ingestion/language_map.py` (decision 2 as amended above). These facts came up while building and
 reviewing it. None changes a decision: shesha kept decision 1 after the `pg_upgrade` finding below,
 and added the language rule for re-uploads (both 2026-10-23).

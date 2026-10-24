@@ -347,6 +347,18 @@ before the freeze (every question as `unassigned`); steps 13 and 15 cannot.
 - After H1 (zara, ananya, you): mirror the owner-connection checks into `tests/canary`, with a
   Postgres red proof that an API path turns red. Moved to M3 PR 3, together with the stricter
   canary gate.
+  - Partly built in M3 PR 3 (2026-10-24, zara; in review); the API-level full-text proof lands
+    in PR 4. `vector_search`, `text_search` (pending H1) and the retire on approve run on the
+    owner's connection in `tests/canary/test_leakage.py`, each with a red proof against Postgres:
+    `vector_search` and the retire with their own business clause removed for the test, the
+    full-text leg through a stand-in without one (H1 is still a stub). The two search legs run
+    there with `MAX_K` hits and with one, so a business filter applied after the `LIMIT` is
+    caught too (red proof: `vector_search` filtered after its limit). One deviation, accepted by
+    shesha on 2026-10-24: an API path runs as the app role, under RLS, so on Postgres it can never
+    show a missing clause (the reason these checks exist). The Postgres red proof is therefore per
+    leg: a leg without its clause passes the app-role read path and fails the owner check. The
+    API-level red proof stays without a database, as for `vector_search`, and covers the full-text
+    leg from PR 4, when a route first runs it.
 - Redis and `compose.yaml` images pinned by digest; `db_provision.py` SCRAM verifier (by M10).
 
 ## M1 leftovers (also shesha's)
