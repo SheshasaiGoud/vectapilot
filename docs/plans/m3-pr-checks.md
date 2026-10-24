@@ -4,10 +4,12 @@
 > ananya-rag, noah-evals, diego-backend and zara-safety, then revised the same day after two
 > independent reviews (completeness, feasibility). The revision made the smallest plan the default,
 > renumbered the PRs (now PR 0–9) and moved the judge and reranking to stretch items, S1 and S2.
-> shesha decided D1–D16 the same day ("Decided 2026-10-23"). One question is open now: who writes
-> H1 (D16 is looked at again after M2's dev run, as decided). PR 0 (this file,
+> shesha decided D1–D16 the same day ("Decided 2026-10-23"), and the last open question on
+> 2026-10-24: shesha writes H1 too ("Decided 2026-10-24"). No question is open (D16 is looked at
+> again after M2's dev run, as decided). PR 0 (this file,
 > [ADR 0014](../adr/0014-hybrid-retrieval.md) and the amendments) is merged (#38), PR 1 (guards)
-> too (#39); PR 2 (full-text column) is in review.
+> (#39), PR 2 (full-text column) (#40) and its audience follow-up (#41) too; PR 3 (hybrid
+> scaffold) is in review.
 > M2 is **not closed**: `support_qa` v0.1 has no questions yet (`manifest.json` says
 > `stage: collecting`, `questions.jsonl` has 0 lines), and there is no live run and no baseline
 > ([`m2-close-out.md`](m2-close-out.md)). M3 can be built now. Anything that compares against M2's
@@ -179,9 +181,9 @@ cacheable prompt length (only relevant to caching, D14).
 
 ## Order of work and sequencing with M2's close-out
 ```
-Decided:        D1–D16 (2026-10-23). Open: who writes H1 (before H1) · D16's look (after M2's dev run)
+Decided:        D1–D16 (2026-10-23), H1's writer (2026-10-24) · Later: D16 (after M2's dev run)
 Now:            PR 0 · PR 1 guards · PR 2 full-text column · PR 6 compare · PR 7 faithfulness labels
-Then:           PR 3 scaffold + canary hardening (after PR 1 and PR 2) → H1, H2 (shesha writes H2)
+Then:           PR 3 scaffold + canary hardening (after PR 1 and PR 2) → H1, H2 (shesha writes both)
                 PR 4 hybrid search (after PR 3) → PR 5 eval hybrid · PR 8 latency (after H1)
 Measure:        PR 9 close-out, each step with its own dependency (below)
 Stretch:        none in M3: S1 judges (D4 (b)) and S2 rerank (D13 (c)) are not built
@@ -426,10 +428,21 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
   - Red proof: `xfail(reason="flaky in CI")` on
     `test_no_read_path_shows_another_businesss_canary` fails the gate.
   - No allowlist [D10 (a)]: PR 1's `RESET` removes the only other xfail first.
-- **Owner-connection clause checks** for `vector_search`, `text_search` and M2 PR 5b's retire move
-  into `tests/canary`, so the gate covers the `WHERE` clause, not only RLS. A red proof shows that an
-  API read path over a leaking full-text leg is caught. This closes the "after H1" item in
-  `m2-close-out.md`.
+- **Owner-connection clause checks** for `vector_search`, `text_search` and M2 PR 5b's retire are
+  mirrored into `tests/canary` (M2's own clause tests stay where they are), so the gate covers the
+  `WHERE` clause, not only RLS. The API-level red proof over a leaking full-text leg moves to PR 4,
+  which closes the "after H1" item in `m2-close-out.md` (both decided 2026-10-24).
+- **Decided 2026-10-24** (shesha accepted the team's proposals; ADR 0014 and ADR 0009 notes):
+  - `ts_rank` in its two-argument form (no length normalisation).
+  - `rrf_fuse` raises `ValueError` when `k` or `limit` is below 1.
+  - `FusedHit` fields: `hit`, `rrf_score`, `ranks` (by input-list position, vector first).
+  - `Question` moves to `retrieval/types.py`; `search.py` re-exports it.
+  - M2's test helpers move into `tests/retrieval/conftest.py`, `corpus.py` and `recording.py`.
+  - The gate accepts only the reason format built by `pending_reason` (read back by
+    `pending_stubs`); a static scan refuses any `xfail` in `tests/canary` outside
+    `pending_hand_writes`.
+  - A NUL (U+0000) in a question is not H1's to handle; `Question` refuses it in PR 4 (or its
+    own small PR).
 - **Guide** `docs/learning/m3-hybrid.md`, covering:
   - tsvector, tsquery and text-search configs;
   - why OR, and why per-chunk configs;
@@ -439,9 +452,9 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
   - the switches and the decisions;
   - explain-back questions, without printed answers.
 
-## H1 — `m3/text-search` (`[HAND-WRITE]`; who writes it is open, shesha's call; time-box 3 h)
-- The body of `text_search`, about 15 lines of SQL. Docker works again (2026-10-23), so
-  `make test-integration` runs the Postgres cases locally.
+## H1 — `m3/text-search` (`[HAND-WRITE]`, written by shesha [D5, 2026-10-24]; time-box 3 h)
+- The body of `text_search`, about 17–18 lines of SQL (updated 2026-10-24; was about 15). Docker
+  works again (2026-10-23), so `make test-integration` runs the Postgres cases locally.
 - **Done when:**
   - every case goes `xfailed` → `XPASS(strict)` → (switches removed) `passed`;
   - the canary suite and gate pass in CI;
@@ -488,10 +501,18 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
     `cancelled`, not `deadline_exceeded`; the ADR 0007 amendment says so.
 - `GET /v1/kb/search` and `POST /v1/answer` follow the mode. Response shapes do not change (`score`
   stays the cosine).
+- **NUL in a question** (decided 2026-10-24, shesha; ADR 0014 decision 5 amendment): `Question`
+  refuses U+0000 with a 422 on both routes in both modes, since Postgres text cannot hold it. A
+  test sends it to each route in each mode; the 422 echoes nothing, like every 422 today
+  (`kb/errors.py`). It may land as its own small PR instead, never in H1.
 - **Canary:**
   - New `READ_PATHS` keys `"hybrid_search"`, `"GET /v1/kb/search (hybrid)"` and
     `"POST /v1/answer (hybrid)"`, each mapped to {`vector_search`, `text_search`, `rrf_fuse`}.
   - `"rrf_fuse"` leaves `NEEDED_OUTSIDE_READ_PATHS`.
+  - Red proof (moved here from PR 3, decided 2026-10-24): each hybrid API route, with a clean
+    vector leg and a leaking `text_search` stand-in, is caught. It extends
+    `test_red_proof_an_api_read_path_over_a_leaking_search_is_caught` and closes the "after H1"
+    item in `m2-close-out.md`.
 - **Snapshot test** (zara S8): an approval that commits between the legs (a hook in a stand-in leg)
   never puts the retired and the new version of one source into one fused list.
 - Local tests use stand-ins for H1 and H2 (on the team side, as in M2). The real paths sit behind
@@ -702,8 +723,8 @@ M9), because the output mode is not part of the fingerprint [D14].
 
 ## Decided 2026-10-23
 shesha accepted every recommendation for D1–D4, D6–D14, D15 (i) and (ii) and D16. shesha answered
-D5 and D15 (iii) personally and left one question open (below). Items tagged **[proposal]**
-elsewhere in this file are not covered by these decisions.
+D5 and D15 (iii) personally and left one question open, decided 2026-10-24 (below). Items
+tagged **[proposal]** elsewhere in this file are not covered by these decisions.
 - **D1 — Q6, translation:** (a) allowed now. There is no language filter, the answer is in the
   question's language, and the citation shows the source's language. Later (c): per business,
   once a config loader exists. zara may tighten it for safety content in M7.
@@ -716,9 +737,9 @@ elsewhere in this file are not covered by these decisions.
   - no `reset-db` or volume prune.
 - **D4 — LLM judges:** (b) both deferred to M4 or later, until a dataset has at least 30 human
   labels on distinct shown answers. M3 reports human faithfulness labels only (a deviation).
-- **D5 — Who writes:** shesha writes H2 `rrf_fuse`; H1 is open (below). The boundary proposals
-  stand: harness counting over H2's values (`compare`'s pairs, the headroom count, faithfulness
-  `x of n`) is `[DELEGATE]`.
+- **D5 — Who writes:** shesha writes H2 `rrf_fuse`, and H1 `text_search` too (2026-10-24,
+  below). The boundary proposals stand: harness counting over H2's values (`compare`'s pairs, the
+  headroom count, faithfulness `x of n`) is `[DELEGATE]`.
 - **D6 — H1/H2 spec:** (a) as in ADR 0014:
   - an OR of the question's lexemes in each chunk's own config, ranked by `ts_rank`;
   - `score` stays the cosine;
@@ -756,10 +777,14 @@ elsewhere in this file are not covered by these decisions.
 - **D16 — Dataset v0.2:** (c) decided after M2's dev run shows whether vector retrieval is at its
   ceiling. The default is (a), v0.1 only. A larger v0.2 is also D4's trigger.
 
-### Still open
-- **Who writes H1 `text_search`** (3 h; the rest of D5). Options: (a) shesha, from the guide;
-  (b) Claude after a hint, at shesha's request, as in M1 and M2; (c) mixed. It is shesha's call,
-  before H1 starts (after PR 3). The explain-back stays part of acceptance either way.
+## Decided 2026-10-24
+No question is open now.
+- **Who writes H1 `text_search`** (the rest of D5): (a) shesha, from the guide. D5 is fully
+  decided: shesha writes both H1 and H2. The explain-back stays part of acceptance.
+- **NUL in a question:** (a) `Question` refuses U+0000 with a 422 on both routes in both modes, in
+  PR 4 or its own small PR, never in H1 (ADR 0014 decision 5 amendment).
+- **PR 3's proposals,** all accepted: listed in PR 3's "Decided 2026-10-24", including the mirrored
+  owner-connection checks and the API-level red proof moving to PR 4.
 
 ## Risks
 - **Everything measured waits on M2's close-out.** Its critical path is the human-written dataset,
@@ -781,7 +806,8 @@ elsewhere in this file are not covered by these decisions.
   killed run or a vector run made for M3 is invisible to the count unless it is committed or added
   by hand. Guards: commit before the next run (PR 9), PR 5's refusal, and the providers' own
   limits.
-- **Score scales.** An RRF score (about 0.016–0.033) against the 0.3 cosine gate would make every
+- **Score scales.** An RRF score (about 0.0125–0.033 at k = 60 and `candidate_k` 20; corrected
+  2026-10-24) against the 0.3 cosine gate would make every
   answer `dont_know`, and a max of scores would let a keyword-stuffed chunk through. Guards:
   `FusedHit` and the gate test.
 - **Isolation.** A full-text leg without its business clause passes the app-role canary, because

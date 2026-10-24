@@ -6,15 +6,25 @@ on the real catalog, and break real tables on purpose, in tests/canary/test_leak
 Kept outside tests/canary/ on purpose: scripts/canary_gate.py must not count these as the suite.
 """
 
+import ast
+import html
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from scripts.canary_gate import SuiteCounts, gate_problems, main, suite_counts
+from scripts.canary_gate import (
+    SuiteCounts,
+    gate_problems,
+    main,
+    pending_reason,
+    pending_stubs,
+    suite_counts,
+    summary,
+)
 from tests.canary.checks import (
     ForeignKey,
     KeyIndex,
@@ -34,6 +44,7 @@ from tests.canary.read_paths import (
     BAIT_WORD,
     NEEDED_OUTSIDE_READ_PATHS,
     NEEDS_HAND_WRITE,
+    OWNER_CONNECTION_PATHS,
     PENDING_HAND_WRITE,
     READ_PATHS,
     answer_through_the_api,
@@ -54,6 +65,7 @@ PRINTED: Final = "(business_id = NULLIF(current_setting('app.business_id'::text,
 """How Postgres prints ADR 0009's policy back (`pg_get_expr`): parenthesised, NULLIF upper-case."""
 
 SAFE_ROLE: Final = RoleFacts(False, False, False, False, 0)
+TESTS: Final = Path(__file__).parent
 REPO_ROOT: Final = Path(__file__).parents[3]
 CORPORA: Final = (REPO_ROOT / "data" / "sample", REPO_ROOT / "evals" / "datasets")
 """What gets ingested or asked: the sample corpus and the eval datasets."""
@@ -299,32 +311,193 @@ def test_seeing_nothing_at_all_is_not_a_pass(outputs: dict[str, str]) -> None:
 # ── Read paths: a [HAND-WRITE] stub is a strict xfail until written ──────────────────────────
 
 
+API_ROUTE: Final = re.compile(r"(GET|POST|PUT|PATCH|DELETE) /")
+"""How a read path that goes through the real app is named (`"GET /v1/kb/search"`)."""
+
+
+def runs(stub: str) -> set[str]:
+    """The read paths that run `stub`."""
+    return {name for name, stubs in NEEDS_HAND_WRITE.items() if stub in stubs}
+
+
 def test_every_stub_dependency_names_a_read_path_and_every_pending_stub_is_used() -> None:
     assert READ_PATHS.keys() >= NEEDS_HAND_WRITE.keys()
-    # A pending stub is run by a read path, or named as needed elsewhere (H2: PR 8's harness).
-    assert set(NEEDS_HAND_WRITE.values()) | NEEDED_OUTSIDE_READ_PATHS.keys() >= PENDING_HAND_WRITE
-    assert not NEEDED_OUTSIDE_READ_PATHS.keys() & set(NEEDS_HAND_WRITE.values())
-    # PR 6's routes run H1: they wait for the same switch as H1's own read path.
-    assert {name for name, stub in NEEDS_HAND_WRITE.items() if stub == "vector_search"} == {
-        "vector_search",
-        "GET /v1/kb/search",
-        "POST /v1/answer",
-    }
+    assert all(NEEDS_HAND_WRITE.values()), "a read path in NEEDS_HAND_WRITE names a stub"
+    run_by_read_paths = frozenset[str]().union(*NEEDS_HAND_WRITE.values())
+    # A pending stub is run by a read path, or named as needed elsewhere (H2: its own tests).
+    assert run_by_read_paths | NEEDED_OUTSIDE_READ_PATHS.keys() >= PENDING_HAND_WRITE
+    assert not NEEDED_OUTSIDE_READ_PATHS.keys() & run_by_read_paths
+    # PR 6's routes run M2 H1: they wait for the same switch as its own read path. M3 H1 has only
+    # its own path until PR 4 adds the hybrid ones (which also take rrf_fuse out of
+    # NEEDED_OUTSIDE_READ_PATHS).
+    assert runs("vector_search") == {"vector_search", "GET /v1/kb/search", "POST /v1/answer"}
+    assert runs("text_search") == {"text_search"}
 
 
-def test_only_read_paths_on_a_pending_stub_are_marked_and_each_as_a_strict_xfail() -> None:
-    marked: dict[str, list[dict[str, object]]] = {}
-    for param in read_path_params():
-        values, marks = param.values, param.marks  # type: ignore[attr-defined]
-        marked[values[0]] = [dict(mark.kwargs) for mark in marks if mark.name == "xfail"]
+def test_every_search_leg_also_runs_on_the_owners_connection() -> None:
+    # Every read path that is neither the whole-table SQL nor an API route runs a statement
+    # with its own business clause, so it also runs where RLS cannot help (PR 4: hybrid_search).
+    legs = {name for name in READ_PATHS if name != "sql" and not API_ROUTE.match(name)}
+    assert legs == OWNER_CONNECTION_PATHS.keys() == {"vector_search", "text_search"}
+    # The very read path the app role runs, not a copy that could drift from it.
+    assert all(OWNER_CONNECTION_PATHS[name] is READ_PATHS[name] for name in legs)
 
-    assert sorted(marked) == sorted(READ_PATHS)
-    for name, xfails in marked.items():
-        if NEEDS_HAND_WRITE.get(name) in PENDING_HAND_WRITE:
-            assert len(xfails) == 1, name
-            assert (xfails[0]["strict"], xfails[0]["raises"]) == (True, NotImplementedError)
-        else:
-            assert xfails == [], name
+
+def marking_problems(
+    params: Sequence[object], needs: Mapping[str, frozenset[str]], pending: frozenset[str]
+) -> list[str]:
+    """A read path whose stubs include a pending one carries exactly one mark, the strict xfail on
+    NotImplementedError with the gate's reason for those stubs; any other path carries none."""
+    problems: list[str] = []
+    for param in params:
+        values, marks = cast(Any, param).values, cast(Any, param).marks
+        name = values[0]
+        xfails = [(mark.args, dict(mark.kwargs)) for mark in marks if mark.name == "xfail"]
+        waiting = sorted(needs.get(name, frozenset()) & pending)
+        if not waiting:
+            if xfails:
+                problems.append(f"{name}: marked xfail, but runs no pending stub")
+            continue
+        expected = {
+            "strict": True,
+            "raises": NotImplementedError,
+            "reason": pending_reason(waiting),
+        }
+        if xfails != [((), expected)]:
+            problems.append(f"{name}: runs pending {', '.join(waiting)} without its strict xfail")
+    return problems
+
+
+@pytest.mark.parametrize("names", [READ_PATHS, OWNER_CONNECTION_PATHS], ids=["all", "owner"])
+def test_only_read_paths_on_a_pending_stub_are_marked_and_each_as_a_strict_xfail(
+    names: Mapping[str, object],
+) -> None:
+    params = read_path_params(names)
+
+    assert [cast(Any, param).values[0] for param in params] == sorted(names)
+    assert marking_problems(params, NEEDS_HAND_WRITE, PENDING_HAND_WRITE) == []
+
+
+STRICT_PENDING: Final = pytest.mark.xfail(
+    strict=True, raises=NotImplementedError, reason=pending_reason(["text_search"])
+)
+"""Built here by hand (outside tests/canary), so the red proofs below stay the same once H1 is
+written and `pending_hand_writes("text_search")` gives no mark any more."""
+
+
+@pytest.mark.parametrize(
+    ("param", "problem"),
+    [
+        (
+            pytest.param("text_search"),
+            "text_search: runs pending text_search without its strict xfail",
+        ),
+        (
+            pytest.param(
+                "text_search", marks=pytest.mark.xfail(reason=pending_reason(["text_search"]))
+            ),
+            "text_search: runs pending text_search without its strict xfail",
+        ),
+        (
+            pytest.param("text_search", marks=[STRICT_PENDING, STRICT_PENDING]),
+            "text_search: runs pending text_search without its strict xfail",
+        ),
+        (pytest.param("sql", marks=STRICT_PENDING), "sql: marked xfail, but runs no pending stub"),
+    ],
+    ids=["no mark", "not strict, any exception", "two marks", "a path on no pending stub"],
+)
+def test_red_proof_a_path_on_a_pending_stub_without_its_strict_xfail_fails(
+    param: object, problem: str
+) -> None:
+    needs = {"text_search": frozenset({"text_search"}), "sql": frozenset[str]()}
+    pending = frozenset({"text_search"})
+
+    assert (
+        marking_problems([pytest.param("text_search", marks=STRICT_PENDING)], needs, pending) == []
+    )
+    assert marking_problems([param], needs, pending) == [problem]
+
+
+# ── No xfail in tests/canary/ but the pending helper's ─────────────────────────────────────
+# pytest's JUnit report keeps an xfail's reason only, so the gate cannot tell the helper's mark
+# from a hand-made one with the same reason but no `raises` (it would turn a leak's AssertionError
+# into an "expected failure"), or from `pytest.xfail(<that reason>)` called inside a test. So no
+# `xfail` may be written in tests/canary/, or in the conftest that applies to it, except inside
+# `pending_hand_writes`. Not covered: an xfail built by obfuscation (`getattr` on a computed
+# name), or one added by a plugin outside these files; review catches those.
+
+HELPER: Final = ("read_paths.py", "pending_hand_writes")
+"""The one place allowed to make an xfail: (file name, function name)."""
+
+
+def xfail_sites(source: str, path: str) -> list[str]:
+    """Each place in `source` that names `xfail` (an attribute, a name, an import, a string),
+    outside `pending_hand_writes` in read_paths.py, as `path:line`."""
+    tree = ast.parse(source, path)
+    allowed: set[int] = set()
+    if Path(path).name == HELPER[0]:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name == HELPER[1]:
+                allowed |= {id(inner) for inner in ast.walk(node)}
+    sites: list[str] = []
+    for node in ast.walk(tree):
+        names_xfail = (
+            (isinstance(node, ast.Attribute) and node.attr == "xfail")
+            or (isinstance(node, ast.Name) and node.id == "xfail")
+            or (isinstance(node, ast.alias) and "xfail" in (node.name, node.asname))
+            or (isinstance(node, ast.Constant) and node.value == "xfail")
+        )
+        if names_xfail and id(node) not in allowed:
+            sites.append(f"{path}:{getattr(node, 'lineno', '?')}")
+    return sites
+
+
+def canary_sources() -> list[Path]:
+    return [*sorted((TESTS / "canary").rglob("*.py")), TESTS / "conftest.py"]
+
+
+def test_no_xfail_is_written_in_the_canary_suite_but_the_pending_helpers() -> None:
+    files = canary_sources()
+    assert len(files) > 3, "found no canary files: the check would pass by not looking"
+
+    found = [site for f in files for site in xfail_sites(f.read_text(encoding="utf-8"), str(f))]
+
+    assert found == []
+    # The positive control: the scan does see the helper's own xfail when it is not the helper.
+    helper = (TESTS / "canary" / "read_paths.py").read_text(encoding="utf-8")
+    assert len(xfail_sites(helper, "elsewhere.py")) == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        '@pytest.mark.xfail(reason="flaky in CI")\ndef test_x() -> None: ...',
+        f"pytestmark = pytest.mark.xfail(reason={pending_reason(['text_search'])!r})",
+        'def test_x() -> None:\n    pytest.xfail("flaky in CI")',
+        "from pytest import xfail",
+        "from _pytest.outcomes import xfail as expected",
+        'mark = getattr(pytest.mark, "xfail")',
+        'params = [pytest.param("sql", marks=pytest.mark.xfail)]',
+    ],
+    ids=[
+        "decorator",
+        "copied pending reason",
+        "imperative",
+        "import",
+        "aliased",
+        "getattr",
+        "param",
+    ],
+)
+def test_red_proof_an_xfail_outside_the_helper_is_found(source: str) -> None:
+    assert len(xfail_sites(source, "tests/canary/test_leakage.py")) == 1
+
+
+def test_red_proof_a_second_pending_helper_elsewhere_is_found() -> None:
+    source = "def pending_hand_writes() -> object:\n    return pytest.mark.xfail(strict=True)"
+
+    assert xfail_sites(source, "tests/canary/read_paths.py") == []
+    assert len(xfail_sites(source, "tests/canary/test_leakage.py")) == 1
 
 
 ApiReadPath = Callable[[AsyncEngine, Planted], Awaitable[Mapping[str, str]]]
@@ -420,6 +593,13 @@ def test_the_bait_word_is_rare_and_part_of_the_bait() -> None:
     assert [p for p in files if word in p.read_bytes().lower()] == []
 
 
+def test_every_api_read_path_has_the_leaking_search_red_proof() -> None:
+    # PR 4's hybrid routes join API_READ_PATHS, so the red proof above runs on them too (with a
+    # leaking full-text leg added there: no route runs `text_search` before PR 4).
+    routes = {READ_PATHS[name] for name in READ_PATHS if API_ROUTE.match(name)}
+    assert routes == set(API_READ_PATHS)
+
+
 def test_a_written_stub_has_no_marks_and_a_pending_one_exactly_one() -> None:
     assert pending_hand_write("a-stub-that-was-written") == []
     for stub in PENDING_HAND_WRITE:
@@ -456,14 +636,22 @@ def case(module: str, name: str, child: str = "") -> str:
     return f'<testcase classname="{module}" name="{name}">{child}</testcase>'
 
 
+def xfail(reason: str | None, name: str = "test_gap", module: str = "tests.canary.x") -> str:
+    """An xfailed test case as pytest writes it (`message` is the xfail's reason)."""
+    message = "" if reason is None else f' message="{html.escape(reason, quote=True)}"'
+    return case(module, name, f'<skipped type="pytest.xfail"{message}/>')
+
+
+READ_PATH_TEST: Final = "test_no_read_path_shows_another_businesss_canary[as a-sql]"
 PASSED: Final = case("tests.canary.test_leakage", "test_ok")
-XFAIL: Final = case("tests.canary.test_leakage", "test_gap", '<skipped type="pytest.xfail"/>')
+PENDING: Final = xfail(pending_reason(["text_search"]))
+FLAKY: Final = xfail("flaky in CI", READ_PATH_TEST, "tests.canary.test_leakage")
 SKIP: Final = case("tests.canary.test_leakage", "test_skip", '<skipped type="pytest.skip"/>')
 UNIT: Final = case("tests.test_canary_checks", "test_unit")
 
 
 def test_the_gate_passes_when_a_canary_test_passed() -> None:
-    assert gate_problems(suite_counts(junit(PASSED, XFAIL, UNIT))) == []
+    assert gate_problems(suite_counts(junit(PASSED, PENDING, UNIT))) == []
 
 
 @pytest.mark.parametrize(
@@ -471,11 +659,11 @@ def test_the_gate_passes_when_a_canary_test_passed() -> None:
     [
         junit(),
         junit(UNIT),
-        junit(XFAIL),
+        junit(PENDING),
         junit(PASSED, SKIP),
         junit(case("tests.canary.test_leakage", "test_bad", "<failure/>")),
     ],
-    ids=["empty", "only unit tests", "only xfail", "a skip", "only a failure"],
+    ids=["empty", "only unit tests", "only a pending xfail", "a skip", "only a failure"],
 )
 def test_the_gate_fails_closed(report: str) -> None:
     assert gate_problems(suite_counts(report)) != []
@@ -485,13 +673,94 @@ def test_skips_are_named() -> None:
     assert suite_counts(junit(SKIP)) == SuiteCounts(0, ["tests.canary.test_leakage::test_skip"])
 
 
+def test_red_proof_a_flaky_xfail_on_the_read_path_test_fails_the_gate() -> None:
+    # `@pytest.mark.xfail(reason="flaky in CI")` on the read-path test: a leak in the sql path
+    # then reports as xfailed, and the test step stays green.
+    problems = gate_problems(suite_counts(junit(PASSED, PENDING, FLAKY)))
+
+    assert problems == [
+        "xfail that is not a pending [HAND-WRITE] mark: tests.canary.test_leakage::"
+        f"{READ_PATH_TEST} (reason: 'flaky in CI')"
+    ]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        None,
+        "",
+        "flaky in CI",
+        "[HAND-WRITE] text_search not written yet (M3 H1, tests/canary/read_paths.py)",
+        pending_reason(["text_search"]) + " (and flaky)",
+        " " + pending_reason(["text_search"]),
+        pending_reason(["text_search"]).replace("text_search", ""),
+        pending_reason(["text_search"]).replace("text_search", "Text_Search"),
+        pending_reason(["text_search"]).replace("text_search", "text_search,rrf_fuse"),
+    ],
+    ids=[
+        "no reason",
+        "empty",
+        "flaky",
+        "the scaffold's own mark (a near miss)",
+        "extra text",
+        "leading space",
+        "no stub",
+        "not a function name",
+        "no space after the comma",
+    ],
+)
+def test_the_gate_refuses_every_xfail_reason_but_the_pending_helpers(reason: str | None) -> None:
+    counts = suite_counts(junit(PASSED, xfail(reason)))
+
+    assert counts.xfailed == 0
+    assert len(gate_problems(counts)) == 1
+
+
+def test_an_xfail_outside_the_suite_is_not_the_gates_business() -> None:
+    report = junit(PASSED, xfail("flaky in CI", module="tests.test_canary_checks"))
+
+    assert gate_problems(suite_counts(report)) == []
+
+
+def test_the_helpers_reasons_are_the_ones_the_gate_accepts() -> None:
+    for stub in PENDING_HAND_WRITE:
+        [mark] = pending_hand_write(stub)
+        assert pending_stubs(mark.kwargs["reason"]) == (stub,)
+    if PENDING_HAND_WRITE:
+        [mark] = pending_hand_writes(*sorted(PENDING_HAND_WRITE))
+        assert pending_stubs(mark.kwargs["reason"]) == tuple(sorted(PENDING_HAND_WRITE))
+    assert pending_stubs(pending_reason(["text_search", "rrf_fuse"])) == ("text_search", "rrf_fuse")
+
+
+@pytest.mark.parametrize("stubs", [[], ["text search"], ["TextSearch"], ["x, y"]])
+def test_a_pending_reason_names_one_or_more_function_names(stubs: list[str]) -> None:
+    with pytest.raises(ValueError, match="function names"):
+        pending_reason(stubs)
+
+
+def test_the_gate_says_which_stubs_are_pending() -> None:
+    counts = suite_counts(
+        junit(PASSED, PENDING, xfail(pending_reason(["rrf_fuse", "text_search"])))
+    )
+
+    assert summary(counts) == (
+        "canary gate: 1 canary tests passed; 2 xfailed on pending [HAND-WRITE] stubs"
+        " (rrf_fuse, text_search)"
+    )
+    assert summary(suite_counts(junit(PASSED))) == "canary gate: 1 canary tests passed"
+
+
 def test_the_gate_script_exit_codes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    good, bad = tmp_path / "good.xml", tmp_path / "bad.xml"
+    good, bad, flaky = tmp_path / "good.xml", tmp_path / "bad.xml", tmp_path / "flaky.xml"
     good.write_text(junit(PASSED), encoding="utf-8")
     bad.write_text("not xml", encoding="utf-8")
+    flaky.write_text(junit(PASSED, FLAKY), encoding="utf-8")
 
     assert main(["gate", str(good)]) == 0
+    assert "1 canary tests passed" in capsys.readouterr().out
     assert main(["gate", str(bad)]) == 1
     assert main(["gate", str(tmp_path / "missing.xml")]) == 1
     assert main(["gate"]) == 1
-    assert "1 canary tests passed" in capsys.readouterr().out
+    capsys.readouterr()
+    assert main(["gate", str(flaky)]) == 1
+    assert "xfail that is not a pending [HAND-WRITE] mark" in capsys.readouterr().err

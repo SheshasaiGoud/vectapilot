@@ -9,18 +9,16 @@ only about the statement's shape and bindings. A recording stand-in for the conn
 every call: `execute` returns an empty result, so the function runs to its end and must return
 `[]`; any other method stops it (`Stopped`) once recorded, and the assert on the calls names it.
 No rows are checked here, and nothing here sends the SQL to Postgres, so a statement Postgres
-rejects can still pass; `test_vector_search.py` checks both on real Postgres (CI).
+rejects can still pass; `test_vector_search.py` checks both on real Postgres (CI). The stand-in is
+in tests/retrieval/recording.py (moved there unchanged in M3 PR 3, shared with `text_search`).
 """
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import Any, Final, NoReturn, cast
+from typing import Final, cast
 
 import pytest
-from sqlalchemy.engine.result import IteratorResult, SimpleResultMetaData
 from sqlalchemy.ext.asyncio import AsyncConnection
-from sqlalchemy.sql.elements import ClauseElement
 
+from tests.retrieval.recording import RecordingConnection, Stopped, statement_and_values
 from tests.retrieval.vectors import vector
 from vectapilot_api.kb.store import vector_literal
 from vectapilot_api.retrieval.types import Reader, SearchHit, VectorQuery
@@ -34,58 +32,6 @@ BUSINESS: Final = "binding-check-clinic"
 MODEL: Final = "binding-check-model"
 K: Final = 7
 EMBEDDING: Final = vector(0.6, 0.8)  # 0.36 + 0.64 = 1; "0.6" and "0.8" appear in no SQL keyword
-
-
-class Stopped(Exception):
-    """Raised by the stand-in for any method but `execute`, right after it recorded the call."""
-
-
-@dataclass(frozen=True)
-class Call:
-    method: str
-    args: tuple[object, ...]
-    kwargs: dict[str, object]
-
-
-class RecordingConnection:
-    """Stands in for `AsyncConnection`. Every awaited method is recorded: `execute` then returns an
-    empty result (no rows; `.mappings()`, `.all()`, `.scalars()` and iteration all work), any other
-    method raises `Stopped`."""
-
-    def __init__(self) -> None:
-        self.calls: list[Call] = []
-
-    async def execute(self, *args: object, **kwargs: object) -> IteratorResult[Any]:
-        self.calls.append(Call("execute", args, kwargs))
-        return IteratorResult(SimpleResultMetaData(list(SearchHit.model_fields)), iter(()))
-
-    def __getattr__(self, name: str) -> Callable[..., Awaitable[NoReturn]]:
-        if name.startswith("__"):
-            raise AttributeError(name)
-
-        async def record(*args: object, **kwargs: object) -> NoReturn:
-            self.calls.append(Call(name, args, kwargs))
-            raise Stopped
-
-        return record
-
-
-def statement_and_values(call: Call) -> tuple[str, list[object]]:
-    """The SQL text of an `execute` call, and every value bound to it (parameters dict, plus any
-    `.bindparams(...)` values carried by the statement itself)."""
-    statement = call.args[0] if call.args else call.kwargs.get("statement")
-    assert isinstance(statement, ClauseElement), "pass a text() statement to connection.execute"
-    parameters = call.args[1] if len(call.args) > 1 else call.kwargs.get("parameters", {})
-    assert isinstance(parameters, dict), "bind the values as one dict of parameters"
-    binds = statement.compile().params
-    unbound = sorted(set(parameters) - set(binds))
-    assert not unbound, (
-        f"{unbound} are in the parameters dict but are no parameter of the statement: in text(),"
-        " ':name::vector' is not read as a parameter; write CAST(:name AS vector)"
-    )
-    values: list[object] = list(parameters.values())
-    values.extend(v for v in binds.values() if v is not None)
-    return str(statement), values
 
 
 @pytest.mark.parametrize("reader", ["customer", "staff"])

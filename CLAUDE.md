@@ -178,10 +178,11 @@ Planned: `packages/mcp_server/`, `scripts/`.
   and Anthropic accounts and keys; the live runs (dev, then test once: `docs/learning/m2-eval-run.md`);
   labels; the note (skeleton: `docs/notes/m2-what-i-measured.md`); H1/H2 explain-backs; quiz.
 - **M3 (RAG v2: hybrid search, abstention) — planned and decided 2026-10-23**
-  (`docs/plans/m3-pr-checks.md`, ADR 0014); PR 0 (#38) and PR 1 guards (#39) merged; PR 2
-  full-text column (migration 0005) in review.
-  - Can start now: PR 1 guards, PR 2 full-text column, PR 6 `compare`, PR 7 faithfulness labels.
-  - shesha writes H2 `rrf_fuse`; who writes H1 `text_search` is open.
+  (`docs/plans/m3-pr-checks.md`, ADR 0014); merged: PR 0 (#38), PR 1 guards (#39), PR 2
+  full-text column (#40) and its `audience_conflict` follow-up (#41). PR 3 hybrid scaffold
+  (stubs, strict xfails, stricter canary gate) in review.
+  - Can start now: PR 6 `compare`, PR 7 faithfulness labels.
+  - shesha writes H1 `text_search` and H2 `rrf_fuse` (D5, decided 2026-10-24).
   - No reranking and no LLM judge in M3.
   - Live spend: $5.00 for all of M3's paid runs, each still ≤ $1.00.
   - **Measurement window** (D3): from M2's first live dev run to M3's last live answer run, nothing

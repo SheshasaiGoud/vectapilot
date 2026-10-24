@@ -7,7 +7,13 @@ from a list here, so a new table is checked the day it is created: until `plant`
 positive control in the reads below fails for it ("shows nothing of ..."). Every check also
 proves itself on purpose: the `test_red_proof_*` tests break one protection inside a rolled-back
 transaction (Postgres DDL is transactional) and assert the same check turns red. CI fails when
-none of this ran (scripts/canary_gate.py).
+none of this ran, or when any of it is an xfail other than a pending [HAND-WRITE] stub's
+(scripts/canary_gate.py).
+
+RLS alone would hide a statement that forgot its own `business_id` clause, so the search legs and
+the retire on approve also run on the owner's connection, where RLS never applies (M3 PR 3, "The
+business clause itself" below); the search legs with `MAX_K` hits and with one, so a clause applied
+only after the `LIMIT` shows too.
 
 As tests/test_rls.py: the owner (VECTAPILOT_MIGRATION_DATABASE_URL) is the bootstrap superuser
 locally and in CI; it seeds the registry and breaks things on purpose. Everything checked for
@@ -16,9 +22,9 @@ leaks runs as the app role.
 
 import secrets
 from collections.abc import AsyncIterator, Callable, Iterator
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, cast
 
 import pytest
 from fastapi.testclient import TestClient
@@ -40,21 +46,28 @@ from tests.canary.checks import Planted
 from tests.canary.read_paths import (
     BAIT,
     BAIT_WORD,
+    OWNER_CONNECTION_PATHS,
     READ_PATHS,
     read_path_params,
     sql_on_every_business_table,
 )
 from tests.canary.write_paths import WRITE_PATHS
 from tests.conftest import integration
+from tests.retrieval.standins import hit
 from vectapilot_api import db
 from vectapilot_api.config import MigrationSettings, Settings
-from vectapilot_api.db import APP_ROLE, business_transaction, create_api_engine
+from vectapilot_api.db import APP_ROLE, Database, business_transaction, create_api_engine
 from vectapilot_api.embeddings.base import EmbeddingSpec
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.fake import fake_vector
 from vectapilot_api.ingestion.language_map import text_search_config
-from vectapilot_api.kb.store import ONE_APPROVED_INDEX, vector_literal
+from vectapilot_api.ingestion.types import SourceType
+from vectapilot_api.kb import store as kb_store
+from vectapilot_api.kb.store import ONE_APPROVED_INDEX, PostgresKbStore, vector_literal
+from vectapilot_api.kb.types import ContentKind, NewChunk, NewDocument
 from vectapilot_api.main import create_app
+from vectapilot_api.retrieval import vector as retrieval_vector
+from vectapilot_api.retrieval.types import MAX_K, SearchHit, TextQuery, VectorQuery
 
 pytestmark = [integration, pytest.mark.anyio]
 
@@ -375,7 +388,7 @@ async def test_no_read_path_shows_another_businesss_canary(
 
 
 # ── The bait's full-text word (M3 PR 2, zara's S2) ────────────────────────────────────────────
-# Until PR 3 wires H1's `text_search` in as a read path: the planted rows give a full-text leg
+# The premise of the `text_search` read path (M3 PR 3): the planted rows give a full-text leg
 # something to leak. ts_config is never selected raw (asyncpg's regconfig codec is not relied on).
 
 BAIT_MATCHES: Final = text(
@@ -408,6 +421,228 @@ async def test_without_a_business_clause_the_bait_word_matches_both_baits(
     assert mine == {a.canary}
     assert config == text_search_config(PLANT_LANGUAGE)
     assert {a.canary, b.canary} <= unclaused
+
+
+# ── The business clause itself: the owner's connection, where RLS cannot help (M3 PR 3) ────────
+# The owner is the bootstrap superuser locally and in CI (ADR 0009, "Limit"): RLS never applies to
+# it, FORCE or not. A statement that forgot `business_id = :business_id` passes every app-role
+# check above, because RLS hides the other business anyway. Here the same code runs as the owner,
+# so only the statement's own clause keeps the other business out. These put the clause under the
+# canary gate. M2's own clause tests stay where they were, in tests/retrieval/
+# test_vector_search.py, test_text_search.py and tests/kb/test_postgres_store.py: mirrored, not
+# moved (decided by shesha, 2026-10-24).
+# The search legs run with `MAX_K` hits and with one: with one, a leg that applies its business
+# filter only after its LIMIT gets the other business's tied chunk or nothing, and the positive
+# control turns red (OWNER_CONNECTION_PATHS; the red proof below).
+
+
+@pytest.mark.parametrize("k", [MAX_K, 1], ids=["k=max_k", "k=1"])
+@pytest.mark.parametrize("path", read_path_params(OWNER_CONNECTION_PATHS))  # pending: strict xfail
+@pytest.mark.parametrize("me", [0, 1], ids=["as a", "as b"])
+async def test_no_search_leg_shows_another_businesss_canary_where_rls_cannot_help(
+    owner_engine: AsyncEngine, planted: tuple[Planted, Planted], me: int, path: str, k: int
+) -> None:
+    mine, other = planted[me], planted[1 - me]
+    async with owner_engine.connect() as connection:
+        assert await owner_is_superuser(connection), "needs an owner that skips RLS"
+
+    outputs = await OWNER_CONNECTION_PATHS[path](owner_engine, mine, k=k)
+
+    assert checks.canary_leaks(outputs, mine, other) == []
+
+
+async def a_full_text_leg_without_its_business_clause(
+    connection: AsyncConnection, query: TextQuery
+) -> list[SearchHit]:
+    """A broken stand-in for `text_search`, deliberately not H1: it ignores the question and the
+    query, and returns every chunk holding `BAIT_WORD` that the connection can see (any business,
+    any model, unranked), as a hit titled with the chunk's document title."""
+    titles = (await connection.execute(BAIT_MATCHES, {"word": BAIT_WORD})).scalars()
+    return [hit(BAIT, 1.0, source_id="bait", title=title) for title in titles]
+
+
+async def test_red_proof_a_full_text_leg_without_its_business_clause_is_caught_as_the_owner(
+    owner_engine: AsyncEngine,
+    fresh_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    a, b = planted
+    monkeypatch.setattr(
+        "tests.canary.read_paths.text_search", a_full_text_leg_without_its_business_clause
+    )
+
+    under_rls = checks.canary_leaks(await READ_PATHS["text_search"](fresh_engine, a), a, b)
+    as_owner = checks.canary_leaks(await READ_PATHS["text_search"](owner_engine, a), a, b)
+
+    # The app role: RLS hides b's bait, so the read path alone would let this leg through...
+    assert under_rls == []
+    # ...and the owner-connection check, running the same path, shows b's canary.
+    assert any(b.canary in problem for problem in as_owner), as_owner
+
+
+VECTOR_CLAUSE: Final = "c.business_id = :business_id\n      AND "
+"""`vector_search`'s business clause, as `retrieval.vector._SEARCH` writes it (the red proof below
+removes it, and fails loudly if it is not there)."""
+
+
+async def test_red_proof_a_vector_leg_without_its_business_clause_is_caught_as_the_owner(
+    owner_engine: AsyncEngine,
+    fresh_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    a, b = planted
+    statement = str(retrieval_vector._SEARCH)
+    assert VECTOR_CLAUSE in statement, "vector_search's business clause changed: update this proof"
+    # M2 H1's own statement without its clause, for this test only (vector.py is unchanged): a
+    # vector leg that relies on RLS alone.
+    monkeypatch.setattr(retrieval_vector, "_SEARCH", text(statement.replace(VECTOR_CLAUSE, "")))
+
+    under_rls = checks.canary_leaks(await READ_PATHS["vector_search"](fresh_engine, a), a, b)
+    as_owner = checks.canary_leaks(await READ_PATHS["vector_search"](owner_engine, a), a, b)
+
+    # The app role: RLS hides b's rows, so the read path alone would let this leg through...
+    assert under_rls == []
+    # ...and the owner-connection check, running the same path, shows b's canary.
+    assert any(b.canary in problem for problem in as_owner), as_owner
+
+
+OWN_DOCUMENTS: Final = text("SELECT id FROM documents WHERE business_id = :b")
+
+
+async def a_vector_leg_that_filters_its_business_after_the_limit(
+    connection: AsyncConnection, query: VectorQuery
+) -> list[SearchHit]:
+    """A broken stand-in for `vector_search`: M2 H1's own statement, with its business clause
+    removed by the test, takes the `k` best chunks of every business, and only then are the other
+    business's hits dropped. A `LIMIT` in a subquery before the business filter does the same."""
+    hits = await retrieval_vector.vector_search(connection, query)
+    own = set((await connection.execute(OWN_DOCUMENTS, {"b": query.business_id})).scalars())
+    return [hit for hit in hits if hit.document_id in own]
+
+
+async def test_red_proof_a_business_filter_after_the_limit_is_caught_as_the_owner_at_k_1(
+    owner_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    a, b = planted
+    statement = str(retrieval_vector._SEARCH)
+    assert VECTOR_CLAUSE in statement, "vector_search's business clause changed: update this proof"
+    monkeypatch.setattr(retrieval_vector, "_SEARCH", text(statement.replace(VECTOR_CLAUSE, "")))
+    monkeypatch.setattr(
+        "tests.canary.read_paths.vector_search",
+        a_vector_leg_that_filters_its_business_after_the_limit,
+    )
+    leg = OWNER_CONNECTION_PATHS["vector_search"]
+
+    async def problems(k: int) -> list[str]:
+        """The owner-connection check's problems at `k`, acting as a and then as b."""
+        return [
+            *checks.canary_leaks(await leg(owner_engine, a, k=k), a, b),
+            *checks.canary_leaks(await leg(owner_engine, b, k=k), b, a),
+        ]
+
+    # With MAX_K hits, both businesses' chunks fit before the filter, and the result looks right...
+    assert await problems(MAX_K) == []
+    # ...with one, a's and b's canary chunks (the same vector, source id, version and index) tie
+    # for the only place, and so do their baits. Whichever business's chunk sorts second gets
+    # nothing back for that model, so the positive control turns red, as a or as b.
+    at_1 = await problems(1)
+    assert any("shows nothing of" in problem for problem in at_1), at_1
+
+
+class OwnerDatabase:
+    """`Database.business_transaction` on the owner's engine, without the app's role check (as in
+    tests/kb/test_postgres_store.py): a superuser skips RLS, so only the store's own
+    `WHERE business_id = ...` keeps the other business out."""
+
+    def __init__(self, engine: AsyncEngine) -> None:
+        self.engine = engine
+
+    def business_transaction(
+        self, business_id: str
+    ) -> AbstractAsyncContextManager[AsyncConnection]:
+        return business_transaction(self.engine, business_id)
+
+
+RETIRE_CLAUSE: Final = "business_id = :business_id AND "
+"""The retire's business clause, as `kb.store._RETIRE_APPROVED` writes it (the red proof below
+removes it, and fails loudly if it is not there)."""
+RETIRE_OWN_CANARY: Final = text(
+    "UPDATE documents SET status = 'retired'"
+    " WHERE business_id = :b AND source_id = 'canary' AND status = 'approved'"
+)
+
+
+async def approve_version_2_as_the_owner(owner: AsyncEngine, me: Planted) -> str | None:
+    """Approve version 2 of `me`'s planted source `canary` through `PostgresKbStore` on the
+    owner's connection (ADR 0010: it retires the approved version in the same transaction);
+    the version it reports retired."""
+    spec = configured_embedding()
+    document = NewDocument(
+        source_id="canary",
+        version="2",
+        title=me.canary,
+        source_type=SourceType.MARKDOWN,
+        content_kind=ContentKind.FAQ,
+        language=PLANT_LANGUAGE,
+        status="approved",
+        audience="public",
+        content_sha256="e" * 64,
+        review_by=None,
+        metadata={},
+    )
+    chunk = NewChunk(
+        chunk_index=0,
+        content=me.canary,
+        page=None,
+        metadata={},
+        embedding=fake_vector(me.canary, spec.dimension),
+    )
+    store = PostgresKbStore(cast(Database, OwnerDatabase(owner)))
+    stored = await store.save_document(
+        me.business_id, document, [chunk], model=spec.model, dimension=spec.dimension
+    )
+    return stored.retired_version
+
+
+async def test_approving_retires_only_the_businesss_own_version_where_rls_cannot_help(
+    owner_engine: AsyncEngine, fresh_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    a, b = planted  # both have source `canary` version 1, approved
+    async with owner_engine.connect() as connection:
+        assert await owner_is_superuser(connection), "needs an owner that skips RLS"
+    b_before = await sql_on_every_business_table(fresh_engine, b)
+
+    retired = await approve_version_2_as_the_owner(owner_engine, a)
+
+    assert retired == "1"  # the positive control: a's own version 1 was retired
+    assert await sql_on_every_business_table(fresh_engine, b) == b_before
+
+
+async def test_red_proof_a_retire_without_its_business_clause_is_caught(
+    owner_engine: AsyncEngine,
+    fresh_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    a, b = planted
+    statement = str(kb_store._RETIRE_APPROVED)
+    assert RETIRE_CLAUSE in statement, "the retire's business clause changed: update this proof"
+    monkeypatch.setattr(kb_store, "_RETIRE_APPROVED", text(statement.replace(RETIRE_CLAUSE, "")))
+    # a retires its own version 1 first, so b's is the only approved `canary` left: the retire
+    # without its clause then reaches b's alone, and the save succeeds. (With a's still approved
+    # it would return two rows, the store would raise, and the rollback would hide the leak.)
+    async with business_transaction(owner_engine, a.business_id) as connection:
+        await connection.execute(RETIRE_OWN_CANARY, {"b": a.business_id})
+    b_before = await sql_on_every_business_table(fresh_engine, b)
+
+    retired = await approve_version_2_as_the_owner(owner_engine, a)
+
+    assert retired == "1"  # reported as a's retire, but it was b's version 1
+    assert await sql_on_every_business_table(fresh_engine, b) != b_before
 
 
 # ── Writes through the API: never another business's rows, never without a business ────────
