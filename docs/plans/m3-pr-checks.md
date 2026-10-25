@@ -8,8 +8,8 @@
 > 2026-10-24: shesha writes H1 too ("Decided 2026-10-24"). No question is open (D16 is looked at
 > again after M2's dev run, as decided). PR 0 (this file,
 > [ADR 0014](../adr/0014-hybrid-retrieval.md) and the amendments) is merged (#38), PR 1 (guards)
-> (#39), PR 2 (full-text column) (#40) and its audience follow-up (#41) too; PR 3 (hybrid
-> scaffold) is in review.
+> (#39), PR 2 (full-text column) (#40) and its audience follow-up (#41) too, and PR 3 (hybrid
+> scaffold) (#42); PR 4 (hybrid search) is in review.
 > M2 is **not closed**: `support_qa` v0.1 has no questions yet (`manifest.json` says
 > `stage: collecting`, `questions.jsonl` has 0 lines), and there is no live run and no baseline
 > ([`m2-close-out.md`](m2-close-out.md)). M3 can be built now. Anything that compares against M2's
@@ -517,12 +517,90 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
   never puts the retired and the new version of one source into one fused list.
 - Local tests use stand-ins for H1 and H2 (on the team side, as in M2). The real paths sit behind
   `PENDING_HAND_WRITE`.
+- **Built (2026-10-25, ananya).** In review; nothing merged. No migration, no new dependency, no
+  change to `text_search`, `rrf_fuse` or any M1/M2 hand-written body.
+  - Settings `rag_retrieval_mode`, `rag_candidate_k` (10 to `MAX_K`, and at least
+    `rag_context_k`, checked at startup in both modes) and `rag_rrf_k` (at least 1).
+  - `db.business_transaction(..., snapshot=True)`: `SET TRANSACTION ISOLATION LEVEL REPEATABLE
+    READ READ ONLY` first, then `set_config`. `retrieval/search.py`: `RetrievalConfig`,
+    `SearchStats`, `fused_search` (both legs, then the fusion, vector list first) and the hybrid
+    path of `SearchService`. The vector branch is M2's code byte for byte.
+  - The answer: legs at `max(context_k, candidate_k)`, `AnswerRun.hits` the whole fused list, the
+    top `context_k` fused hits then the cosine gate, confidence over those, FTS-only hits and
+    FTS-only evidence counted. `rag_answer` gains one optional `retrieval` block (hybrid only,
+    with `candidate_k`, `context_k` and `rrf_k`); vector records keep M2's keys; `record_version`
+    1.
+  - `Question` refuses U+0000 (a 422 on both routes in both modes, echoing nothing).
+  - The eval harness refuses a `rag_retrieval_mode` other than `vector` (decision 6 below).
+  - Canary: `hybrid_search` (also on the owner's connection, at `MAX_K` and 1) and both routes in
+    hybrid mode, each on {`vector_search`, `text_search`, `rrf_fuse`}; `rrf_fuse` left
+    `NEEDED_OUTSIDE_READ_PATHS`. The API red proof runs every route with each leg it runs
+    leaking in turn (vector routes: the vector leg; hybrid routes: either leg, the other clean).
+  - Tests: `tests/retrieval/test_hybrid_search.py` and `tests/answer/test_hybrid_answer.py` (no
+    database; team-side stand-ins `StandInTextSearch` and `StandInFuse`, which are not full-text
+    search or RRF), `tests/retrieval/test_hybrid_snapshot.py` (Postgres: the first statement, a
+    commit between statements, writes refused, the approval between the legs; each with READ
+    COMMITTED as its red proof; and both hybrid routes over the real legs, a strict xfail until
+    H1 and H2).
+  - Measured on the local stack (counts, not results): the M2 test files are unchanged and pass;
+    targeted Postgres run (`tests/retrieval`, `tests/answer`, `tests/canary`, `tests/evalrun`)
+    691 passed, 91 xfailed (after shesha's decisions of 2026-10-25; 682 before them); `make
+    check` 2689 passed, 206 skipped, 42 xfailed, coverage gate passed; canary gate "54 canary
+    tests passed; 16 xfailed on pending [HAND-WRITE] stubs (rrf_fuse, text_search)". Mutations
+    checked by hand, each turning its tests red: a gate on the RRF score, the whole fused list
+    sent on, `transaction_ms` read before the commit, a record `hits` cut at `context_k`, a
+    `top_score` over the whole fused list, hybrid without the
+    snapshot, `SET TRANSACTION` dropped. The nine that survived the first round now fail too
+    (2026-10-25, each applied alone to the working file, then restored byte for byte, checked by
+    sha256): each leg cut to `k` before the fusion (M09c); FTS-only hits counted over the legs,
+    not the fused list (M12f); a wall clock as `SearchService`'s or `fused_search`'s default
+    (M14a, M14b); RRF's k taken from the constant, in the fusion call or in the record (X07);
+    the record's `candidate_k` taken from the setting when `k` is larger (X12); evidence
+    re-sorted by cosine (X10); the canary `hybrid_search` path at READ COMMITTED (M17g); the
+    harness running under a hybrid setting (X09: now refused, decision 6, in the CLI and in
+    `check_run`). Also the block's `context_k` taken from `candidate_k`. With scratch reference versions of H1 and H2 (in the
+    session's scratch directory only, deleted afterwards) and the pending set emptied, the
+    hybrid canary paths, H1's and H2's tests and the real-legs test passed (gate: 70 canary
+    tests passed); the one failure was H2's hash-seed test, whose fresh interpreters load the
+    stub.
+- **[decided 2026-10-25] (shesha)** Every recommendation of PR 4's review accepted (ADR 0014,
+  "Built 2026-10-25"; decision 8, for PR 5, is in PR 5's section):
+  1. **The record:** one optional nested `retrieval` block on `rag_answer`, hybrid only (a
+     vector-mode record has exactly M2's keys), `record_version` 1. The block also carries
+     `context_k` (`rag_context_k`): additive, so still version 1.
+  2. **Evidence:** the top `context_k` fused hits, then the cosine gate (D7), in fused order.
+  3. **Confidence v0:** the best cosine among those top `context_k` fused hits.
+  4. **`GET /v1/kb/search`:** each leg fetches `max(k, candidate_k)`; the fused list is cut at `k`.
+  5. **`rag_candidate_k >= rag_context_k`** is checked at startup in both modes. Side effect in
+     vector mode, which never reads `rag_candidate_k`: a `rag_context_k` above `rag_candidate_k`
+     (default 20) now stops startup there too, as does a `rag_candidate_k` outside 10 to `MAX_K`.
+     Raising `rag_context_k` past 20 therefore means raising `rag_candidate_k` with it.
+  6. **The eval harness refuses** a `rag_retrieval_mode` other than `vector` until PR 5 adds
+     `--retrieval-mode`: `cli._check_settings` (dry and live runs, and `ingest`), and again
+     `harness.check_run` (any caller), with one fixed message, `harness.VECTOR_MODE_ONLY`, that
+     names the setting, never its value. Tests:
+     `test_a_hybrid_retrieval_mode_is_refused_until_pr5_adds_retrieval_mode` (CLI: dry, live,
+     ingest) and `test_execute_refuses_a_hybrid_retrieval_mode_for_any_caller` (harness), each
+     also showing that the same Settings in vector mode get through.
+  7. **No upper bound on `rag_rrf_k`** (at least 1).
 
 ## PR 5 — `m3/eval-hybrid` (noah; ananya and zara review) · M
 - **`run.json`:**
   - `ConfigInfo` gains an optional `retrieval` block (mode, candidate k, RRF k, language-map
     version), omitted for vector mode.
-  - The harness takes `--retrieval-mode`, like `--min-score`.
+    - "Omitted" means a None block is left out of the fingerprint payload (as
+      `RagAnswerRecord`'s wrap serializer does for its `retrieval` block), not dumped as
+      `"retrieval": null`; the vector fingerprint pin below proves it (review of PR 4, noah N3).
+    - `--search-k` skips Settings' rule `rag_candidate_k >= rag_context_k`, so in hybrid mode
+      either refuse a `--search-k` above `rag_candidate_k`, or record the effective candidate k
+      (`max(rag_candidate_k, search_k)`) in the block, as `RetrievalRecord.candidate_k` already
+      does (noah N3).
+    - **[decided 2026-10-25] (shesha)** The language-map version is the sha256 of the canonical
+      `TEXT_SEARCH_CONFIGS` plus `FALLBACK_CONFIG` (`ingestion/language_map.py`), not a
+      hand-bumped constant. PR 5 builds it and fixes the canonical form; no code in PR 4.
+  - The harness takes `--retrieval-mode`, like `--min-score`. It replaces PR 4's refusal of a
+    hybrid `rag_retrieval_mode` (`harness.VECTOR_MODE_ONLY`, PR 4's decision 6; ADR 0014, "Not
+    built here"): PR 5 removes the refusal and its two tests together.
 - **Fingerprint pin (D3's tripwire).** A test computes the fingerprint of a fixed vector config. It
   reads `catalog_version` from `gateway/models.toml` and `PROMPT_VERSION` from
   `answer/prompt.py`, never from literals, and compares the result with a pinned literal. A
@@ -535,6 +613,18 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
     answer step: a leak that fusion drops is still a leak.
   - Tests: a stand-in full-text leg that returns another business's hit aborts with
     `CROSS-BUSINESS LEAK`, exit 4; a staff-only hit aborts with `AUDIENCE LEAK`.
+  - **Scoring in hybrid mode** (review of PR 4, noah N2). Today `_score` scores `call.hits`, the
+    recorder's vector list, and refuses a run whose `call.k` is not `search_k` or whose
+    `run.hits` differ from `call.hits`: in hybrid mode both checks would raise on every question.
+    In hybrid mode `_score` scores `run.hits` (the fused list) with H2, builds `hit_refs` and the
+    evidence zip from it, and keeps `call.hits` as the vector component list. The checks become
+    `call.k == max(candidate_k, search_k)` and `run.hits` == the recorded fused list.
+  - **The recorder's own time** (noah N4). The recorder runs its document lookup inside the
+    wrapped leg, so the leg's `vector_ms` (and `text_ms`, once that leg is wrapped too) includes
+    the harness's own leak-check query. The recorder times its lookup on the same monotonic clock
+    and writes it per question to `results.jsonl`; the per-stage rows either subtract it or are
+    labelled "includes the harness leak-check lookup". Test: a ticking clock where the lookup
+    takes a known number of steps.
 - **`summary.md`:**
   - One retrieval row per list (vector, text, fused) at the metric k, each with its interval as in
     ADR 0013.

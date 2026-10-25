@@ -132,3 +132,27 @@ otherwise.
   ADR 0007's rule ("additive; a breaking change bumps it") governs the Consequences' "changing
   them later needs a new `record_version`": only a breaking change needs one. A test shows that
   M2's records still validate.
+
+**Built 2026-10-25 (M3 PR 4, ananya; in review). The two proposals above were accepted by shesha
+on 2026-10-25** (`docs/plans/m3-pr-checks.md`, PR 4, "[decided 2026-10-25]"). Nothing earlier
+changes.
+- **The record.** The new fields are one optional `retrieval` block on `RagAnswerRecord`, written
+  in hybrid mode only: `mode` (`hybrid`), `candidate_k`, `context_k`, `rrf_k`, hits per leg and
+  fused, FTS-only hits, FTS-only evidence (the "rescues", D7), and the durations of the
+  embedding, the transaction, each leg and the fusion in milliseconds on a monotonic clock. A
+  count or duration is null when its stage did not finish, so a failed search still shows how far
+  it got. Counts and durations only: never text or ids. A vector-mode record serializes without
+  the block, so it has exactly M2's keys; `record_version` stays 1. In hybrid mode the existing
+  `hits` is the whole fused list's length (equal to `retrieval.fused_hits`), while `evidence` and
+  `top_score` cover only the top `rag_context_k` fused hits, the ones the gate saw (ADR 0014's
+  "Built 2026-10-25"), and the block's `context_k` says how many that was (added by shesha's
+  decision of 2026-10-25, additive). Tests: an M2 record validates and serializes unchanged, the
+  block is closed, and canary strings in the question, a chunk, a title and the answer appear in
+  no record (`tests/answer/test_hybrid_answer.py`).
+- **Decision 5 in hybrid mode.** `db.business_transaction(..., snapshot=True)` sends
+  `SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY` as the transaction's first statement,
+  then `set_config`. Tested against Postgres (`tests/retrieval/test_hybrid_snapshot.py`), each
+  with READ COMMITTED as the red proof: a commit between two statements is invisible to the
+  second; an update, a delete and an insert inside are refused (SQLSTATE 25006); an approval that
+  commits between the legs never puts the retired and the new version of one source into one
+  fused list. Vector mode still runs at READ COMMITTED.

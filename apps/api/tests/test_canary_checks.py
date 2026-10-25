@@ -9,8 +9,10 @@ Kept outside tests/canary/ on purpose: scripts/canary_gate.py must not count the
 import ast
 import html
 import re
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Final, cast
 
 import pytest
@@ -48,18 +50,21 @@ from tests.canary.read_paths import (
     PENDING_HAND_WRITE,
     READ_PATHS,
     answer_through_the_api,
+    answer_through_the_api_hybrid,
+    hybrid_search_as_staff,
     pending_hand_write,
     pending_hand_writes,
     read_path_params,
     search_through_the_api,
+    search_through_the_api_hybrid,
 )
 from tests.conftest import make_settings
-from tests.retrieval.standins import FakeDatabase, hit
+from tests.retrieval.standins import FakeDatabase, StandInFuse, hit
 from vectapilot_api.db import Database
 from vectapilot_api.embeddings.fake import fake_vector
 from vectapilot_api.kb.service import KbService
 from vectapilot_api.kb.types import ReindexResult
-from vectapilot_api.retrieval.types import SearchHit, VectorQuery
+from vectapilot_api.retrieval.types import SearchHit, TextQuery, VectorQuery
 
 PRINTED: Final = "(business_id = NULLIF(current_setting('app.business_id'::text, true), ''::text))"
 """How Postgres prints ADR 0009's policy back (`pg_get_expr`): parenthesised, NULLIF upper-case."""
@@ -327,18 +332,29 @@ def test_every_stub_dependency_names_a_read_path_and_every_pending_stub_is_used(
     # A pending stub is run by a read path, or named as needed elsewhere (H2: its own tests).
     assert run_by_read_paths | NEEDED_OUTSIDE_READ_PATHS.keys() >= PENDING_HAND_WRITE
     assert not NEEDED_OUTSIDE_READ_PATHS.keys() & run_by_read_paths
-    # PR 6's routes run M2 H1: they wait for the same switch as its own read path. M3 H1 has only
-    # its own path until PR 4 adds the hybrid ones (which also take rrf_fuse out of
-    # NEEDED_OUTSIDE_READ_PATHS).
-    assert runs("vector_search") == {"vector_search", "GET /v1/kb/search", "POST /v1/answer"}
-    assert runs("text_search") == {"text_search"}
+    # PR 6's routes run M2 H1: they wait for the same switch as its own read path. M3 PR 4's
+    # hybrid paths run both legs and H2, so each waits for every one of the three switches, and
+    # rrf_fuse is no longer needed outside the read paths.
+    hybrid = {"hybrid_search", "GET /v1/kb/search (hybrid)", "POST /v1/answer (hybrid)"}
+    assert runs("vector_search") == {
+        "vector_search",
+        "GET /v1/kb/search",
+        "POST /v1/answer",
+        *hybrid,
+    }
+    assert runs("text_search") == {"text_search", *hybrid}
+    assert runs("rrf_fuse") == hybrid
+    assert NEEDED_OUTSIDE_READ_PATHS == {}
 
 
 def test_every_search_leg_also_runs_on_the_owners_connection() -> None:
     # Every read path that is neither the whole-table SQL nor an API route runs a statement
-    # with its own business clause, so it also runs where RLS cannot help (PR 4: hybrid_search).
+    # with its own business clause, so it also runs where RLS cannot help (M3 PR 4 added
+    # hybrid_search: both legs' clauses, through the fusion).
     legs = {name for name in READ_PATHS if name != "sql" and not API_ROUTE.match(name)}
-    assert legs == OWNER_CONNECTION_PATHS.keys() == {"vector_search", "text_search"}
+    assert (
+        legs == OWNER_CONNECTION_PATHS.keys() == {"vector_search", "text_search", "hybrid_search"}
+    )
     # The very read path the app role runs, not a copy that could drift from it.
     assert all(OWNER_CONNECTION_PATHS[name] is READ_PATHS[name] for name in legs)
 
@@ -501,14 +517,22 @@ def test_red_proof_a_second_pending_helper_elsewhere_is_found() -> None:
 
 
 ApiReadPath = Callable[[AsyncEngine, Planted], Awaitable[Mapping[str, str]]]
-API_READ_PATHS: Final[list[ApiReadPath]] = [search_through_the_api, answer_through_the_api]
+VECTOR_API_READ_PATHS: Final[list[ApiReadPath]] = [search_through_the_api, answer_through_the_api]
+HYBRID_API_READ_PATHS: Final[list[ApiReadPath]] = [
+    search_through_the_api_hybrid,
+    answer_through_the_api_hybrid,
+]
+"""M3 PR 4: the same two routes with `rag_retrieval_mode=hybrid` (both legs and the fusion)."""
+API_READ_PATHS: Final[list[ApiReadPath]] = [*VECTOR_API_READ_PATHS, *HYBRID_API_READ_PATHS]
 
 
 @pytest.fixture
 def app_without_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
     """PR 6's API read paths run the real app; here everything that would reach Postgres is
     replaced (the registry, the reindex, the transaction, the stored models); each test replaces
-    H1's `vector_search` itself. The same paths run against Postgres in CI."""
+    H1's `vector_search` itself, and for M3 PR 4's hybrid routes M3 H1's `text_search` and M3 H2's
+    `rrf_fuse` (team-side stand-ins: both are pending [HAND-WRITE]s). The same paths run against
+    Postgres in CI."""
 
     async def business_exists(self: Database, business_id: str) -> bool:
         return True
@@ -539,6 +563,39 @@ def search_returning(
     return search
 
 
+def text_search_returning(
+    hits: Mapping[str, list[SearchHit]], asked: list[TextQuery] | None = None
+) -> Any:
+    """A stand-in for M3 H1's `text_search`: prepared hits per business, no SQL."""
+
+    async def search(connection: AsyncConnection, query: TextQuery) -> list[SearchHit]:
+        if asked is not None:
+            asked.append(query)
+        return hits.get(query.business_id, [])
+
+    return search
+
+
+def use_legs(
+    monkeypatch: pytest.MonkeyPatch,
+    vector: Mapping[str, list[SearchHit]],
+    text: Mapping[str, list[SearchHit]],
+    *,
+    asked: list[VectorQuery] | None = None,
+    asked_text: list[TextQuery] | None = None,
+) -> None:
+    """Both legs and the fusion as stand-ins, for every app built afterwards (`SearchService`
+    looks them up in `retrieval.search` when the app starts). The vector-mode routes never run
+    the text leg or the fusion."""
+    monkeypatch.setattr(
+        "vectapilot_api.retrieval.search.vector_search", search_returning(vector, asked)
+    )
+    monkeypatch.setattr(
+        "vectapilot_api.retrieval.search.text_search", text_search_returning(text, asked_text)
+    )
+    monkeypatch.setattr("vectapilot_api.retrieval.search.rrf_fuse", StandInFuse())
+
+
 def bait(owner: Planted, score: float = 1.0) -> SearchHit:
     """`owner`'s bait chunk as a search would return it from test_leakage.plant's rows: the shared
     `BAIT` text, titled with `owner`'s canary. Asking `BAIT`, CI scores every bait 1.0."""
@@ -551,11 +608,11 @@ def bait(owner: Planted, score: float = 1.0) -> SearchHit:
 async def test_an_api_read_path_over_a_correct_search_passes_the_leak_check(
     path: ApiReadPath, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    hits = {A.business_id: [bait(A)], B.business_id: [bait(B)]}
+    mine, theirs = bait(A), bait(B)
+    hits = {A.business_id: [mine], B.business_id: [theirs]}
     asked: list[VectorQuery] = []
-    monkeypatch.setattr(
-        "vectapilot_api.retrieval.search.vector_search", search_returning(hits, asked)
-    )
+    asked_text: list[TextQuery] = []
+    use_legs(monkeypatch, hits, hits, asked=asked, asked_text=asked_text)
 
     outputs = await path(cast(AsyncEngine, None), A)
 
@@ -565,21 +622,92 @@ async def test_an_api_read_path_over_a_correct_search_passes_the_leak_check(
     assert [(q.business_id, q.embedding) for q in asked] == [
         (A.business_id, fake_vector(BAIT, 1024))
     ]
+    # A hybrid route asks the full-text leg the same question, for the same business (M3 PR 4).
+    hybrid = path in HYBRID_API_READ_PATHS
+    expected_text = [(A.business_id, BAIT, fake_vector(BAIT, 1024))] if hybrid else []
+    assert [(q.business_id, q.question, q.embedding) for q in asked_text] == expected_text
+
+
+LEAKS: Final = [
+    pytest.param(search_through_the_api, "vector", id="GET /v1/kb/search, vector leg"),
+    pytest.param(answer_through_the_api, "vector", id="POST /v1/answer, vector leg"),
+    pytest.param(search_through_the_api_hybrid, "vector", id="GET (hybrid), vector leg"),
+    pytest.param(answer_through_the_api_hybrid, "vector", id="POST (hybrid), vector leg"),
+    pytest.param(search_through_the_api_hybrid, "text", id="GET (hybrid), full-text leg"),
+    pytest.param(answer_through_the_api_hybrid, "text", id="POST (hybrid), full-text leg"),
+]
+"""Every API read path with each leg it runs leaking in turn, the other leg clean (M3 PR 4)."""
 
 
 @pytest.mark.anyio
-@pytest.mark.parametrize("path", API_READ_PATHS)
+@pytest.mark.parametrize(("path", "leaking_leg"), LEAKS)
 @pytest.mark.usefixtures("app_without_postgres")
 async def test_red_proof_an_api_read_path_over_a_leaking_search_is_caught(
-    path: ApiReadPath, monkeypatch: pytest.MonkeyPatch
+    path: ApiReadPath, leaking_leg: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # What CI's bait gives a route that leaks: both baits at 1.0, the other one titled B's canary.
-    leaking = {A.business_id: [bait(A), bait(B)]}
-    monkeypatch.setattr("vectapilot_api.retrieval.search.vector_search", search_returning(leaking))
+    # The hybrid routes' other leg is clean: one leg without its business clause is enough.
+    mine, theirs = bait(A), bait(B)
+    clean, leaking = {A.business_id: [mine]}, {A.business_id: [mine, theirs]}
+    vector, text = (leaking, clean) if leaking_leg == "vector" else (clean, leaking)
+    use_legs(monkeypatch, vector, text)
 
     outputs = await path(cast(AsyncEngine, None), A)
 
     assert any(B.canary in problem for problem in canary_leaks(outputs, A, B))
+
+
+class ModelsConnection:
+    """The connection `hybrid_search_as_staff` gets without Postgres: its one statement of its own
+    (the stored-models query) answers `models`, and every statement is recorded."""
+
+    def __init__(self, models: Sequence[str]) -> None:
+        self.models = list(models)
+        self.statements: list[str] = []
+
+    async def execute(self, statement: object, parameters: object = None) -> SimpleNamespace:
+        self.statements.append(str(statement))
+        return SimpleNamespace(scalars=lambda: iter(self.models))
+
+
+@pytest.mark.anyio
+async def test_the_hybrid_read_path_runs_both_legs_and_the_fusion_in_one_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The canary suite's hybrid_search must read as `SearchService` does (D8): one business
+    # transaction opened as a snapshot (REPEATABLE READ READ ONLY), both legs on its connection.
+    # A read path at READ COMMITTED would pass its leak check while checking another composition.
+    connection = ModelsConnection(["fake-embedding-1024"])
+    opened: list[tuple[str, bool]] = []
+    legs: list[tuple[str, object]] = []
+
+    @asynccontextmanager
+    async def recording(
+        engine: AsyncEngine, business_id: str, *, snapshot: bool = False
+    ) -> AsyncIterator[ModelsConnection]:
+        opened.append((business_id, snapshot))
+        yield connection
+
+    async def vector(conn: AsyncConnection, query: VectorQuery) -> list[SearchHit]:
+        legs.append(("vector", conn))
+        return [bait(A)]
+
+    async def text(conn: AsyncConnection, query: TextQuery) -> list[SearchHit]:
+        legs.append(("text", conn))
+        return [bait(A)]
+
+    monkeypatch.setattr("tests.canary.read_paths.business_transaction", recording)
+    monkeypatch.setattr("tests.canary.read_paths.vector_search", vector)
+    monkeypatch.setattr("tests.canary.read_paths.text_search", text)
+    monkeypatch.setattr("tests.canary.read_paths.rrf_fuse", StandInFuse())
+
+    outputs = await hybrid_search_as_staff(cast(AsyncEngine, None), A)
+
+    assert opened == [(A.business_id, True)]
+    assert legs == [("vector", connection), ("text", connection)]
+    assert len(connection.statements) == 1  # the stored-models query, in the same transaction
+    assert canary_leaks(outputs, A, B) == []
+    assert A.canary in outputs["hybrid_search:fake-embedding-1024"]
 
 
 def test_the_bait_word_is_rare_and_part_of_the_bait() -> None:
@@ -594,10 +722,19 @@ def test_the_bait_word_is_rare_and_part_of_the_bait() -> None:
 
 
 def test_every_api_read_path_has_the_leaking_search_red_proof() -> None:
-    # PR 4's hybrid routes join API_READ_PATHS, so the red proof above runs on them too (with a
-    # leaking full-text leg added there: no route runs `text_search` before PR 4).
+    # M3 PR 4's hybrid routes are in API_READ_PATHS, so the red proof above runs on them, with
+    # each leg they run leaking in turn (LEAKS).
     routes = {READ_PATHS[name] for name in READ_PATHS if API_ROUTE.match(name)}
     assert routes == set(API_READ_PATHS)
+    legs = {"vector_search": "vector", "text_search": "text"}
+    expected = {
+        (READ_PATHS[name], legs[stub])
+        for name in READ_PATHS
+        if API_ROUTE.match(name)
+        for stub in NEEDS_HAND_WRITE[name]
+        if stub in legs
+    }
+    assert {(param.values[0], param.values[1]) for param in LEAKS} == expected
 
 
 def test_a_written_stub_has_no_marks_and_a_pending_one_exactly_one() -> None:

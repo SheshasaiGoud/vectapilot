@@ -33,8 +33,8 @@ is never an outcome. Questions after a stop are kept as `not_run`, never dropped
 with its stop recorded, never for the note (`final_status`, decided 2026-10-22).
 
 `execute` refuses (`HarnessRefused`) a dry run whose Settings name a paid provider, a live run
-without a cap, and a `--fresh` delete of any id that is not a derived eval id of its business, or
-in production.
+without a cap, a `--fresh` delete of any id that is not a derived eval id of its business, or in
+production, and any `rag_retrieval_mode` but `vector` (`VECTOR_MODE_ONLY`).
 
 Nothing here logs or prints question, chunk or answer text: progress lines carry ids, labels,
 H2's values and dollar amounts.
@@ -122,6 +122,16 @@ _API_QUESTION: Final = TypeAdapter(Question)
 
 class HarnessRefused(Exception):
     """The run cannot start as configured. The message names settings and ids, never text."""
+
+
+VECTOR_MODE_ONLY: Final = (
+    "rag_retrieval_mode must be vector: the eval harness measures vector mode only until M3 PR 5"
+    " adds --retrieval-mode (ADR 0014), so a run never reports one mode while Settings name another"
+)
+"""Why the harness refuses a hybrid `rag_retrieval_mode` (decided 2026-10-25, shesha): it builds
+`SearchService` in vector mode, and its scoring and recording know only the vector list. Fixed
+text: it names the setting, never a value. Dry and live runs, and `ingest` too (one rule for
+every command)."""
 
 
 def api_questions(questions: Sequence[EvalQuestion]) -> dict[str, str]:
@@ -563,10 +573,13 @@ class Target:
 def check_run(
     target: Target, settings: Settings, cap: CostCap, *, dry_run: bool, fresh: bool
 ) -> None:
-    """Every refusal `execute` makes before it touches the database (`HarnessRefused`): a dry run
-    whose Settings name a paid provider, a live run without a cap, a `--fresh` delete of an id
-    that is not its business's derived eval id or in production, a question the API would refuse.
-    The CLI checks the same before it prints the plan; this holds for any caller."""
+    """Every refusal `execute` makes before it touches the database (`HarnessRefused`): a
+    retrieval mode other than vector (`VECTOR_MODE_ONLY`), a dry run whose Settings name a paid
+    provider, a live run without a cap, a `--fresh` delete of an id that is not its business's
+    derived eval id or in production, a question the API would refuse. The CLI checks the same
+    before it prints the plan; this holds for any caller."""
+    if settings.rag_retrieval_mode != "vector":
+        raise HarnessRefused(VECTOR_MODE_ONLY)
     if dry_run and (settings.embeddings_provider != "fake" or settings.llm_provider != "fake"):
         raise HarnessRefused(
             "a dry run needs the fake embedder and the fake answer model in Settings"

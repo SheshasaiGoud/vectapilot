@@ -98,7 +98,8 @@ these lines supersede it where they differ.
 - **Stage durations instead** (M3 PR 4). `rag_answer` gains optional, metadata-only fields: the
   retrieval mode, hits per leg, FTS-only hits, and per-stage durations (embed, transaction, each
   leg, fuse) on a monotonic clock. They are additive, so `record_version` stays 1 (ADR 0011
-  amendment).
+  amendment). Built in M3 PR 4 (2026-10-25, in review) as one optional `retrieval` block, written
+  in hybrid mode only (ADR 0011, "Built 2026-10-25").
 - **FastAPI's built-in telemetry pinned off** (M3 PR 1). FastAPI 0.143.0 turns tracing, metrics and
   logs on by default. Once any OpenTelemetry provider exists, they would record `url.query`, the
   bodies of failed validations and stack traces, and read an inbound `traceparent`. So
@@ -107,4 +108,5 @@ these lines supersede it where they differ.
 - **Route errors and timeouts** (carried from `m1-pr-checks.md`, "Handed on to M3"). Route handlers
   keep logging only `type(exc).__name__` for gateway errors. No route-level timeout is added
   around `complete()`; if one ever is, its expiry is recorded as `cancelled`, not
-  `deadline_exceeded`.
+  `deadline_exceeded`. Held in M3 PR 4: a test scans both route modules and the answer service
+  for timeouts and the routes for any logging.

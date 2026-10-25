@@ -31,7 +31,7 @@ from vectapilot_api.kb.service import KbService
 from vectapilot_api.kb.store import PostgresKbStore
 from vectapilot_api.log import configure_logging
 from vectapilot_api.retrieval.router import router as search_router
-from vectapilot_api.retrieval.search import SearchService
+from vectapilot_api.retrieval.search import RetrievalConfig, SearchService
 
 logger = logging.getLogger("vectapilot_api")
 
@@ -117,8 +117,9 @@ def create_app(
         app.state.embedder = embedder
         app.state.kb_service = KbService(PostgresKbStore(database), runner)
         # M2 PR 6: search (H1's `vector_search` in one business transaction) and cited answers
-        # through the gateway, which closes its provider when this block ends.
-        search = SearchService(database, runner)
+        # through the gateway, which closes its provider when this block ends. M3 PR 4: both
+        # follow `rag_retrieval_mode` (vector by default; hybrid fuses both legs in one snapshot).
+        search = SearchService(database, runner, retrieval=RetrievalConfig.from_settings(settings))
         app.state.search_service = search
         async with build_gateway(settings, provider=llm_provider) as gateway:
             app.state.answer_service = AnswerService(

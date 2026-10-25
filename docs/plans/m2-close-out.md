@@ -359,6 +359,11 @@ before the freeze (every question as `unassigned`); steps 13 and 15 cannot.
     leg: a leg without its clause passes the app-role read path and fails the owner check. The
     API-level red proof stays without a database, as for `vector_search`, and covers the full-text
     leg from PR 4, when a route first runs it.
+  - Closed by M3 PR 4 (2026-10-25, ananya; in review): `GET /v1/kb/search` and `POST /v1/answer`
+    in hybrid mode are canary read paths, and the API-level red proof
+    (`test_red_proof_an_api_read_path_over_a_leaking_search_is_caught`) runs each hybrid route
+    with a clean vector leg and a leaking full-text stand-in, and with a leaking vector leg and a
+    clean full-text one: each is caught. `hybrid_search` also runs on the owner's connection.
 - Redis and `compose.yaml` images pinned by digest; `db_provision.py` SCRAM verifier (by M10).
 
 ## M1 leftovers (also shesha's)
