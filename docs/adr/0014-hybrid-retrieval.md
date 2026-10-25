@@ -4,7 +4,8 @@
   D15: every recommendation, D15 (iii) with shesha's own number; `docs/plans/m3-pr-checks.md`,
   "Decided 2026-10-23"). Drafted by maya-tech-lead from research by ananya-rag, noah-evals,
   diego-backend and zara-safety. Decisions 1 and 2 are built in M3 PR 2 (merged, #40); the
-  scaffold for 3 and 4 is M3 PR 3 (in review); the rest comes in PR 4–5 and H1/H2.
+  scaffold for 3 and 4 is M3 PR 3 (merged, #42); 5–7 are built in M3 PR 4 (in review, "Built
+  2026-10-25" below); the rest comes in PR 5 and H1/H2.
 
 **Context.** M2 retrieves by meaning only: H1's `vector_search` ranks a business's approved chunks
 by exact cosine distance, with `business_id` in the statement's `WHERE` and RLS underneath (ADR
@@ -156,3 +157,34 @@ and added the language rule for re-uploads (both 2026-10-23).
   locally; CI runs the same image with no locale override). M10 checks the target's locale, or
   reruns `test_an_hi_chunk_gets_hindi` and the `te` case of `test_an_unknown_language_gets_simple`
   against it.
+
+**Built 2026-10-25 (M3 PR 4, ananya; in review).** Decisions 5–7 as written, behind
+`rag_retrieval_mode` (default `vector`). The choices below were not fixed by a decision; each was
+a proposal, and shesha accepted all of them on 2026-10-25 (`docs/plans/m3-pr-checks.md`, PR 4,
+"[decided 2026-10-25]").
+- **Where the code is.** `retrieval/search.py`: `RetrievalConfig` (the three settings),
+  `fused_search` (both legs at `query.k`, then `rrf_fuse([vector hits, text hits], k, limit)`;
+  the canary suite's `hybrid_search` read path runs this same function), and `SearchService`'s
+  hybrid path (one embedding, then one `snapshot=True` business transaction with the model check
+  and `fused_search`). `rag_candidate_k` is checked against `rag_context_k` at startup in both
+  modes. Side effect in vector mode, which never reads `rag_candidate_k`: a `rag_context_k` above
+  `rag_candidate_k` (default 20), or a `rag_candidate_k` outside 10 to `MAX_K`, stops startup
+  there too.
+- **k.** Each leg is asked for `max(k, rag_candidate_k)` hits and the fused list is cut at `k`.
+  The answer asks for `rag_candidate_k`, so for it this is decision 5 exactly; `GET
+  /v1/kb/search` keeps its `k` (default 5, at most `MAX_K`), and a `k` above `rag_candidate_k`
+  widens both legs instead of returning fewer hits than asked.
+- **The answer.** `AnswerRun.hits` is the whole fused list, in fused order, as plain `SearchHit`s
+  (PR 5's harness will score it, and its headroom count needs hit@10). The top `rag_context_k` fused
+  hits go on, then the cosine gate (decision 7): a hit that fusion ranks below them is never
+  evidence, whatever its cosine; the evidence keeps fused order. Confidence v0 is the best cosine
+  among those top hits (in vector mode they are all the hits, as in M2). The `rag_answer` record's
+  `retrieval` block carries `candidate_k`, `context_k` and `rrf_k` (ADR 0011, "Built
+  2026-10-25").
+- **NUL.** `check_question` refuses U+0000, so `Question` does on both routes in both modes (a
+  422 that echoes nothing), and the harness refuses such a question by id.
+- **Not built here:** the harness's `--retrieval-mode` and its per-leg recording (PR 5). Until
+  then the harness refuses a `rag_retrieval_mode` other than `vector`, dry or live (and in
+  `ingest`), with a fixed message naming the setting (`evalrun/harness.py`, `VECTOR_MODE_ONLY`;
+  checked by the CLI and again by `check_run`), so no run reports vector numbers under a hybrid
+  setting. PR 5 replaces the refusal with `--retrieval-mode`.

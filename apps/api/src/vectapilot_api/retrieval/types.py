@@ -32,15 +32,28 @@ MAX_K: Final = 50
 5, M3's reranker may want 20-50 candidates, and a cap stops one request from reading a whole
 knowledge base. Exact search scans every candidate whatever `k` is."""
 
+CANDIDATE_K: Final = 20
+"""How many hits each leg of a hybrid search returns, and the fused list's length (M3 PR 4,
+`Settings.rag_candidate_k`'s default; D6, D15 (i)). Provisional and unmeasured: 2 x 20 candidates
+already cover most of a v0.1 business's roughly 60-65 chunks (ADR 0014 decision 10)."""
+
 MAX_QUESTION_CHARS: Final = 2000
 """The longest question accepted, in characters, counted before stripping. A platform default, not
 measured: generous for a customer's question, far below the embedding model's context (32,000
 tokens, ADR 0008), and it bounds what one request can put into a prompt."""
 
+NUL: Final = "\x00"
+"""U+0000. Postgres text cannot hold it, so a question with one could never be bound to the
+full-text leg's statement (decided 2026-10-24, shesha; ADR 0014 decision 5 amendment)."""
+
 
 def check_question(value: str) -> str:
     """A question with text in it, stripped; encodable as UTF-8 (no lone surrogates, which the
-    embedding and model APIs would refuse). Messages never contain the value."""
+    embedding and model APIs would refuse) and without a NUL character (U+0000, which Postgres
+    text cannot hold: refused in both retrieval modes, M3 PR 4). Messages never contain the
+    value."""
+    if NUL in value:
+        raise ValueError("must not contain a NUL character (U+0000)")
     stripped = value.strip()
     if not stripped:
         raise ValueError("must contain text, not only whitespace")
@@ -59,6 +72,10 @@ Question = Annotated[
 """A customer's question as the API accepts it (`GET /v1/kb/search?q=`, `POST /v1/answer`), and as
 `TextQuery` holds it. Defined here, not in `search.py` (which re-exports it), since M3 PR 3:
 `TextQuery` needs it, and `search.py` imports this module."""
+
+RetrievalMode = Literal["vector", "hybrid"]
+"""How a search retrieves (M3 PR 4, `Settings.rag_retrieval_mode`): `vector` is M2's path
+unchanged; `hybrid` runs the vector and full-text legs in one snapshot and fuses them (ADR 0014)."""
 
 Reader = Literal["customer", "staff"]
 """Who will see the hits. `customer` is anyone talking to the business (the widget, PR 6's

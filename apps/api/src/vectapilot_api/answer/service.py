@@ -3,10 +3,15 @@
 One answer, in this order (every step for one business, scoped by its id):
 
 1. **Retrieve** (`SearchService`): embed the question, refuse mixed models, H1's search as
-   reader `customer`, `context_k` hits.
-2. **Abstain early.** The evidence is the hits scoring at least `min_score` (provisional,
-   unmeasured: Settings). No hits, or none at the threshold, means **no model call at all**: the
-   answer is the weak-evidence outcome (`dont_know` by default, or `handoff`), with no text.
+   reader `customer`, `context_k` hits. In hybrid mode (M3 PR 4, `rag_retrieval_mode`): both
+   legs and the fusion in one snapshot, `candidate_k` fused hits, of which the top `context_k`
+   go on (ADR 0014 decision 5); the whole fused list stays in `AnswerRun.hits` for the harness.
+2. **Abstain early.** The evidence is the hits (in hybrid mode: of those top `context_k`)
+   scoring at least `min_score` (provisional, unmeasured: Settings). The score is always the
+   cosine, never an RRF score (D7): a keyword-stuffed chunk that fusion ranks first is still no
+   evidence if its cosine is low. No hits, or none at the threshold, means **no model call at
+   all**: the answer is the weak-evidence outcome (`dont_know` by default, or `handoff`), with
+   no text.
 3. **Prompt** (`prompt.py`, versioned): the evidence only, each chunk in an unforgeable block.
 4. **The gateway** (`complete_structured`, alias `large`, operation `rag-answer`, the request's
    trace id): the reply must match `ModelAnswer`; a schema repair is the gateway's job.
@@ -15,7 +20,9 @@ One answer, in this order (every step for one business, scoped by its id):
    held (so: retrieved for this business in this request). Anything else becomes the weak-evidence
    outcome with no text: one unretrieved id drops the whole answer, because the text cannot be
    split into the claims that id was meant to support.
-6. **One `rag_answer` record**, metadata only, also on error.
+6. **One `rag_answer` record**, metadata only, also on error. In hybrid mode it carries a
+   `retrieval` block (the k's, counts per leg, FTS-only hits and evidence, stage durations); in
+   vector mode it is exactly M2's record.
 
 Errors: the search's own (embedding, `ReindexRequired`, database) propagate unchanged for the
 route to map; the model's become `ModelUnavailable` (transient, deadline) or `AnswerFailed`
@@ -41,13 +48,20 @@ from vectapilot_api.answer.types import (
     ModelAnswer,
     ModelUnavailable,
     RagAnswerRecord,
+    RetrievalRecord,
     WeakEvidenceOutcome,
 )
 from vectapilot_api.config import Settings
 from vectapilot_api.gateway.errors import DeadlineExceeded, GatewayError, Transient
 from vectapilot_api.gateway.gateway import LLMGateway
 from vectapilot_api.gateway.types import LLMRequest, Message
-from vectapilot_api.retrieval.search import Citation, SearchService, top_score
+from vectapilot_api.retrieval.search import (
+    Citation,
+    SearchService,
+    SearchStats,
+    fts_only,
+    top_score,
+)
 from vectapilot_api.retrieval.types import Reader, SearchHit
 
 ANSWER_ALIAS: Final = "large"
@@ -92,6 +106,9 @@ class _Tally:
     model_called: bool = False
     outcome: AnswerOutcome | None = None
     reason: AbstainReason | None = None
+    search: SearchStats | None = None
+    """Hybrid mode only: what the search did (filled in by `SearchService` as it runs)."""
+    fts_only_evidence: int | None = None
 
 
 def _cited(citations: Sequence[str]) -> list[uuid.UUID | None]:
@@ -149,17 +166,31 @@ class AnswerService:
     async def _answer(
         self, business_id: str, question: str, trace_id: str, tally: _Tally
     ) -> AnswerRun:
+        retrieval = self._search.retrieval
+        hybrid = retrieval.mode == "hybrid"
+        k = self.config.context_k  # vector: M2's k
+        if hybrid:  # the whole fused list, for the harness; only its top context_k go on
+            k = max(retrieval.candidate_k, self.config.context_k)
+            tally.search = SearchStats()
         result = await self._search.search(
             business_id,
             question,
-            k=self.config.context_k,
+            k=k,
             reader=CUSTOMER,
             trace_id=trace_id,
             operation=ANSWER_OPERATION,
+            stats=tally.search,
         )
         hits = result.hits
-        evidence = tuple(hit for hit in hits if hit.score >= self.config.min_score)
-        tally.hits, tally.evidence, tally.top_score = len(hits), len(evidence), top_score(hits)
+        # Hybrid: the top context_k fused hits go on (ADR 0014 decision 5). Vector: M2's hits, as
+        # they came (the search was asked for context_k).
+        context = hits[: self.config.context_k] if hybrid else hits
+        # D7: `hit.score` is the cosine in both modes. A FusedHit's RRF score never gets here.
+        evidence = tuple(hit for hit in context if hit.score >= self.config.min_score)
+        tally.hits, tally.evidence, tally.top_score = len(hits), len(evidence), top_score(context)
+        if hybrid:
+            rescued = fts_only(result.fused or ())
+            tally.fts_only_evidence = sum(hit.chunk_id in rescued for hit in evidence)
         confidence = Confidence(value=tally.top_score)
 
         def abstain(reason: AbstainReason) -> AnswerRun:
@@ -249,5 +280,27 @@ class AnswerService:
             min_score=self.config.min_score,
             model_called=tally.model_called,
             latency_ms=max(0.0, (self._clock() - started) * 1000),
+            retrieval=None if tally.search is None else self._retrieval_record(tally),
         )
         logger.info(RAG_ANSWER, extra={RAG_ANSWER: record.model_dump(mode="json")})
+
+    def _retrieval_record(self, tally: _Tally) -> RetrievalRecord:
+        """The hybrid record's `retrieval` block: counts and durations, never text or ids."""
+        stats = tally.search or SearchStats()
+        retrieval = self._search.retrieval
+        return RetrievalRecord(
+            mode="hybrid",
+            candidate_k=stats.candidate_k or max(retrieval.candidate_k, self.config.context_k),
+            context_k=self.config.context_k,
+            rrf_k=retrieval.rrf_k,
+            vector_hits=stats.vector_hits,
+            text_hits=stats.text_hits,
+            fused_hits=stats.fused_hits,
+            fts_only_hits=stats.fts_only_hits,
+            fts_only_evidence=tally.fts_only_evidence,
+            embed_ms=stats.embed_ms,
+            transaction_ms=stats.transaction_ms,
+            vector_ms=stats.vector_ms,
+            text_ms=stats.text_ms,
+            fuse_ms=stats.fuse_ms,
+        )

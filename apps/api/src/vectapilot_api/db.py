@@ -1,7 +1,9 @@
 """Database access scoped to one business (ADR 0004, ADR 0009).
 
 Every unit of work runs inside `business_transaction`: it opens a transaction and, before anything
-else, runs `set_config('app.business_id', <id>, true)`. `true` makes the setting local to that
+else, runs `set_config('app.business_id', <id>, true)` (a hybrid search's snapshot transaction
+first runs `SET TRANSACTION ... REPEATABLE READ READ ONLY`, which reads and writes nothing, M3 PR
+4). `true` makes the setting local to that
 transaction, so it ends at commit or rollback and a pooled connection never carries one business
 into the next request. Row-level security then filters every business-owned table to that business.
 
@@ -41,6 +43,14 @@ APP_ROLE: Final = "vectapilot_app"
 `vectapilot-db-provision`."""
 
 _SET_BUSINESS: Final = text("SELECT set_config('app.business_id', :business_id, true)")
+
+SNAPSHOT: Final = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"
+"""A snapshot transaction's first statement (M3 PR 4; D8, ADR 0014 decision 6, ADR 0011 decision 5
+amendment). REPEATABLE READ: every statement sees the data as of the transaction's first query (the
+`set_config` right after), so nothing another transaction commits meanwhile is seen. READ ONLY:
+any write is refused (SQLSTATE 25006), so the transaction never meets a serialization failure.
+Postgres requires it before the transaction's first query."""
+_SNAPSHOT: Final = text(SNAPSHOT)
 
 RESET_BUSINESS: Final = "RESET app.business_id"
 """What `reset_business_on_return` sends: the session value goes back to the session default:
@@ -182,7 +192,7 @@ def create_api_engine(url: str, **pool_options: int) -> AsyncEngine:
 
 @asynccontextmanager
 async def business_transaction(
-    engine: AsyncEngine, business_id: str
+    engine: AsyncEngine, business_id: str, *, snapshot: bool = False
 ) -> AsyncIterator[AsyncConnection]:
     """A transaction in which only `business_id`'s rows exist. Commits on success, rolls back on
     an exception; either way the business setting ends with the transaction.
@@ -190,9 +200,16 @@ async def business_transaction(
     The one place that sets the business. One business per transaction: never call `set_config`
     for another business inside it. The API goes through `Database.business_transaction`, which
     checks the role first; owner scripts and tests may call this directly.
+
+    `snapshot` (M3 PR 4, hybrid search): the transaction's first statement is `SNAPSHOT`
+    (REPEATABLE READ READ ONLY), then `set_config` as always, so every later statement reads one
+    snapshot and none may write. Without it (every other caller): Postgres' default, READ
+    COMMITTED, where each statement sees what was committed before it started.
     """
     valid = parse_business_id(business_id)
     async with engine.begin() as connection:
+        if snapshot:
+            await connection.execute(_SNAPSHOT)
         await connection.execute(_SET_BUSINESS, {"business_id": valid})
         yield connection
 
@@ -241,11 +258,14 @@ class Database:
             logger.warning("database_role_check_deferred", extra={"reason": type(error).__name__})
 
     @asynccontextmanager
-    async def business_transaction(self, business_id: str) -> AsyncIterator[AsyncConnection]:
-        """`business_transaction(self.engine, business_id)` once the role check has passed."""
+    async def business_transaction(
+        self, business_id: str, *, snapshot: bool = False
+    ) -> AsyncIterator[AsyncConnection]:
+        """`business_transaction(self.engine, business_id, snapshot=snapshot)` once the role check
+        has passed."""
         valid = parse_business_id(business_id)  # before the database: a bad id costs no query
         await self.verify_role()
-        async with business_transaction(self.engine, valid) as connection:
+        async with business_transaction(self.engine, valid, snapshot=snapshot) as connection:
             yield connection
 
     async def business_exists(self, business_id: str) -> bool:

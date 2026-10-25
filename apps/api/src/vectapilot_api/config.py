@@ -10,7 +10,12 @@ from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, Settings
 
 from vectapilot_api.embeddings.catalog import EmbeddingsProvider
 from vectapilot_api.gateway.types import OpaqueId, RetryPolicy, Seconds
-from vectapilot_api.retrieval.types import MAX_K
+from vectapilot_api.retrieval.fusion import RRF_K
+from vectapilot_api.retrieval.types import CANDIDATE_K, MAX_K, RetrievalMode
+
+MIN_CANDIDATE_K: Final = 10
+"""`rag_candidate_k`'s floor (M3 plan PR 4): PR 5's headroom count reads hit@10 on the fused list,
+so it must hold at least 10 hits when that many chunks qualify."""
 
 ANTHROPIC_SDK_ENV_VARS: Final = (
     "ANTHROPIC_API_KEY",
@@ -138,6 +143,22 @@ class Settings(BaseSettings):
     know"; `handoff` is business-context §3.5's proposed default, but nothing notifies staff until
     M8, so it is only a label for now."""
 
+    # ── Hybrid retrieval (M3 PR 4, ADR 0014) ──
+    # Platform defaults, unmeasured (rule 3). `vector` stays the default until a paired dev
+    # comparison against M2's vector baseline meets D15's adoption rule.
+    rag_retrieval_mode: RetrievalMode = "vector"
+    """`vector`: M2's path, unchanged. `hybrid`: the vector and full-text legs at
+    `rag_candidate_k` each, in one REPEATABLE READ READ ONLY transaction, fused by RRF; both
+    `GET /v1/kb/search` and `POST /v1/answer` follow it (ADR 0014 decisions 5-7). The eval
+    harness refuses `hybrid` until M3 PR 5 adds `--retrieval-mode` (decided 2026-10-25)."""
+    rag_candidate_k: int = Field(default=CANDIDATE_K, ge=MIN_CANDIDATE_K, le=MAX_K)
+    """Each leg's k and the fused list's length in hybrid mode (D6, provisional). At least
+    `rag_context_k` (checked in `_llm_rules`) and 10, at most `MAX_K`. Checked in either mode
+    (decided 2026-10-25): in vector mode too, a `rag_context_k` above it stops startup."""
+    rag_rrf_k: int = Field(default=RRF_K, ge=1)
+    """RRF's k (`rrf_fuse`'s `k`): 60, fixed, not tuned (ADR 0014 decision 4). At least 1, no upper
+    bound (decided 2026-10-25)."""
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -210,6 +231,9 @@ class Settings(BaseSettings):
             problems.append("llm_deadline_seconds must be >= llm_attempt_timeout_seconds")
         if self.llm_backoff_cap_seconds < self.llm_backoff_base_seconds:
             problems.append("llm_backoff_cap_seconds must be >= llm_backoff_base_seconds")
+        if self.rag_candidate_k < self.rag_context_k:
+            # M3 PR 4: the answer takes its rag_context_k hits from the top of the fused list.
+            problems.append("rag_candidate_k must be >= rag_context_k")
         problems += self._embedding_problems()
         if problems:
             raise ValueError("; ".join(problems))

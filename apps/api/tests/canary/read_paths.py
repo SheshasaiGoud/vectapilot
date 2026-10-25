@@ -5,9 +5,11 @@ A read path acts as one business and returns what it produced, as text per label
 business and fails if the other business's id or canary appears, or if its own never does.
 
 The paths: plain SQL on every business table, M2 H1's top-k vector search (`m2/retrieval`), M3
-H1's full-text search (`text_search`, M3 PR 3), and PR 6's two routes that show chunk text
+H1's full-text search (`text_search`, M3 PR 3), M3 PR 4's hybrid search (both legs and M3 H2's
+`rrf_fuse` in one snapshot, `search.fused_search`), and PR 6's two routes that show chunk text
 (`GET /v1/kb/search`, `POST /v1/answer`, through the real app with that business's
-`X-Business-Id`). Add yours here, with no other change.
+`X-Business-Id`), each in vector mode and in hybrid mode (M3 PR 4). Add yours here, with no other
+change.
 
 **The business clause itself (M3 PR 3, ADR 0009 amendment).** Every path above runs as the app
 role, under RLS, so it would pass with a search whose SQL forgot `c.business_id = :business_id`:
@@ -61,8 +63,10 @@ from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import Settings
 from vectapilot_api.db import business_transaction
 from vectapilot_api.main import create_app
+from vectapilot_api.retrieval.fusion import RRF_K, rrf_fuse
+from vectapilot_api.retrieval.search import fused_search
 from vectapilot_api.retrieval.text import text_search
-from vectapilot_api.retrieval.types import MAX_K, TextQuery, VectorQuery
+from vectapilot_api.retrieval.types import MAX_K, RetrievalMode, TextQuery, VectorQuery
 from vectapilot_api.retrieval.vector import vector_search
 
 ReadPath = Callable[[AsyncEngine, Planted], Awaitable[Mapping[str, str]]]
@@ -172,6 +176,47 @@ async def text_search_as_staff(
     return outputs
 
 
+async def hybrid_search_as_staff(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """M3 PR 4's hybrid search as `me`, asking `BAIT`: the product's own `fused_search` (M2 H1's
+    `vector_search`, M3 H1's `text_search`, then M3 H2's `rrf_fuse`) in one snapshot business
+    transaction, as `SearchService` runs it, once per embedding model id `me`'s chunks carry,
+    every fused hit as JSON. As for the two legs: staff, `k` hits from each leg and in the fused
+    list, and the canary direction as the question's vector.
+
+    A working search shows `me`'s canary in both outputs (each leg finds `me`'s canary chunk or
+    bait, titled with `me`'s canary), and a leg that leaks puts the other business's canary into
+    the fused list. Also in `OWNER_CONNECTION_PATHS`: both legs' business clauses, through the
+    fusion. The legs and the fusion are looked up here, so a red proof that replaces one leg in
+    this module replaces it for this path too."""
+    outputs: dict[str, str] = {}
+    async with business_transaction(engine, me.business_id, snapshot=True) as connection:
+        models = (await connection.execute(_STORED_MODELS, {"b": me.business_id})).scalars()
+        for model in list(models):
+            query = TextQuery(
+                business_id=me.business_id,
+                question=BAIT,
+                embedding=CANARY_EMBEDDING,
+                embedding_model=model,
+                k=k,
+                reader="staff",
+            )
+            lists = await fused_search(
+                connection,
+                query,
+                limit=k,
+                rrf_k=RRF_K,
+                vector=vector_search,
+                text=text_search,
+                fuse=rrf_fuse,
+            )
+            outputs[f"hybrid_search:{model}"] = "\n".join(
+                item.hit.model_dump_json() for item in lists.fused
+            )
+    return outputs
+
+
 def _reindex(client: TestClient, me: Planted) -> None:
     """Re-embed `me`'s canary chunk with the configured (fake) model: `test_leakage.plant` stores
     it under model id `fake` next to the bait under the configured one, and search refuses mixed
@@ -181,12 +226,8 @@ def _reindex(client: TestClient, me: Planted) -> None:
     assert response.is_success, response.text
 
 
-async def search_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
-    """`GET /v1/kb/search` as `me` (reader customer: approved public chunks), asking `BAIT` with
-    the largest `k`; the response body as text (`me`'s bait shows `me`'s canary as its title).
-    Through the real app, as the app role: it proves the route's isolation through RLS and its own
-    scoping together."""
-    with TestClient(create_app(Settings())) as client:
+async def _search_through_the_api(me: Planted, mode: RetrievalMode, label: str) -> dict[str, str]:
+    with TestClient(create_app(Settings(rag_retrieval_mode=mode))) as client:
         _reindex(client, me)
         response = client.get(
             "/v1/kb/search",
@@ -194,17 +235,28 @@ async def search_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[st
             headers={BUSINESS_HEADER: me.business_id},
         )
     assert response.is_success, response.text
-    return {"GET /v1/kb/search": response.text}
+    return {label: response.text}
 
 
-async def answer_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
-    """`POST /v1/answer` as `me`, asking `BAIT`, with a scripted model that cites every real block
-    of its prompt; the response body (its `sources` show chunk text and titles) and every prompt
-    the model got (business-context §5: a prompt only ever holds the current business's data).
-    `me`'s bait scores 1.0, so it is evidence, and its title, `me`'s canary, is the positive
-    control in both outputs."""
+async def search_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """`GET /v1/kb/search` as `me` (reader customer: approved public chunks), asking `BAIT` with
+    the largest `k`; the response body as text (`me`'s bait shows `me`'s canary as its title).
+    Through the real app, as the app role: it proves the route's isolation through RLS and its own
+    scoping together."""
+    return await _search_through_the_api(me, "vector", "GET /v1/kb/search")
+
+
+async def search_through_the_api_hybrid(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """`search_through_the_api` with `rag_retrieval_mode=hybrid` (M3 PR 4): the route runs both
+    legs and the fusion. Both legs find `me`'s bait (same vector as `BAIT`, and `BAIT_WORD`), and
+    the other business's bait is a candidate for both."""
+    return await _search_through_the_api(me, "hybrid", "GET /v1/kb/search (hybrid)")
+
+
+async def _answer_through_the_api(me: Planted, mode: RetrievalMode, label: str) -> dict[str, str]:
     provider = CitingProvider()
-    with TestClient(create_app(Settings(), llm_provider=provider)) as client:
+    settings = Settings(rag_retrieval_mode=mode)
+    with TestClient(create_app(settings, llm_provider=provider)) as client:
         _reindex(client, me)
         response = client.post(
             "/v1/answer",
@@ -213,20 +265,39 @@ async def answer_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[st
         )
     assert response.is_success, response.text
     prompts = [f"{call.system}\n{call.messages[-1].content}" for call in provider.calls]
-    return {"POST /v1/answer": response.text, "POST /v1/answer (prompt)": "\n".join(prompts)}
+    return {label: response.text, f"{label} (prompt)": "\n".join(prompts)}
+
+
+async def answer_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """`POST /v1/answer` as `me`, asking `BAIT`, with a scripted model that cites every real block
+    of its prompt; the response body (its `sources` show chunk text and titles) and every prompt
+    the model got (business-context §5: a prompt only ever holds the current business's data).
+    `me`'s bait scores 1.0, so it is evidence, and its title, `me`'s canary, is the positive
+    control in both outputs."""
+    return await _answer_through_the_api(me, "vector", "POST /v1/answer")
+
+
+async def answer_through_the_api_hybrid(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """`answer_through_the_api` with `rag_retrieval_mode=hybrid` (M3 PR 4): the prompt holds the
+    top `rag_context_k` fused hits whose cosine passes the gate (`me`'s bait scores 1.0)."""
+    return await _answer_through_the_api(me, "hybrid", "POST /v1/answer (hybrid)")
 
 
 READ_PATHS: Final[dict[str, ReadPath]] = {
     "sql": sql_on_every_business_table,
     "vector_search": vector_search_as_staff,
     "text_search": text_search_as_staff,
+    "hybrid_search": hybrid_search_as_staff,
     "GET /v1/kb/search": search_through_the_api,
     "POST /v1/answer": answer_through_the_api,
+    "GET /v1/kb/search (hybrid)": search_through_the_api_hybrid,
+    "POST /v1/answer (hybrid)": answer_through_the_api_hybrid,
 }
 
 OWNER_CONNECTION_PATHS: Final[Mapping[str, SearchLegPath]] = {
     "vector_search": vector_search_as_staff,
     "text_search": text_search_as_staff,
+    "hybrid_search": hybrid_search_as_staff,
 }
 """Read paths that also run on the owner's connection, where RLS never applies: each search leg's
 own `WHERE c.business_id = :business_id` is then the only thing between `me` and the other
@@ -239,22 +310,28 @@ take the only place before the filter, and `me` gets nothing: the positive contr
 
 Not "sql" (it reads whole tables on purpose, so it leaks there by design:
 `test_red_proof_a_role_that_skips_rls_leaks_the_canary`), and not the API routes (the app refuses
-such a role). PR 4 adds its `hybrid_search` path here too."""
+such a role). `hybrid_search` (M3 PR 4) runs both legs' clauses through the fusion here."""
+
+HYBRID: Final = frozenset({"vector_search", "text_search", "rrf_fuse"})
+"""What every hybrid read path runs (M3 PR 4): both legs and the fusion."""
 
 NEEDS_HAND_WRITE: Final[Mapping[str, frozenset[str]]] = {
     "vector_search": frozenset({"vector_search"}),
     "text_search": frozenset({"text_search"}),
+    "hybrid_search": HYBRID,
     "GET /v1/kb/search": frozenset({"vector_search"}),
     "POST /v1/answer": frozenset({"vector_search"}),
+    "GET /v1/kb/search (hybrid)": HYBRID,
+    "POST /v1/answer (hybrid)": HYBRID,
 }
 """Read path → the [HAND-WRITE] stubs it runs (M2 H1's `vector_search` for PR 6's routes, M3 H1's
-`text_search` for its own path; PR 4's hybrid paths will name both legs and `rrf_fuse`)."""
+`text_search` for its own path, and both legs and M3 H2's `rrf_fuse` for M3 PR 4's hybrid
+paths)."""
 
-NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {
-    "rrf_fuse": "tests/retrieval/test_fusion.py (H2's own tests), until PR 4's hybrid read paths",
-}
+NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {}
 """[HAND-WRITE] stubs that no read path runs yet, but other tests wait for through this same
-switch: stub → who waits. M3 H2's `rrf_fuse` leaves when PR 4 adds the hybrid read paths."""
+switch: stub → who waits. Empty since M3 PR 4: M3 H2's `rrf_fuse` left when the hybrid read paths
+came, which run it."""
 
 PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"text_search", "rrf_fuse"})
 """[HAND-WRITE] stubs still raising NotImplementedError, one switch each. Remove a name once
@@ -262,8 +339,11 @@ every test that runs it shows XPASS(strict) (guide: docs/learning/m3-hybrid.md �
 
 - "text_search": M3 H1 (shesha, D5, decided 2026-10-24). Its tests
   (`tests/retrieval/test_text_search.py`, `test_text_search_binding.py`), the `text_search` read
-  path and its owner-connection check wait for it.
-- "rrf_fuse": M3 H2 (shesha, D5). Its tests (`tests/retrieval/test_fusion.py`) wait for it.
+  path and its owner-connection check wait for it, and so do the hybrid paths below.
+- "rrf_fuse": M3 H2 (shesha, D5). Its tests (`tests/retrieval/test_fusion.py`) wait for it, and
+  so do M3 PR 4's three hybrid read paths (`hybrid_search`, also on the owner's connection, and
+  both routes in hybrid mode) and its Postgres hybrid tests
+  (`tests/retrieval/test_hybrid_snapshot.py`, the cases that run the real legs).
 
 For the record: M2 H1 "vector_search" and M2 H2 "retrieval_metrics" were removed on 2026-10-22
 (both written by Claude at shesha's request), so every check that runs them is a plain test."""

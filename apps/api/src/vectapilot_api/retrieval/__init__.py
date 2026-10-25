@@ -9,10 +9,11 @@
   until written (guide: docs/learning/m3-hybrid.md).
 - `fusion.py` — `rrf_fuse`, Reciprocal Rank Fusion. **[HAND-WRITE]** (M3 H2), written by shesha,
   a stub until then (same guide).
-- `search.py` — the search use case (M2 PR 6): embed the question, refuse mixed models, then
-  `vector_search` in one business transaction. Depends only on `vector_search`'s interface.
-- `router.py` — `GET /v1/kb/search` (M2 PR 6).
+- `search.py` — the search use case (M2 PR 6, M3 PR 4): embed the question, refuse mixed
+  models, then `vector_search` in one business transaction (vector mode, M2's path), or both
+  legs and `rrf_fuse` in one read-only snapshot (hybrid mode, `fused_search`). Depends only on
+  the three functions' interfaces.
+- `router.py` — `GET /v1/kb/search` (M2 PR 6), in the configured mode.
 
-Hybrid search (both legs fused in one snapshot, M3 PR 4) joins `search.py` later; reranking is
-not built in M3 (D13).
+Reranking is not built in M3 (D13).
 """

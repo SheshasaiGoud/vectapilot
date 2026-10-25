@@ -334,6 +334,39 @@ def test_a_dry_run_with_a_paid_provider_in_settings_is_refused(
     assert "a run without --live uses the fake providers only" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "args",
+    [
+        ["run", "--split", "dev"],
+        ["run", "--split", "dev", "--live", "--max-usd", "0.50"],
+        ["ingest"],
+    ],
+    ids=["dry", "live", "ingest"],
+)
+@pytest.mark.usefixtures("checked_and_selected")
+def test_a_hybrid_retrieval_mode_is_refused_until_pr5_adds_retrieval_mode(
+    world: World, capsys: pytest.CaptureFixture[str], args: list[str]
+) -> None:
+    # Decided 2026-10-25 (shesha): the harness builds vector-mode search and scores the vector
+    # list only, so a hybrid setting would be a run that reports one mode while its Settings name
+    # another. Everything else would let these runs through: the live one has the paid Settings
+    # and the cap typed at a terminal.
+    live = "--live" in args
+    world.settings = make_settings(**(PAID if live else {}), rag_retrieval_mode="hybrid")
+    world.stdin = Terminal("0.50\n")
+
+    assert world.run(*args) == 1
+
+    assert world.execute.calls == [] and run_dirs(world) == []
+    err = capsys.readouterr().err
+    assert "rag_retrieval_mode must be vector" in err and "--retrieval-mode" in err
+    assert "hybrid" not in err  # a fixed message: the setting's name, never its value
+    # The same Settings in vector mode go through (the refusal is the only thing that stopped it).
+    world.settings = world.settings.model_copy(update={"rag_retrieval_mode": "vector"})
+    world.stdin = Terminal("0.50\n")
+    assert world.run(*args) == 0 and len(world.execute.calls) == 1
+
+
 def test_a_search_k_of_zero_is_refused_never_replaced_by_the_default(world: World) -> None:
     assert world.run("run", "--split", "dev", "--search-k", "0") == 1
     assert world.execute.calls == [] and run_dirs(world) == []

@@ -29,6 +29,9 @@ opt-in plays no part: the harness calls `AnswerService` directly, under its own 
 - a live run on a dataset that is not frozen (tuning before the split exists would tune on future
   test questions); a dry run on an unfrozen dataset runs every question, labelled `unassigned`;
 - a dry run whose Settings name a paid provider (`harness.check_run` refuses it again);
+- a `rag_retrieval_mode` other than `vector`, dry or live, and in `ingest` too (decided 2026-10-25,
+  shesha; `harness.VECTOR_MODE_ONLY`, refused again by `check_run`): the harness measures vector
+  mode only until M3 PR 5 adds `--retrieval-mode`;
 - a question whose text `POST /v1/answer` would refuse (named by id);
 - `--split test` unless it is live, the dataset is frozen, a complete live **dev** run with the same
   config fingerprint is committed (its run.json byte for byte in HEAD), the test-run ledger
@@ -74,6 +77,7 @@ from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.runner import EMBEDDING_CALL
 from vectapilot_api.evalrun.budget import CostCap, record_for, usd
 from vectapilot_api.evalrun.harness import (
+    VECTOR_MODE_ONLY,
     HarnessRefused,
     RunConfig,
     RunOutcome,
@@ -718,6 +722,8 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
 def _check_settings(settings: Settings, live: bool) -> None:
     if settings.environment == "production":
         raise Refused("the eval harness never runs with environment production")
+    if settings.rag_retrieval_mode != "vector":
+        raise Refused(VECTOR_MODE_ONLY)
     if live and (settings.llm_provider == "fake" or settings.embeddings_provider == "fake"):
         raise Refused(
             "--live needs the paid providers in Settings: llm_provider anthropic and"

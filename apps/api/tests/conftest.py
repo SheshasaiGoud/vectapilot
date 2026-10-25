@@ -54,6 +54,9 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "rag_min_score": 0.3,
     "rag_context_k": 5,
     "rag_weak_evidence_outcome": "dont_know",
+    "rag_retrieval_mode": "vector",
+    "rag_candidate_k": 20,
+    "rag_rrf_k": 60,
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 
