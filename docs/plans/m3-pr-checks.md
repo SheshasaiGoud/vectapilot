@@ -601,6 +601,11 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
   - The harness takes `--retrieval-mode`, like `--min-score`. It replaces PR 4's refusal of a
     hybrid `rag_retrieval_mode` (`harness.VECTOR_MODE_ONLY`, PR 4's decision 6; ADR 0014, "Not
     built here"): PR 5 removes the refusal and its two tests together.
+  - **`compare` in step** (review of PR 6, ananya A4). When `ConfigInfo` gains `retrieval`,
+    `compare`'s run table gains a "Retrieval" row (mode, candidate k, RRF k; "vector (no
+    retrieval block)" when the block is absent), and the report points to each folder's
+    summary.md for the FTS-only and headroom counts. Until then, PR 6 prints a missing block as
+    `config.retrieval: … (absent: vector mode)` among the differing fields.
 - **Fingerprint pin (D3's tripwire).** A test computes the fingerprint of a fixed vector config. It
   reads `catalog_version` from `gateway/models.toml` and `PROMPT_VERSION` from
   `answer/prompt.py`, never from literals, and compares the result with a pinned literal. A
@@ -675,6 +680,113 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
 - Dry or fake runs are labelled "not a result".
 - Comparing two chunk configs stays manual, from the two folders' `results.jsonl` (ADR 0013) [D14].
 - ADR 0013 amendment: its Consequences gain the command.
+- **Built (2026-10-25, noah).** In review; nothing merged. No migration, no new dependency,
+  `pyproject.toml` and `uv.lock` unchanged; no paid call, no database (run folders are files).
+  - Files: `evalrun/compare.py` (new); `evalrun/ledger.py` (the ledger model and its reader,
+    moved unchanged from `cli.py` so `compare` can read HEAD's ledger); `evalrun/cli.py` (the
+    `compare` command); `evalrun/report.py` (the fingerprint payload as its own function, same
+    hashes; `_metric_row` takes `k` and `counts_only`, defaults unchanged);
+    `tests/evalrun/test_compare.py` (47 tests after the review fixes, TEST-ONLY folders in
+    `tmp_path`); ADR 0013, "Amended 2026-10-25".
+  - Checks: `make check` passed. The fingerprint refactor was compared with HEAD's code on 4
+    configs: identical hashes. Mutation audit: 16 single changes to `compare.py`, each applied
+    alone to the working file, then restored byte for byte (sha256 checked). 15 failed a test.
+    The survivor (per-run rows at the run's metric k instead of 5) led to a stronger test, and
+    then all 16 failed.
+  - **Review fixes (2026-10-25; ananya A1, A2, A4, A5; kenji K1, K3, K5, K6).**
+    - A1: the groups come from every selected question, not from the pairs, so a business or
+      language whose questions are all left out keeps its rows with n = 0 ("none scorable under
+      both", plus a line naming it) instead of vanishing and passing D15 (ii) unseen. The
+      discordant table gains "Left out: one run only" and "Scorable in neither" (by reason) per
+      group. The questions section lists by id the questions scorable in one run only, not scored
+      (no evidence), unscorable in both, and not run in one or both runs.
+    - A4: the run table's "Mode" row is now "Live or dry". An absent `config.retrieval` reads
+      "(absent: vector mode)". PR 5's checklist has the "Retrieval" row.
+    - K3: on test, the run table carries each run's test-run ledger row (`report._ledger_row`),
+      and the banner names a held-out test RERUN with its reason.
+    - K6: the interval caveat says each run's intervals are computed as summary.md computes them,
+      over the paired n at k = 5, so they can differ from the run's own summary.md; and that
+      overlapping intervals do not show that the runs agree.
+    - K1, K5: run B's file is reversed in the two main tests (pairing by id, not by line). The
+      fingerprint, stored-value and search-k refusals are tested on both sides. A split_group
+      fixture is counted over paired questions only. The word guard matches word starts (it
+      gained "higher", "lower", "win", "lost", "lose", "gain", "beat", "outperform", "adopt" and
+      "superior"), and both table headers are asserted exactly (no difference column).
+    - Fixture: a chunk id keeps its matched groups across runs (`<id>-relevant`), as a stored
+      chunk does. Before, ids were named by rank, which A2's check would have flagged.
+    - Mutation check of the fixes: 16 in-memory mutants of `compare.py` (each run in its own
+      pytest process, no repo file written). These include the reviewers' K1 and K5 survivors,
+      groups from pairs only, a dropped ledger row or rerun banner, a dropped "vector mode",
+      and both A2 checks removed or comparing groups by rank. Each failed at least one test, and
+      the unmutated control passed 47.
+    - Checks after the fixes: ruff, format check and mypy clean; `make check` passed (2736
+      passed, 206 skipped, 42 xfailed; gateway coverage gate passed).
+- **[decided 2026-10-25] (shesha)** On PR 6's proposals and review findings:
+  1. **The test split, as built:** only two folders already in the test-run ledger as committed
+     in HEAD, counts only, "Held-out: reported, not used to choose" (maya's rule).
+  2. **Prints only, no `--out`:** redirect stdout to keep the report; nothing is written under
+     `evals/reports/` unless shesha chooses to.
+  3. **Keep the second re-ingest warning:** a document id that differs between the runs for one
+     eval business, source and version (it also catches a re-ingest by a third run).
+  4. **Refuse a run.json** whose `config_fingerprint` is not the hash of its own fields.
+  5. **A config block present in one run only** (PR 5's `retrieval`) counts as one differing field.
+  6. **"Not a result"** for a dry run and for a run that is not complete (partial, failed, leak).
+  7. **D15 (ii)'s safety half, as read in ananya's A5:** every `category == "safety"` question
+     that ran in both runs (outcome not `not_run`), whatever its retrieval status, answered under
+     one mode but not the other, as counts and ids per business, with no ranking. It is still not
+     built (below).
+  8. **Changed: the scoring-rule check refuses** (ananya A2), it does not warn. A question scored
+     in both runs with a chunk whose matched groups differ, or a question scored in one run and
+     unscorable in the other, is refused with one fixed message naming the cause and saying to
+     re-run both runs on one commit (`compare.SCORING_RULE_REFUSAL`). `not_run` stays benign.
+  9. **D15 (ii)'s hit half: a business with n = 0 paired questions gives no evidence and blocks
+     adoption**, because the retrieval mode is platform-wide. `compare` shows it as
+     "n = 0: no evidence (blocks adoption under D15)" (PR 9, step 4).
+- **Decisions applied (2026-10-26, noah).** In review; nothing merged.
+  - `compare.py`: `_check_scoring_rule` raises `CompareRefused` with `SCORING_RULE_REFUSAL`
+    (`REGROUPED_CAUSE` or `SPLIT_CAUSE`), after the stored-value check and before any pairing;
+    the two warnings are gone. A business row with n = 0 shows `NO_EVIDENCE_BLOCKS` as its n in
+    the discordant table, and a line under the table says that it blocks adoption under D15 (ii).
+    A language row with n = 0 does not block (D15 reads per business).
+  - **[proposal]** Every business in either run.json's `namespaces` (the dataset manifest's
+    businesses) now keeps its rows, with n = 0 when none of its questions was selected. Before,
+    such a business had no row at all, so it would have passed D15 (ii) unseen.
+  - With the refusal, a question scorable in one run only must have been not run in the other.
+    So the main test fixture's x-01 and x-02 are `not_run` on one side, and a TEST-ONLY folder
+    with an unrun question is written as partial (as `harness.final_status` would write it).
+    That report is "not a result"; two complete live runs are tested as a result separately.
+  - Tests for the mutation audit's gaps (`tests/evalrun/test_compare.py`, 68 passed):
+    - M54: a spy shows `hit_at_k` asked at k = 5 for each paired question in both runs (both
+      runs at metric k 6, so these calls are compare's own).
+    - M57: a spy goes through `cli.run(["compare", A, B])`, so the CLI uses `io.metrics`.
+    - M58: the bootstrap calls the passed `mean_reciprocal_rank` exactly
+      `bootstrap_resamples` times per run (200 and 120), for "all" (n = 12) only, not for
+      en (n = 9).
+    - M33: the no-ranking test covers both folder orders and a 2-and-2 tie, on dev and test.
+    - M34: every non-table line of the main fixture's report is pinned exactly.
+    - M38: the "Live or dry" cell is checked for live/live, dry/live, live/dry and dry/dry.
+    - M41: a later ingest into a namespace the earlier run never used gives no warning.
+    - M47: a ledger line with matching fields but another run id is refused.
+    - M26: the Wilson bounds 39 % to 86 % (8 of 12), 47 % to 91 % (9 of 12) and 44 % to 97 %
+      (5 of 6), worked out by hand in the test.
+    - Also: each scoring-rule refusal (both causes, both sides) and its literal text; an n = 0
+      language that does not block; a manifest business with no selected question.
+  - Mutation check: 21 in-memory mutants of `compare.py`, `cli.py` and `report.py`, each run in
+    its own pytest process; no repo file was written, and the sha256 of all four files was the
+    same before and after. Each was killed by the test written for it. For M54 (pair cell from
+    the stored value in run B), M57, M58 (run B's rows read run A's info), M34, M41 and M47, the
+    new test was the only one that failed. So these were real gaps. The unmutated control passed
+    68.
+  - Checks: ruff, format check and mypy clean; `make check` passed (2757 passed, 206 skipped,
+    42 xfailed; gateway coverage gate passed). No database, no paid call; `pyproject.toml`,
+    `uv.lock` and the migrations unchanged.
+- **Not built:** D15 (ii)'s safety half (decision 7's reading) is a per-question outcome check
+  that `compare` does not print yet. Until it is built, it is read from both folders'
+  results.jsonl.
+  - **Its range is not the pairs** (review of PR 6, ananya A5). A safety question must be
+    handed off but need not have evidence, and a question without evidence is `not_scored`, so
+    it never enters the pairs. Its test uses a safety question without evidence.
+  - [open, for shesha] Build it in PR 5 or in a small follow-up.
 
 ## PR 7 — `m3/faithfulness-labels` (noah; zara reviews) · S — before M2 step 16 if possible
 - **[proposal] `faithfulness_labels.jsonl` per run folder.** One line per shown answer (outcome
@@ -722,11 +834,15 @@ dependency, so steps 2–4 can overlap M2's steps 15–17.
    PR 5, H1 and H2.
 3. **`compare`** M2's vector dev run with each hybrid dev variant, and read the headroom count.
    *Needs:* step 2 and PR 6.
-4. **Choose on dev under D15 (ii)'s adoption rule**, counted over the questions scorable under
-   both runs. Hybrid is adopted only if, for each business, "vector hit, hybrid miss" ≤ "hybrid
-   hit, vector miss", and no safety row that vector did not answer is answered under hybrid. If
-   hybrid is adopted, a small PR flips `rag_retrieval_mode`'s default and carries the `compare`
-   output.
+4. **Choose on dev under D15 (ii)'s adoption rule.** Hybrid is adopted only if, for each business,
+   "vector hit, hybrid miss" ≤ "hybrid hit, vector miss", counted over the questions scorable
+   under both runs. **[decided 2026-10-25] (shesha)** A business with n = 0 gives no evidence and
+   blocks adoption, because the retrieval mode is platform-wide. `compare` shows it as
+   "n = 0: no evidence (blocks adoption under D15)". Adoption also needs that no safety row that
+   vector did not answer is answered under hybrid, counted over every safety question that ran in
+   both runs, whatever its retrieval status (review of PR 6, ananya A5: a safety question without
+   evidence is never scorable; this reading decided 2026-10-25, PR 6's decision 7). If hybrid is adopted, a small PR flips `rag_retrieval_mode`'s default and
+   carries the `compare` output.
    *Needs:* step 3.
 5. **If hybrid is adopted:** one live test run of the hybrid config (ledger entry before the first
    paid call), within what is left of the $5.00, then correctness and faithfulness labels and
