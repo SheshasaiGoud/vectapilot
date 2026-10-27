@@ -218,6 +218,37 @@ class RunInfo(_Closed):
     """Test-run ledger entries before this run on the same frozen version (any config)."""
 
 
+def fingerprint_payload(
+    *,
+    dataset: str,
+    version: str,
+    freeze_sha256: str | None,
+    embedding_model: str,
+    answer_model: str,
+    catalog_version: str,
+    prompt_version: str,
+    config: ConfigInfo,
+) -> dict[str, object]:
+    """Everything that defines what a run measures (not the commit, the seed or the cap), as the
+    JSON `config_fingerprint` hashes; `compare` lists the fields where two runs differ."""
+    return {
+        "dataset": dataset,
+        "version": version,
+        "freeze_sha256": freeze_sha256,
+        "embedding_model": embedding_model,
+        "answer_model": answer_model,
+        "catalog_version": catalog_version,
+        "prompt_version": prompt_version,
+        "config": config.model_dump(mode="json"),
+    }
+
+
+def fingerprint_digest(payload: Mapping[str, object]) -> str:
+    """sha256 of a fingerprint payload's canonical JSON."""
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def config_fingerprint(
     *,
     dataset: str,
@@ -229,20 +260,34 @@ def config_fingerprint(
     prompt_version: str,
     config: ConfigInfo,
 ) -> str:
-    """sha256 of everything that defines what a run measures (not the commit, the seed or the
-    cap): "test run once per reported config" is checked against it."""
-    payload = {
-        "dataset": dataset,
-        "version": version,
-        "freeze_sha256": freeze_sha256,
-        "embedding_model": embedding_model,
-        "answer_model": answer_model,
-        "catalog_version": catalog_version,
-        "prompt_version": prompt_version,
-        "config": config.model_dump(mode="json"),
-    }
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    """sha256 of everything that defines what a run measures (`fingerprint_payload`): "test run
+    once per reported config" is checked against it."""
+    return fingerprint_digest(
+        fingerprint_payload(
+            dataset=dataset,
+            version=version,
+            freeze_sha256=freeze_sha256,
+            embedding_model=embedding_model,
+            answer_model=answer_model,
+            catalog_version=catalog_version,
+            prompt_version=prompt_version,
+            config=config,
+        )
+    )
+
+
+def run_fingerprint_payload(run: RunInfo) -> dict[str, object]:
+    """The fingerprint payload of a run, from its run.json fields."""
+    return fingerprint_payload(
+        dataset=run.dataset,
+        version=run.dataset_version,
+        freeze_sha256=run.freeze_sha256,
+        embedding_model=run.embedding_model,
+        answer_model=run.answer_model,
+        catalog_version=run.catalog_version,
+        prompt_version=run.prompt_version,
+        config=run.config,
+    )
 
 
 # ── Labels ───────────────────────────────────────────────────────────────────────────────────
@@ -480,11 +525,16 @@ def _metric_row(
     functions: MetricFunctions,
     *,
     unscorable: int = 0,
+    k: int | None = None,
+    counts_only: bool | None = None,
 ) -> MetricRow:
     """One retrieval row: H2's values for the group's scored `results`, cross-checked, with
-    their intervals; `unscorable` is the group's count of questions unscorable at this config."""
-    k = run.config.metric_k
-    counts_only = group.removeprefix("category ") in COUNTS_ONLY_CATEGORIES
+    their intervals; `unscorable` is the group's count of questions unscorable at this config.
+    `k` defaults to the run's metric k and `counts_only` to the category rule (safety); `compare`
+    passes k 5 and, on the test split, counts only."""
+    k = run.config.metric_k if k is None else k
+    if counts_only is None:
+        counts_only = group.removeprefix("category ") in COUNTS_ONLY_CATEGORIES
     records = [result.ranked() for result in results]
     n = len(records)
     if n == 0:  # only unscorable questions in this group: nothing to score, nothing hidden

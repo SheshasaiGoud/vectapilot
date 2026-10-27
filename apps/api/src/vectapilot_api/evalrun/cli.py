@@ -5,6 +5,7 @@
     ingest [--fresh]                   # dry only: ingest the corpus with the fake embedder
     summarize RUN_DIR                  # recompute summary.md/json from a run folder (labels too)
     label-sheet RUN_DIR                # print questions and answers for labelling (stdout only)
+    compare RUN_A RUN_B                # two runs of one chunk config, paired by question (stdout)
 
 **`run` is the one command** of PR 9's live run: it registers the eval businesses if needed
 (owner URL), ingests the corpus through the product (`KbService`, idempotent), checks the stored
@@ -43,6 +44,9 @@ opt-in plays no part: the harness calls `AnswerService` directly, under its own 
 - a metric k above the search k, or a search k below 1 (D6, asserted again in `RunConfig` and in
   run.json's `ConfigInfo`).
 
+**`compare`** (M3 PR 6, `compare.py`) reads two run folders and prints, never writes: redirect
+stdout to keep the report. It reads git only on the test split (the ledger as committed in HEAD).
+
 Everything the run writes after its calls (run.json, labels, the summary) can still fail; it then
 prints "the run FAILED, no summary written", where the folder is and what was spent, never
 "nothing was sent".
@@ -68,7 +72,7 @@ from decimal import Decimal
 from pathlib import Path, PurePosixPath
 from typing import Any, Final, TextIO
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
 
 from vectapilot_api.answer.prompt import PROMPT_VERSION
 from vectapilot_api.answer.service import ANSWER_ALIAS
@@ -76,6 +80,7 @@ from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.runner import EMBEDDING_CALL
 from vectapilot_api.evalrun.budget import CostCap, record_for, usd
+from vectapilot_api.evalrun.compare import CompareRefused, compare, load_run, render_comparison
 from vectapilot_api.evalrun.harness import (
     VECTOR_MODE_ONLY,
     HarnessRefused,
@@ -87,6 +92,13 @@ from vectapilot_api.evalrun.harness import (
 )
 from vectapilot_api.evalrun.ingest import IngestRefused
 from vectapilot_api.evalrun.intervals import DEFAULT_CONFIDENCE
+from vectapilot_api.evalrun.ledger import (
+    LEDGER_FILE,
+    LedgerEntry,
+    append_ledger,
+    parse_ledger,
+    read_ledger,
+)
 from vectapilot_api.evalrun.namespace import NamespaceError, namespaces
 from vectapilot_api.evalrun.plan import worst_case
 from vectapilot_api.evalrun.report import (
@@ -152,7 +164,6 @@ from vectapilot_api.measure.budget import MAX_USD_CEILING
 from vectapilot_api.measure.records import RecordError, parse_llm_call_lines
 
 PROG: Final = "python -m vectapilot_api.evalrun"
-LEDGER_FILE: Final = "test-runs.jsonl"
 RUNBOOK: Final = "docs/learning/m2-eval-run.md"
 
 EXIT_OK: Final = 0
@@ -278,6 +289,12 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("summarize", "label-sheet"):
         command = commands.add_parser(name)
         command.add_argument("run_dir", type=Path)
+    compare = commands.add_parser(
+        "compare",
+        help="two runs of one chunk config, paired by question; prints, never writes",
+    )
+    compare.add_argument("run_a", type=Path, help="run A's folder")
+    compare.add_argument("run_b", type=Path, help="run B's folder")
     return parser
 
 
@@ -297,40 +314,7 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     return args
 
 
-# ── The test-split discipline ────────────────────────────────────────────────────────────────
-
-
-class LedgerEntry(BaseModel):
-    """One test run, appended before its first paid call
-    (`evals/reports/<dataset>/test-runs.jsonl`)."""
-
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    dataset: str
-    version: str
-    freeze_sha256: str | None
-    config_fingerprint: str
-    run_id: str
-    commit: str
-    started_at: datetime
-    rerun_reason: str | None
-
-
-def read_ledger(path: Path) -> list[LedgerEntry]:
-    if not path.is_file():
-        return []
-    return [
-        LedgerEntry.model_validate_json(line)
-        for line in path.read_text("utf-8").splitlines()
-        if line.strip()
-    ]
-
-
-def append_ledger(path: Path, entry: LedgerEntry) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as ledger:
-        ledger.write(entry.model_dump_json() + "\n")
-        ledger.flush()
+# ── The test-split discipline (the ledger itself: `ledger.py`) ───────────────────────────────
 
 
 def committed_dev_run(
@@ -972,6 +956,34 @@ def label_sheet_command(args: argparse.Namespace, io: Io) -> int:
     return EXIT_OK
 
 
+def _committed_ledger(io: Io, dataset: str) -> list[LedgerEntry] | None:
+    """The dataset's test-run ledger as committed in HEAD, or None when HEAD has none."""
+    git = io.git()
+    relative = PurePosixPath((REPORTS_DIR / dataset / LEDGER_FILE).as_posix())
+    content = io.head_file(git.root, relative)
+    if content is None:
+        return None
+    try:
+        return parse_ledger(content.decode("utf-8"))
+    except (UnicodeDecodeError, ValidationError):
+        raise CompareRefused(f"{relative} as committed in HEAD is not a valid ledger") from None
+
+
+def compare_command(args: argparse.Namespace, io: Io) -> int:
+    """Print the comparison of two run folders (`compare.py`); exit 1 when it is refused."""
+    try:
+        run_a = load_run(args.run_a, "A")
+        run_b = load_run(args.run_b, "B")
+        both_test = run_a.info.split == run_b.info.split == "test"
+        ledger = _committed_ledger(io, run_a.info.dataset) if both_test else None
+        comparison = compare(run_a, run_b, io.metrics, ledger=ledger)
+    except CompareRefused as refused:
+        print(f"{PROG} compare: refused: {refused}", file=sys.stderr)
+        return EXIT_FAILED
+    print(render_comparison(comparison), end="")
+    return EXIT_OK
+
+
 def run(argv: Sequence[str] | None, io: Io) -> int:
     args = parse_args(argv)
     try:
@@ -981,6 +993,8 @@ def run(argv: Sequence[str] | None, io: Io) -> int:
             return ingest_command(args, io)
         if args.command == "summarize":
             return summarize_command(args, io)
+        if args.command == "compare":
+            return compare_command(args, io)
         return label_sheet_command(args, io)
     except (
         Refused,

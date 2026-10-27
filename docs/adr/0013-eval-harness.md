@@ -107,10 +107,12 @@ printed with the plan; not measured until PR 9) and leaves its namespace in the 
 leak can never be averaged away. The price: more code to read; namespaces accumulate locally until
 `--fresh` or a reset; the test-run ledger is honest only if test runs go through the harness and
 the ledger is committed with each test folder; comparing two chunk configs over the questions
-scorable under both is done from the two folders' results.jsonl (no command does it yet).
+scorable under both is done from the two folders' results.jsonl (no command does it yet). Two runs
+of one chunk config are compared by `evalrun compare <run A> <run B>`, paired by question id
+(amended 2026-10-25, below); it refuses two chunk configs.
 
 **Amended 2026-10-23 (shesha, M3 plan D3, D4, D14, D15; `docs/plans/m3-pr-checks.md`).** Built in
-M3 PR 5–7; nothing below is built yet.
+M3 PR 5–7; only `compare` is built so far (PR 6, 2026-10-25, below).
 - **The measurement window** (D3 (a)), from M2's first live dev run to M3's last live answer run:
   - No change to `gateway/models.toml`, `PROMPT_VERSION` or the gateway's output path. A catalog
     or prompt bump changes every fingerprint and refuses the test run, and the output mode is not
@@ -143,3 +145,45 @@ M3 PR 5–7; nothing below is built yet.
   folders, shows it before the cap prompt, and refuses a cap above what is left (details: the
   plan, PR 5). Like the typed cap, this only catches mistakes. The providers' own limits stay the
   real cap across runs (ADR 0007; Voyage's spend limit is unverified, ADR 0008).
+
+**Amended 2026-10-25 (M3 PR 6, noah; in review, ananya reviews; shesha's decisions of 2026-10-25
+applied 2026-10-26).** `compare` is built as the 2026-10-23 amendment says (`evalrun/compare.py`;
+plan, PR 6, "[decided 2026-10-25] (shesha)"):
+- It reads run.json and results.jsonl only, prints Markdown and writes nothing: redirect stdout
+  to keep the report (decided).
+- Refused, naming the field: another dataset, version, freeze, split or embedding model; two
+  chunk configs, with a pointer to decision 8 and D14. Also refused: a run.json whose
+  `config_fingerprint` is not the hash of its own fields (decided), two question sets, a search k
+  below 5, stored values H2 does not give again, and the same folder twice.
+- **A scoring rule that differs between the runs is refused** (D3; decided: refuse, not warn): a
+  question scored in both runs with a chunk whose matched groups differ, or a question scored in
+  one run and unscorable in the other. One freeze and chunk config store the same chunks, so
+  either means the code deciding relevant or unscorable changed, and the fingerprint does not
+  cover that code. The message is fixed: it names the cause and says to re-run both runs on one
+  commit. A question not run in one run stays benign.
+- Printed: both commits, every other fingerprint field that differs (a block present in one run
+  only, such as PR 5's `retrieval`, is one field, decided; an absent `retrieval` reads "absent:
+  vector mode"), and a warning when more than one does. Two re-ingest warnings (D3): the later
+  run's ingest wrote chunks into a namespace the earlier run used; and a document has another id
+  in each run for the same eval business, source and version (decided; it also sees a re-ingest
+  made by a third run).
+- Over the questions scorable under both: hit@5 and MRR@5 per run through H2, with decision 7's
+  intervals computed over the paired n at k = 5 (so they can differ from each run's own
+  summary.md), for "all", each business and each language; and the discordant pairs at hit@5 by
+  question id, per business and per language. Counts and intervals only.
+- Left out, as decision 8 asks (outside every row's n, shown next to it per row): the groups
+  come from every selected question, so a group with nothing paired keeps an n = 0 row; so does
+  every business in either run.json's `namespaces` with no selected question [proposal]. Per
+  group, the questions scorable in one run only and those scorable in neither are counted. The
+  questions themselves are listed by id: scorable in one run only, not scored (no evidence),
+  unscorable in both, and not run in one or both.
+- **A business with n = 0 gives no evidence and blocks adoption under D15 (ii)** (decided), as
+  the retrieval mode is platform-wide. Its discordant row reads "n = 0: no evidence (blocks
+  adoption under D15)". A language with n = 0 does not block.
+- "Not a result" for a dry run, a run that is not complete, or an unfrozen dataset (decided).
+  "Dev is for choosing" on dev. On test, only folders already in the ledger as committed in
+  HEAD, counts only, "Held-out: reported, not used to choose" (maya's rule, decided), with each
+  run's test-run ledger row and any RERUN named with its reason (decision 5).
+- Not built yet: D15 (ii)'s safety half. Its reading is decided: every safety question that ran
+  in both runs, whatever its retrieval status, answered under one mode but not the other, as
+  counts and ids per business. Whether it lands in PR 5 or a follow-up is open.
