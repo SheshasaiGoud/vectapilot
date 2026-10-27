@@ -10,7 +10,9 @@ dry: the same under the git-ignored `evals/reports/tmp/`, `-fake-` instead of `-
   timestamps, `dry_run` and the status.
 - `results.jsonl` (`scoring.QuestionResult`): one line per selected question, written as the run
   goes: ids, labels, the ranked hits (no text) with the groups each finds, H2's values, the
-  outcome, sources and trace id. No question, chunk or answer text.
+  outcome, sources and trace id. No question, chunk or answer text. In a hybrid run (M3 PR 5) the
+  ranked hits are the fused list, and `components` keeps each leg's list (chunk ids, ranks,
+  matched groups) and the harness's own time inside each stage.
 - `answers.jsonl` (`scoring.AnswerLine`): the system's reply per question that ran, the only file
   with model text (the answer), for labelling. No question text: the dataset holds it, pinned by
   freeze.json.
@@ -46,6 +48,17 @@ business to meet it. These choices were decided by shesha on 2026-10-22 (ADR 001
 **"Synthetic"** comes from the dataset manifest and the corpus manifests (run.json records both
 flags), never from chunk text: the summary's data sentence and the CLI's plan say "NOT synthetic"
 when either flag is false.
+
+**Hybrid runs (M3 PR 5).** run.json's `config.retrieval` block (mode, candidate k, RRF k, the
+language map's sha256) is part of the fingerprint and absent in vector mode, so a vector run's
+run.json and fingerprint stay M2's. The summary then adds, from the files only: each list's rows
+(vector leg, text leg, fused) at the metric k with their intervals; the FTS-only counts; the
+headroom count (D13: scored questions with H2's hit@10 and not its hit@5 on the fused list, by
+id; harness counting over H2's values, D5); and the per-stage latency from `rag_answer_log.jsonl`
+minus the harness's own time, through M1's `latency_summary` (p95 only from n = 20), labelled
+"local Docker on an 8 GB Mac, synthetic" and never compared with §6's target. Every run, vector
+too, gets its safety questions by outcome per business (zara S7). It refuses component lists that
+disagree with run.json or with each other.
 """
 
 import hashlib
@@ -56,8 +69,19 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Final, Literal
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    ValidationError,
+    model_serializer,
+    model_validator,
+)
 
+from vectapilot_api.answer.service import RAG_ANSWER
+from vectapilot_api.answer.types import RagAnswerRecord
 from vectapilot_api.evalrun.budget import usd
 from vectapilot_api.evalrun.intervals import (
     DEFAULT_CONFIDENCE,
@@ -77,6 +101,9 @@ from vectapilot_api.evalset.corpus import describe_validation_error
 from vectapilot_api.evalset.questions import CATEGORIES, CorrectnessLabel, EvalQuestion
 from vectapilot_api.evalset.ranking import RankedRelevance
 from vectapilot_api.gateway.types import Usd
+from vectapilot_api.ingestion.language_map import FALLBACK_CONFIG, TEXT_SEARCH_CONFIGS
+from vectapilot_api.measure.latency import LatencySummary, latency_summary
+from vectapilot_api.retrieval.types import MAX_K
 
 RUN_FILE: Final = "run.json"
 RESULTS_FILE: Final = "results.jsonl"
@@ -126,22 +153,80 @@ class _Closed(BaseModel):
 # ── run.json ─────────────────────────────────────────────────────────────────────────────────
 
 
+SEARCH_K_ABOVE_CANDIDATE_K: Final = (
+    "in hybrid mode the search k (rag_context_k: how many fused hits reach the evidence gate) must"
+    " be at most rag_candidate_k (the fused list's length): the API refuses such Settings at"
+    " startup, so the harness never measures a config the product cannot run (M3 PR 5)"
+)
+"""Why a hybrid run with `--search-k` above `rag_candidate_k` is refused (fixed text, no value).
+Refuse rather than record `max(rag_candidate_k, search_k)` [proposal, M3 PR 5]."""
+
+
+def language_map_canonical() -> str:
+    """The language map's canonical form (M3 PR 5; decided 2026-10-25, shesha): compact JSON with
+    sorted keys and ASCII only, `{"fallback": FALLBACK_CONFIG, "map": TEXT_SEARCH_CONFIGS}` from
+    `ingestion/language_map.py`; today `{"fallback":"simple","map":{"en":"english","hi":"hindi"}}`.
+    Fixed: changing the form changes every hybrid run's fingerprint, as a map change does. (Here,
+    not in `ingestion/`: that package imports nothing outside its allowlist, `json` included.)"""
+    return json.dumps(
+        {"fallback": FALLBACK_CONFIG, "map": dict(TEXT_SEARCH_CONFIGS)},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+
+
+def language_map_sha256() -> str:
+    """The language map's version: the sha256 of `language_map_canonical()` (decided 2026-10-25,
+    shesha: a hash, never a hand-bumped constant), recorded in a hybrid run's `retrieval` block."""
+    return hashlib.sha256(language_map_canonical().encode("ascii")).hexdigest()
+
+
+class RetrievalInfo(_Closed):
+    """run.json's `config.retrieval` (M3 PR 5, ADR 0013 amendment 2026-10-23): how a hybrid run
+    retrieved. Part of the config fingerprint. Absent in vector mode (`ConfigInfo` leaves a None
+    block out of every dump), so a vector run's run.json and fingerprint stay exactly M2's."""
+
+    mode: Literal["hybrid"]
+    candidate_k: int = Field(ge=1, le=MAX_K)
+    """`rag_candidate_k`: each leg's k and the fused list's length (never below the search k,
+    `SEARCH_K_ABOVE_CANDIDATE_K`)."""
+    rrf_k: int = Field(ge=1)
+    """`rag_rrf_k`: RRF's k."""
+    language_map_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    """`language_map_sha256()` when the run was made (decided 2026-10-25, shesha)."""
+
+
 class ConfigInfo(_Closed):
     max_chars: int
     overlap_chars: int
     search_k: int
-    """The k passed to the search (`rag_context_k`)."""
+    """The k passed to the search (`rag_context_k`). In hybrid mode: how many of the top fused
+    hits reach the evidence gate (the search itself is asked for the candidate k)."""
     metric_k: int
     """hit@k and MRR@k's k; at most `search_k` (asserted)."""
     rag_min_score: float
     weak_evidence_outcome: str
     llm_max_retries: int
     llm_max_repairs: int
+    retrieval: RetrievalInfo | None = None
+    """Hybrid only (M3 PR 5); absent from the dump, and so from the fingerprint, in vector mode."""
 
     @model_validator(mode="after")
     def _metric_k_within_search_k(self) -> "ConfigInfo":
         check_metric_k(self.metric_k, self.search_k)  # also when read back from run.json
+        if self.retrieval is not None and self.search_k > self.retrieval.candidate_k:
+            raise ValueError(SEARCH_K_ABOVE_CANDIDATE_K)
         return self
+
+    @model_serializer(mode="wrap")
+    def _without_absent_retrieval(self, handler: SerializerFunctionWrapHandler) -> object:
+        # As `RagAnswerRecord` does for its block (review of PR 4, noah N3): a vector run's
+        # config dumps without the key, never as `"retrieval": null`, so M2's fingerprints hold.
+        data = handler(self)
+        if self.retrieval is None and isinstance(data, dict):
+            data.pop("retrieval", None)
+        return data
 
 
 class CostInfo(_Closed):
@@ -216,6 +301,20 @@ class RunInfo(_Closed):
     """Test-run ledger entries before this run with the same config fingerprint."""
     test_runs_before_freeze: int = Field(default=0, ge=0)
     """Test-run ledger entries before this run on the same frozen version (any config)."""
+    m3_spend: bool = False
+    """`--m3-spend` (M3 PR 5): a vector run named as one of M3's paid runs (D3's re-run), so its
+    spend counts toward M3's $5.00 ceiling (`spend.py`). A hybrid run counts without it. Not part
+    of the fingerprint. Left out of the dump when False (read back as False), so a vector run's
+    run.json has exactly M2's keys (review of PR 5, ananya A5)."""
+
+    @model_serializer(mode="wrap")
+    def _without_unnamed_m3_spend(self, handler: SerializerFunctionWrapHandler) -> object:
+        # As `ConfigInfo._without_absent_retrieval`: M2's code (extra="forbid") can still read a
+        # vector run.json written now, and only a run named with --m3-spend says so.
+        data = handler(self)
+        if not self.m3_spend and isinstance(data, dict):
+            data.pop("m3_spend", None)
+        return data
 
 
 def fingerprint_payload(
@@ -274,6 +373,19 @@ def config_fingerprint(
             config=config,
         )
     )
+
+
+def m3_spend_reason(run: RunInfo) -> str | None:
+    """Why a run's spend counts toward M3's $5.00 ceiling (D15 (iii); `spend.py`), or None: a
+    live run with a `retrieval` block (every hybrid run is M3's), or a live vector run named with
+    `--m3-spend` (D3's re-run) [proposal, M3 PR 5]. A dry run never counts: it costs nothing."""
+    if run.dry_run:
+        return None
+    if run.config.retrieval is not None:
+        return "hybrid (retrieval block)"
+    if run.m3_spend:
+        return "vector, named by --m3-spend"
+    return None
 
 
 def run_fingerprint_payload(run: RunInfo) -> dict[str, object]:
@@ -409,6 +521,55 @@ class TargetRow(_Closed):
     """Whether the Wilson interval's lower end reaches the target; None without a verdict."""
 
 
+RankedListName = Literal["vector", "text", "fused"]
+RANKED_LISTS: Final[tuple[RankedListName, ...]] = ("vector", "text", "fused")
+HEADROOM_KS: Final = (5, 10)
+"""D13's headroom count: hit@10 and not hit@5 on the fused list (M3 plan, PR 5)."""
+SAFETY_OUTCOMES: Final = ("answered", "dont_know", "handoff", "error")
+LATENCY_LABEL: Final = "local Docker on an 8 GB Mac, synthetic"
+"""Every per-stage latency row's label (M3 plan, PR 5): never compared with §6's p95 < 6 s."""
+LATENCY_TOLERANCE_MS: Final = 1e-6
+"""A stage minus the harness's own time may come out below 0 by float noise only (a nanosecond):
+clamped to 0 within this, refused beyond it (the two files do not belong together)."""
+
+
+class ListRow(_Closed):
+    """One retrieval row of one ranked list of a hybrid run (each leg, and the fused list)."""
+
+    ranked_list: RankedListName
+    row: MetricRow
+
+
+class HeadroomCount(_Closed):
+    """D13's headroom count (harness counting over H2's values, D5): scored questions whose fused
+    list has H2's hit@10 and not its hit@5, listed by id, per business too (counts only)."""
+
+    questions: tuple[str, ...]
+    total: CountStat
+    by_business: dict[str, CountStat]
+
+
+class FtsOnlyCount(_Closed):
+    """What only the full-text leg found (in the text list, not the vector list), over the
+    questions whose search finished: in the fused lists, and among the hits the prompt held."""
+
+    questions: int
+    fused_hits: int
+    evidence_hits: int
+    evidence_questions: tuple[str, ...]
+    by_business: dict[str, tuple[int, int]]
+    """{business: (FTS-only fused hits, FTS-only evidence hits)}."""
+
+
+class StageLatency(_Closed):
+    """One stage's latency over the questions whose `rag_answer` record has it (M1's
+    `latency_summary`: p95 only from n = 20), the harness's own time subtracted."""
+
+    stage: str
+    latency: LatencySummary | None
+    """None when no question has this stage."""
+
+
 class Summary(_Closed):
     run: RunInfo
     status_line: str
@@ -441,6 +602,19 @@ class Summary(_Closed):
     unlabelled: int
     correctness: tuple[CorrectnessRow, ...]
     targets: tuple[TargetRow, ...] = ()
+    safety_outcomes: dict[str, dict[str, int]] = Field(default_factory=dict)
+    """Per business of the run (every one in run.json's namespaces): its safety questions that ran,
+    by outcome (zara S7; counts only). M3 PR 5."""
+    by_list: tuple[ListRow, ...] = ()
+    """Hybrid only: each ranked list (vector leg, text leg, fused) at the metric k, for "all" and
+    each business."""
+    headroom: HeadroomCount | None = None
+    headroom_note: str | None = None
+    """Hybrid only: why the headroom count is not shown (a fused list shorter than 10)."""
+    fts_only: FtsOnlyCount | None = None
+    latency: tuple[StageLatency, ...] = ()
+    latency_note: str | None = None
+    """Hybrid only: why some or all per-stage latency is not shown."""
 
 
 def read_results(run_dir: Path) -> list[QuestionResult]:
@@ -527,15 +701,17 @@ def _metric_row(
     unscorable: int = 0,
     k: int | None = None,
     counts_only: bool | None = None,
+    ranked: Callable[[QuestionResult], RankedRelevance] | None = None,
 ) -> MetricRow:
     """One retrieval row: H2's values for the group's scored `results`, cross-checked, with
     their intervals; `unscorable` is the group's count of questions unscorable at this config.
     `k` defaults to the run's metric k and `counts_only` to the category rule (safety); `compare`
-    passes k 5 and, on the test split, counts only."""
+    passes k 5 and, on the test split, counts only. `ranked` picks the list (default each
+    result's own `hits`; a hybrid run's per-leg rows pass `ranked_component`)."""
     k = run.config.metric_k if k is None else k
     if counts_only is None:
         counts_only = group.removeprefix("category ") in COUNTS_ONLY_CATEGORIES
-    records = [result.ranked() for result in results]
+    records = [result.ranked() if ranked is None else ranked(result) for result in results]
     n = len(records)
     if n == 0:  # only unscorable questions in this group: nothing to score, nothing hidden
         empty = MeanStat(value=None, n=0, low=None, high=None, ranks={})
@@ -808,6 +984,16 @@ def summarize(run_dir: Path, functions: MetricFunctions = H2_METRICS) -> Summary
     )
     line, reasons = status_of(run, len(unlabelled))
     shared = Counter(r.split_group for r in results if r.split_group is not None)
+    safety_outcomes: dict[str, dict[str, int]] = {
+        business: dict.fromkeys(SAFETY_OUTCOMES, 0) for business in sorted(run.namespaces)
+    }
+    for result in ran:
+        if result.category == "safety":
+            counts = safety_outcomes.setdefault(
+                result.business_id, dict.fromkeys(SAFETY_OUTCOMES, 0)
+            )
+            counts[result.outcome] += 1
+    hybrid = _hybrid_parts(run_dir, run, results, functions)
     return Summary(
         run=run,
         status_line=line,
@@ -832,7 +1018,260 @@ def summarize(run_dir: Path, functions: MetricFunctions = H2_METRICS) -> Summary
         unlabelled=len(unlabelled),
         correctness=correctness,
         targets=_targets(retrieval, correctness, run, len(unlabelled)),
+        safety_outcomes=dict(sorted(safety_outcomes.items())),
+        **hybrid,
     )
+
+
+# ── Hybrid runs (M3 PR 5) ────────────────────────────────────────────────────────────────────
+
+
+def _check_components(run: RunInfo, results: Sequence[QuestionResult]) -> None:
+    """A hybrid run keeps each leg's list for every question that ran, and a vector run none.
+    Each list ranks from 1 and is at most the candidate k long; a chunk finds the same groups in
+    every list; every fused hit is in a leg's list. Raises `SummaryError` naming the question."""
+    retrieval = run.config.retrieval
+    for result in results:
+        where = f"question {result.question_id}"
+        if retrieval is None:
+            if result.components is not None:
+                raise SummaryError(
+                    f"{where}: component lists in a vector run ({RUN_FILE} has no retrieval block)"
+                )
+            continue
+        components = result.components
+        if components is None:
+            if result.outcome != "not_run":
+                raise SummaryError(
+                    f"{where}: a hybrid run's question that ran has no component"
+                    f" lists in {RESULTS_FILE}"
+                )
+            continue
+        for name, hits in (
+            ("vector", components.vector),
+            ("text", components.text),
+            ("fused", result.hits),
+        ):
+            if [hit.rank for hit in hits] != list(range(1, len(hits) + 1)):
+                raise SummaryError(f"{where}: the {name} list's ranks are not 1, 2, 3, ...")
+            if len(hits) > retrieval.candidate_k:
+                raise SummaryError(f"{where}: the {name} list is longer than the candidate k")
+        found: list[tuple[str, tuple[int, ...]]] = [
+            *((hit.chunk_id, hit.groups) for hit in (*components.vector, *components.text)),
+            *((hit.chunk_id, hit.groups) for hit in result.hits),
+        ]
+        groups: dict[str, tuple[int, ...]] = {}
+        for chunk_id, matched in found:
+            if groups.setdefault(chunk_id, matched) != matched:
+                raise SummaryError(f"{where}: one chunk finds other groups in another list")
+        legs = {hit.chunk_id for hit in (*components.vector, *components.text)}
+        if any(hit.chunk_id not in legs for hit in result.hits):
+            raise SummaryError(f"{where}: a fused hit is in neither leg's list")
+
+
+def _hybrid_parts(
+    run_dir: Path, run: RunInfo, results: Sequence[QuestionResult], functions: MetricFunctions
+) -> dict[str, object]:
+    """The summary's hybrid-only fields (empty for a vector run): each list's rows, the headroom
+    count, the FTS-only counts and the per-stage latency."""
+    _check_components(run, results)
+    retrieval = run.config.retrieval
+    if retrieval is None:
+        return {}
+    accounted = [r for r in results if r.retrieval in RETRIEVAL_ROWS]
+    groups = [
+        (group, members)
+        for group, members in _groups(accounted)
+        if group == "all" or group.startswith("business ")
+    ]
+    by_list: list[ListRow] = []
+    for name in RANKED_LISTS:
+
+        def ranked(result: QuestionResult, name: RankedListName = name) -> RankedRelevance:
+            return result.ranked() if name == "fused" else result.ranked_component(name)
+
+        by_list += [
+            ListRow(
+                ranked_list=name,
+                row=_metric_row(
+                    group,
+                    [r for r in members if r.retrieval == "scored"],
+                    run,
+                    functions,
+                    unscorable=sum(r.retrieval == "unscorable" for r in members),
+                    ranked=ranked,
+                ),
+            )
+            for group, members in groups
+            if members
+        ]
+    scored = [r for r in results if r.retrieval == "scored"]
+    headroom, headroom_note = _headroom(scored, run, functions)
+    latency, latency_note = _latency(run_dir, results)
+    return {
+        "by_list": tuple(by_list),
+        "headroom": headroom,
+        "headroom_note": headroom_note,
+        "fts_only": _fts_only(results, run),
+        "latency": latency,
+        "latency_note": latency_note,
+    }
+
+
+def _headroom(
+    scored: Sequence[QuestionResult], run: RunInfo, functions: MetricFunctions
+) -> tuple[HeadroomCount | None, str | None]:
+    """D13's count over H2's per-question hit@5 and hit@10 on the fused list (D5: counting, not a
+    metric function)."""
+    retrieval = run.config.retrieval
+    low, high = HEADROOM_KS
+    if retrieval is None or retrieval.candidate_k < high:
+        depth = "none" if retrieval is None else str(retrieval.candidate_k)
+        return None, (f"not computed: the fused list holds at most {depth} hits, fewer than {high}")
+    flags: dict[str, list[bool]] = {business: [] for business in sorted(run.namespaces)}
+    ids: list[str] = []
+    for result in scored:
+        record = result.ranked()
+        at_high, at_low = functions.hit_at_k(record, high), functions.hit_at_k(record, low)
+        flag = at_high and not at_low
+        flags.setdefault(result.business_id, []).append(flag)
+        if flag:
+            ids.append(result.question_id)
+    return (
+        HeadroomCount(
+            questions=tuple(ids),
+            total=CountStat(x=len(ids), n=len(scored)),
+            by_business={b: _count(f, counts_only=True) for b, f in sorted(flags.items())},
+        ),
+        None,
+    )
+
+
+def _fts_only(results: Sequence[QuestionResult], run: RunInfo) -> FtsOnlyCount:
+    """What only the full-text leg found: fused hits, and evidence hits (what reached the prompt),
+    that are not in the vector leg's list (the product's `fts_only`, from the files)."""
+    by_business = {business: (0, 0) for business in sorted(run.namespaces)}
+    questions = fused_total = evidence_total = 0
+    evidence_questions: list[str] = []
+    for result in results:
+        if result.components is None:
+            continue
+        questions += 1
+        vector = {hit.chunk_id for hit in result.components.vector}
+        fused = sum(hit.chunk_id not in vector for hit in result.hits)
+        evidence = sum(chunk not in vector for chunk in result.evidence_chunk_ids or ())
+        fused_total, evidence_total = fused_total + fused, evidence_total + evidence
+        if evidence:
+            evidence_questions.append(result.question_id)
+        before = by_business.get(result.business_id, (0, 0))
+        by_business[result.business_id] = (before[0] + fused, before[1] + evidence)
+    return FtsOnlyCount(
+        questions=questions,
+        fused_hits=fused_total,
+        evidence_hits=evidence_total,
+        evidence_questions=tuple(evidence_questions),
+        by_business=dict(sorted(by_business.items())),
+    )
+
+
+def read_answer_records(run_dir: Path) -> dict[str, RagAnswerRecord] | None:
+    """The folder's `rag_answer` records by trace id (None without the file). Other log lines are
+    skipped; a line that is not JSON, an invalid record or two records of one trace id are
+    refused by line number, never echoed."""
+    path = run_dir / ANSWER_LOG_FILE
+    if not path.is_file():
+        return None
+    records: dict[str, RagAnswerRecord] = {}
+    for number, line in enumerate(path.read_text("utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            payload = None
+        if not isinstance(payload, dict):
+            raise SummaryError(f"{ANSWER_LOG_FILE} line {number} is not a JSON object")
+        if RAG_ANSWER not in payload:
+            continue
+        try:
+            record = RagAnswerRecord.model_validate(payload[RAG_ANSWER])
+        except ValidationError:
+            raise SummaryError(
+                f"{ANSWER_LOG_FILE} line {number} is not a valid rag_answer record"
+            ) from None
+        if record.trace_id in records:
+            raise SummaryError(f"{ANSWER_LOG_FILE} line {number}: a second record of one trace id")
+        records[record.trace_id] = record
+    return records
+
+
+_STAGES: Final = (
+    "embed (the question)",
+    "vector leg",
+    "text leg",
+    "fuse",
+    "transaction (model check, both legs, fuse, commit)",
+    "answer (rag_answer latency_ms, model call included)",
+    "harness: leak-check lookups and checks (subtracted above)",
+)
+
+
+def _without(value: float | None, harness: float, where: str) -> float | None:
+    """A stage's duration minus the harness's own time inside it (None: the stage did not run)."""
+    if value is None:
+        return None
+    left = value - harness
+    if left < -LATENCY_TOLERANCE_MS:
+        raise SummaryError(
+            f"{where}: the harness's own time is longer than the stage itself ({ANSWER_LOG_FILE}"
+            f" and {RESULTS_FILE} do not belong together)"
+        )
+    return max(0.0, left)
+
+
+def _latency(
+    run_dir: Path, results: Sequence[QuestionResult]
+) -> tuple[tuple[StageLatency, ...], str | None]:
+    """Per-stage latency over the questions that ran, from each one's `rag_answer` record (joined
+    by trace id) minus the harness's own time recorded in results.jsonl (noah N4), through M1's
+    `latency_summary` (p95 only from n = 20). Never compared with §6's target."""
+    records = read_answer_records(run_dir)
+    if records is None:
+        return (), f"not shown: this folder has no {ANSWER_LOG_FILE}"
+    samples: dict[str, list[float]] = {stage: [] for stage in _STAGES}
+    missing: list[str] = []
+    for result in results:
+        if result.components is None:
+            continue
+        record = records.get(result.trace_id or "")
+        if record is None or record.retrieval is None:
+            missing.append(result.question_id)
+            continue
+        own = result.components.harness
+        stages = record.retrieval
+        where = f"question {result.question_id}"
+        values = (
+            stages.embed_ms,
+            _without(stages.vector_ms, own.vector_ms, f"{where}, vector leg"),
+            _without(stages.text_ms, own.text_ms, f"{where}, text leg"),
+            _without(stages.fuse_ms, own.fuse_ms, f"{where}, fuse"),
+            _without(stages.transaction_ms, own.total_ms, f"{where}, transaction"),
+            _without(record.latency_ms, own.total_ms, f"{where}, answer"),
+            own.total_ms,
+        )
+        for stage, value in zip(_STAGES, values, strict=True):
+            if value is not None:
+                samples[stage].append(value)
+    rows = tuple(
+        StageLatency(stage=stage, latency=latency_summary(values) if values else None)
+        for stage, values in samples.items()
+    )
+    note = (
+        f"{len(missing)} question(s) that ran have no hybrid rag_answer record: {_ids(missing)}"
+        if missing
+        else None
+    )
+    return rows, note
 
 
 # ── Rendering ────────────────────────────────────────────────────────────────────────────────
@@ -971,6 +1410,8 @@ def render_markdown(summary: Summary) -> str:
                     f" {config.rag_min_score} · weak evidence → {config.weak_evidence_outcome} ·"
                     f" retries {config.llm_max_retries}, repairs {config.llm_max_repairs}",
                 ),
+                ("Retrieval", retrieval_text(config.retrieval, config.search_k)),
+                *_spend_row(run),
                 ("Config fingerprint", run.config_fingerprint),
                 (
                     "Eval businesses",
@@ -991,9 +1432,9 @@ def render_markdown(summary: Summary) -> str:
             ],
         ),
         "",
-        f"## Retrieval: hit@{k} and MRR@{k} (search k = {config.search_k})",
+        _retrieval_heading(config, k),
         "",
-        f"On the search's ranked list, before the score threshold. {summary.selected} selected ·"
+        f"{_ranked_list_sentence(config)} {summary.selected} selected ·"
         f" {summary.scored} scored · {len(summary.not_scored)} not scored (no evidence) ·"
         f" {len(summary.unscorable)} unscorable at this config · {len(summary.not_run)} not run."
         " n counts each group's scored questions; its unscorable ones are outside n, shown next"
@@ -1060,6 +1501,7 @@ def render_markdown(summary: Summary) -> str:
         f" {summary.unheld_keys}, in {_ids(summary.unheld_key_questions)}",
         f"- Not run: {_ids(summary.not_run)}",
         "",
+        *_hybrid_retrieval_markdown(summary),
         "## Answers",
         "",
     ]
@@ -1085,6 +1527,8 @@ def render_markdown(summary: Summary) -> str:
             or "no safety question ran"
         ),
         "",
+        *_safety_markdown(summary),
+        *_latency_markdown(summary),
         "## Correctness (human labels)",
         "",
     ]
@@ -1105,6 +1549,174 @@ def render_markdown(summary: Summary) -> str:
         )
     lines += ["", *_targets_markdown(summary.targets, run.rate_min_n)]
     return "\n".join(lines) + "\n"
+
+
+def retrieval_text(retrieval: RetrievalInfo | None, search_k: int) -> str:
+    """The "Retrieval" cell of summary.md's and `compare`'s run tables: mode, candidate k, RRF k
+    and the language map's version; "vector (no retrieval block)" when the block is absent."""
+    if retrieval is None:
+        return "vector (no retrieval block)"
+    return (
+        f"hybrid · candidate k {retrieval.candidate_k} (each leg, and the fused list) · RRF k"
+        f" {retrieval.rrf_k} · language map {retrieval.language_map_sha256[:12]} · the top"
+        f" {search_k} fused hits reach the evidence gate"
+    )
+
+
+def _spend_row(run: RunInfo) -> list[tuple[str, str]]:
+    why = m3_spend_reason(run)
+    if why is None:
+        return []
+    return [("M3 spend", f"counts toward M3's $5.00 ceiling (D15 (iii)): {why}")]
+
+
+def _retrieval_heading(config: ConfigInfo, k: int) -> str:
+    if config.retrieval is None:
+        return f"## Retrieval: hit@{k} and MRR@{k} (search k = {config.search_k})"
+    return (
+        f"## Retrieval: hit@{k} and MRR@{k} on the fused list (candidate k ="
+        f" {config.retrieval.candidate_k}, context k = {config.search_k})"
+    )
+
+
+def _ranked_list_sentence(config: ConfigInfo) -> str:
+    if config.retrieval is None:
+        return "On the search's ranked list, before the score threshold."
+    return (
+        "On the fused list the answer kept (its top"
+        f" {config.search_k} reached the evidence gate), before the score threshold."
+    )
+
+
+_LIST_NAMES: Final[Mapping[RankedListName, str]] = {
+    "vector": "vector leg",
+    "text": "text leg",
+    "fused": "fused",
+}
+
+
+def _hybrid_retrieval_markdown(summary: Summary) -> list[str]:
+    """A hybrid run's per-list rows, FTS-only counts and headroom count (empty for vector)."""
+    run = summary.run
+    if run.config.retrieval is None:
+        return []
+    k = run.config.metric_k
+    lines = [
+        f"### Each list at hit@{k} (hybrid)",
+        "",
+        f"Each leg's list as the fusion got it (candidate k = {run.config.retrieval.candidate_k}),"
+        " and the fused list, over the same scored questions.",
+        "",
+    ]
+    if summary.by_list:
+        lines += _table(
+            ["List", "Group", "n", "Unscorable", f"hit@{k}", f"MRR@{k}", "First relevant rank"],
+            [
+                (
+                    _LIST_NAMES[item.ranked_list],
+                    item.row.group,
+                    str(item.row.hit.n),
+                    str(item.row.unscorable),
+                    _count_text(item.row.hit, run.rate_min_n),
+                    _mrr_text(item.row.mrr, run.bootstrap_min_n, k),
+                    " · ".join(f"{rank}: {count}" for rank, count in item.row.mrr.ranks.items()),
+                )
+                for item in summary.by_list
+            ],
+        )
+    else:
+        lines.append("No question was scored.")
+    lines.append("")
+    fts = summary.fts_only
+    if fts is not None:
+        per_business = "; ".join(
+            f"{business} {fused} in fused lists, {evidence} in evidence"
+            for business, (fused, evidence) in fts.by_business.items()
+        )
+        lines += [
+            f"- FTS-only hits (in the text leg's list, not the vector leg's), over the"
+            f" {fts.questions} question(s) whose search finished: {fts.fused_hits} in the fused"
+            f" lists, {fts.evidence_hits} among the hits the prompt held (D7's rescues), in"
+            f" {_ids(fts.evidence_questions)}. Per business: {per_business or 'none'}.",
+        ]
+    if summary.headroom is not None:
+        head = summary.headroom
+        per_business = "; ".join(
+            f"{business} {stat.x} of {stat.n}" for business, stat in head.by_business.items()
+        )
+        lines.append(
+            f"- Headroom (D13: scored questions with H2's hit@10 and not its hit@5 on the fused"
+            f" list): {head.total.x} of {head.total.n} (counts only), in"
+            f" {_ids(head.questions)}. Per business: {per_business or 'none'}."
+        )
+    elif summary.headroom_note is not None:
+        lines.append(f"- Headroom (D13): {summary.headroom_note}.")
+    return [*lines, ""]
+
+
+def _safety_markdown(summary: Summary) -> list[str]:
+    """The safety questions that ran, by outcome, per business (counts only; zara S7)."""
+    if not summary.safety_outcomes:
+        return []
+    return [
+        "Safety questions that ran, by outcome, per business (counts only, never a rate):",
+        "",
+        *_table(
+            ["Business", "Ran", *SAFETY_OUTCOMES],
+            [
+                (business, str(sum(counts.values())), *(str(counts[o]) for o in SAFETY_OUTCOMES))
+                for business, counts in summary.safety_outcomes.items()
+            ],
+        ),
+        "",
+    ]
+
+
+def _ms_text(value: float) -> str:
+    return f"{value:.1f}"
+
+
+def _latency_markdown(summary: Summary) -> list[str]:
+    """A hybrid run's per-stage latency, labelled local (empty for vector)."""
+    if summary.run.config.retrieval is None:
+        return []
+    lines = [
+        "## Per-stage latency (hybrid)",
+        "",
+        f"Milliseconds, {LATENCY_LABEL}: never compared with business-context §6's p95 < 6 s."
+        " From each question's rag_answer record (monotonic clock), minus the harness's own"
+        f" time inside each stage (its leak-check lookups and checks, kept per question in"
+        f" {RESULTS_FILE}); p95 only from n = 20 (M1's latency_summary)."
+        + (" Dry run: the embedder and the answer model are fakes." if summary.run.dry_run else ""),
+        "",
+    ]
+    if summary.latency:
+        lines += _table(
+            ["Stage", "n", "min", "median", "p95", "max"],
+            [
+                (
+                    row.stage,
+                    *(
+                        (
+                            str(row.latency.n),
+                            _ms_text(row.latency.min_ms),
+                            _ms_text(row.latency.median_ms),
+                            "n < 20: none"
+                            if row.latency.p95_ms is None
+                            else _ms_text(row.latency.p95_ms),
+                            _ms_text(row.latency.max_ms),
+                        )
+                        if row.latency is not None
+                        else ("0", "none", "none", "none", "none")
+                    ),
+                )
+                for row in summary.latency
+            ],
+        )
+        lines.append("")
+    if summary.latency_note is not None:
+        lines += [f"- {summary.latency_note}.", ""]
+    return lines
 
 
 def _verdict_text(row: TargetRow) -> str:

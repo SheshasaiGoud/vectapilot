@@ -4,6 +4,9 @@
   from the synthetic corpus (`data/sample`), so the corpus-based tests can resolve them.
 - `ScriptedSearch` stands in for H1's `vector_search`: the n-th call returns the n-th prepared
   hit list. It runs no SQL and ranks nothing (H1 is shesha's [HAND-WRITE]).
+- `ScriptedTextSearch` does the same for M3 H1's `text_search` (no matching), and hybrid runs fuse
+  with `tests.retrieval.standins.StandInFuse`, which is deliberately not RRF (M3 H2 is shesha's
+  [HAND-WRITE]): both on the team's side of the line, as in M2.
 - `PreparedLookup` stands in for `store.document_rows`: prepared {document id: business, status,
   audience}.
 - `PreparedMetrics` stands in for H2 (shesha's [HAND-WRITE]): every value is prepared and looked
@@ -16,12 +19,13 @@
   M7b-d); equal values give that value exactly. So it is no implementation of hit@k, MRR or their
   means.
 - `harness_parts(...)` builds the real `AnswerService` over those stand-ins, with the capped
-  embedder (the fake) and the capped gateway, and captures the gateway's records.
+  embedder (the fake) and the capped gateway, and captures the gateway's records; with
+  `retrieval` in hybrid mode, the search runs both legs and the fusion through the recorder.
 """
 
 import io
 import uuid
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
@@ -33,13 +37,19 @@ from typing import Any, Final
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from tests.embeddings.scripted import FAKE_SPEC, POLICY, FakeClock, ScriptedEmbedder
-from tests.retrieval.standins import FakeDatabase, StoredModels
+from tests.retrieval.standins import FakeDatabase, StandInFuse, StoredModels
 from vectapilot_api.answer.service import AnswerService, RagConfig
 from vectapilot_api.embeddings.runner import EmbeddingRunner
 from vectapilot_api.evalrun.budget import CappedEmbedder, CappedGateway, CostCap, record_for
 from vectapilot_api.evalrun.dryrun import DryRunAnswerProvider
 from vectapilot_api.evalrun.harness import RecordingSearch
-from vectapilot_api.evalrun.report import ConfigInfo, CostInfo, RunInfo
+from vectapilot_api.evalrun.report import (
+    ConfigInfo,
+    CostInfo,
+    RetrievalInfo,
+    RunInfo,
+    language_map_sha256,
+)
 from vectapilot_api.evalrun.scoring import DocumentRow, MetricFunctions
 from vectapilot_api.evalset.corpus import Corpus
 from vectapilot_api.evalset.files import read_corpus
@@ -50,8 +60,8 @@ from vectapilot_api.gateway.gateway import logger as gateway_logger
 from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.gateway.types import RetryPolicy
 from vectapilot_api.llm_cli import LogCapture
-from vectapilot_api.retrieval.search import SearchService
-from vectapilot_api.retrieval.types import SearchHit, VectorQuery
+from vectapilot_api.retrieval.search import RetrievalConfig, SearchService
+from vectapilot_api.retrieval.types import SearchHit, TextQuery, VectorQuery
 
 REPO: Final = Path(__file__).resolve().parents[4]
 CORPUS_DIR: Final = REPO / "data" / "sample"
@@ -153,10 +163,26 @@ class ScriptedSearch:
 
 
 @dataclass
+class ScriptedTextSearch:
+    """M3 H1's stand-in, as `ScriptedSearch` is M2 H1's: call n returns `script[n]` (at most k).
+    No SQL, no matching, no ranking."""
+
+    script: list[list[SearchHit]]
+    calls: list[TextQuery] = field(default_factory=list)
+
+    async def __call__(self, connection: AsyncConnection, query: TextQuery) -> list[SearchHit]:
+        self.calls.append(query)
+        return list(self.script.pop(0))[: query.k]
+
+
+@dataclass
 class PreparedLookup:
     """`store.document_rows`' stand-in: prepared rows; a missing id is not visible."""
 
     rows: dict[uuid.UUID, DocumentRow] = field(default_factory=dict)
+    ticks: int = 0
+    """Readings of `clock` per call: the lookup "takes" that many steps of a ticking clock."""
+    clock: Callable[[], float] | None = None
 
     def own(
         self,
@@ -173,6 +199,9 @@ class PreparedLookup:
     async def __call__(
         self, connection: AsyncConnection, document_ids: Sequence[uuid.UUID]
     ) -> Mapping[uuid.UUID, DocumentRow]:
+        if self.clock is not None:
+            for _ in range(self.ticks):
+                self.clock()
         return {i: self.rows[i] for i in document_ids if i in self.rows}
 
 
@@ -272,6 +301,8 @@ class Parts:
     cap: CostCap
     capture: LogCapture
     embedder: ScriptedEmbedder
+    text: ScriptedTextSearch
+    fuse: StandInFuse
 
 
 @contextmanager
@@ -284,29 +315,45 @@ def harness_parts(
     embedding_price: Decimal = Decimal(0),
     retry_policy: RetryPolicy | None = None,
     context_k: int = 5,
+    retrieval: RetrievalConfig | None = None,
+    text_script: list[list[SearchHit]] | None = None,
+    fuse: StandInFuse | None = None,
+    lookup: PreparedLookup | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> Iterator[Parts]:
     """The real `AnswerService`, over `ScriptedSearch` + `PreparedLookup`, the capped fake
-    embedder and the capped gateway (dry-run answers unless `provider`); records captured."""
+    embedder and the capped gateway (dry-run answers unless `provider`); records captured. In
+    hybrid mode (`retrieval`) the text leg is `ScriptedTextSearch(text_script)` and the fusion
+    `fuse` (default `StandInFuse()`), both through the recorder. `clock`, if given, is the one
+    monotonic clock of the answer, the search, the recorder and the transaction's commit."""
     cap = cap or CostCap(cap=None)
-    clock = FakeClock()
+    fake = FakeClock()  # the runner's and the gateway's own clock (deadlines, sleeps)
     embedder = ScriptedEmbedder()
     runner = EmbeddingRunner(
         CappedEmbedder(embedder, embedding_price, cap),
         FAKE_SPEC,
         POLICY,
         deadline_s=100.0,
-        clock=clock,
-        sleep=clock.sleep,
+        clock=fake,
+        sleep=fake.sleep,
         rand=lambda: 0.5,
     )
     search = ScriptedSearch(script)
-    lookup = PreparedLookup()
-    recorder = RecordingSearch(search, lookup)
+    lookup = PreparedLookup() if lookup is None else lookup
+    text = ScriptedTextSearch([] if text_script is None else text_script)
+    fuse = StandInFuse() if fuse is None else fuse
+    timed: dict[str, Any] = {} if clock is None else {"clock": clock}
+    hybrid = retrieval is not None and retrieval.mode == "hybrid"
+    recorder = RecordingSearch(search, lookup, text=text, fuse=fuse, name_lists=hybrid, **timed)
     service = SearchService(
-        FakeDatabase(),
+        FakeDatabase(clock=clock),
         runner,
         search=recorder,
         stored_models=StoredModels({b: frozenset({FAKE_SPEC.model}) for b in eval_ids}),
+        text=recorder.text_leg,
+        fuse=recorder.fuse,
+        retrieval=retrieval,
+        **timed,
     )
     capture = LogCapture(io.StringIO())
     gateway_logger.addHandler(capture)
@@ -321,16 +368,17 @@ def harness_parts(
             max_repairs=1,
             cap=cap,
             records=lambda trace_id: record_for(capture.lines, trace_id),
-            clock=clock,
-            sleep=clock.sleep,
+            clock=fake,
+            sleep=fake.sleep,
             rand=lambda: 0.5,
         )
         answer = AnswerService(
             service,
             gateway,
             RagConfig(min_score=0.3, context_k=context_k, weak_evidence_outcome="dont_know"),
+            **timed,
         )
-        yield Parts(answer, recorder, search, lookup, cap, capture, embedder)
+        yield Parts(answer, recorder, search, lookup, cap, capture, embedder, text, fuse)
     finally:
         gateway_logger.removeHandler(capture)
 
@@ -348,6 +396,13 @@ CONFIG: Final = ConfigInfo(
     llm_max_retries=2,
     llm_max_repairs=1,
 )
+
+
+HYBRID_RETRIEVAL: Final = RetrievalInfo(
+    mode="hybrid", candidate_k=20, rrf_k=60, language_map_sha256=language_map_sha256()
+)
+HYBRID_CONFIG: Final = CONFIG.model_copy(update={"retrieval": HYBRID_RETRIEVAL})
+"""`CONFIG` as a hybrid run records it (candidate k 20, RRF k 60, today's language map)."""
 
 
 def run_info(**changes: Any) -> RunInfo:

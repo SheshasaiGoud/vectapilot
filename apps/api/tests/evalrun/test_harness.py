@@ -622,47 +622,6 @@ async def test_execute_never_pays_without_live_and_its_cap(
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("settings", "dry_run", "cap"),
-    [
-        ({}, True, None),
-        (
-            {
-                "environment": "local",
-                "llm_provider": "anthropic",
-                "anthropic_api_key": PAID_KEY,
-                "embeddings_provider": "voyage",
-                "voyage_api_key": PAID_KEY,
-            },
-            False,
-            Decimal("0.50"),
-        ),
-    ],
-    ids=["dry", "live"],
-)
-async def test_execute_refuses_a_hybrid_retrieval_mode_for_any_caller(
-    monkeypatch: pytest.MonkeyPatch,
-    settings: dict[str, Any],
-    dry_run: bool,
-    cap: Decimal | None,
-) -> None:
-    # As the CLI does (decided 2026-10-25, shesha), before the database: `wired` builds
-    # vector-mode search, so a hybrid setting would be measured as vector.
-    monkeypatch.setattr(harness, "create_async_engine", no_database)
-    hybrid = make_settings(**settings, rag_retrieval_mode="hybrid")
-
-    with pytest.raises(HarnessRefused) as refused:
-        await execute_with(hybrid, dry_run=dry_run, cap=CostCap(cap=cap))
-
-    assert str(refused.value) == harness.VECTOR_MODE_ONLY
-    assert "rag_retrieval_mode" in harness.VECTOR_MODE_ONLY
-    # The same Settings in vector mode get past every refusal, to the database.
-    vector = hybrid.model_copy(update={"rag_retrieval_mode": "vector"})
-    with pytest.raises(AssertionError, match="the database must not be reached"):
-        await execute_with(vector, dry_run=dry_run, cap=CostCap(cap=cap))
-
-
-@pytest.mark.anyio
-@pytest.mark.parametrize(
     ("mapping", "settings", "message"),
     [
         ({SUNRISE: SUNRISE, PAWS: EVAL[PAWS]}, {}, "sunrise-clinic is not the derived eval"),

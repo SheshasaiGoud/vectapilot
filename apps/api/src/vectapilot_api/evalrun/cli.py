@@ -1,6 +1,7 @@
 """`uv run python -m vectapilot_api.evalrun <command>`: the eval harness (M2 PR 8).
 
     run --split dev                    # dry run (default): fake embedder, canned answers, $0
+    run --split dev --retrieval-mode hybrid   # M3: both legs and RRF (default: Settings' mode)
     run --split dev --live --max-usd X # shesha only, in a terminal without an agent; never an agent
     ingest [--fresh]                   # dry only: ingest the corpus with the fake embedder
     summarize RUN_DIR                  # recompute summary.md/json from a run folder (labels too)
@@ -30,9 +31,11 @@ opt-in plays no part: the harness calls `AnswerService` directly, under its own 
 - a live run on a dataset that is not frozen (tuning before the split exists would tune on future
   test questions); a dry run on an unfrozen dataset runs every question, labelled `unassigned`;
 - a dry run whose Settings name a paid provider (`harness.check_run` refuses it again);
-- a `rag_retrieval_mode` other than `vector`, dry or live, and in `ingest` too (decided 2026-10-25,
-  shesha; `harness.VECTOR_MODE_ONLY`, refused again by `check_run`): the harness measures vector
-  mode only until M3 PR 5 adds `--retrieval-mode`;
+- in hybrid mode, a search k above `rag_candidate_k` (`report.SEARCH_K_ABOVE_CANDIDATE_K`: the
+  API refuses such Settings at startup, so the harness never measures them; M3 PR 5);
+- a live run of M3 (hybrid, or `--m3-spend`) whose cap is above what is left of M3's $5.00 (a
+  live folder without run.json counts at the $1.00 per-run ceiling until its spend is recorded),
+  or while one of M3's live folders is not committed as it is on disk (`spend.py`, D15 (iii));
 - a question whose text `POST /v1/answer` would refuse (named by id);
 - `--split test` unless it is live, the dataset is frozen, a complete live **dev** run with the same
   config fingerprint is committed (its run.json byte for byte in HEAD), the test-run ledger
@@ -43,6 +46,18 @@ opt-in plays no part: the harness calls `AnswerService` directly, under its own 
   runs once per reported config" is auditable in git;
 - a metric k above the search k, or a search k below 1 (D6, asserted again in `RunConfig` and in
   run.json's `ConfigInfo`).
+
+**The retrieval mode** (M3 PR 5) is the run's own: `--retrieval-mode vector|hybrid`, like
+`--min-score`, defaults to Settings' `rag_retrieval_mode`, and the harness builds its search in
+that mode whatever Settings say (PR 4's refusal of a hybrid setting is gone). A hybrid run records
+run.json's `config.retrieval` block (mode, `rag_candidate_k`, `rag_rrf_k`, the language map's
+sha256), part of the config fingerprint; a vector run has none, so its fingerprint stays M2's. The
+eval namespaces depend on the embedding model and chunk config only, so a hybrid run reuses the
+vector runs' namespaces and, once they are ingested, embeds one query per question and no
+document. The plan says so only when a complete live vector dev run committed in HEAD used the
+same namespaces (`committed_vector_dev_run`), and prints a WARNING with the ingest's worst case
+otherwise. Its "M3 spend so far" line names the branch and commit whose HEAD it read, and says
+that every M3 live run is made, and its folder committed, on `m3/close-out` (decided 2026-10-27).
 
 **`compare`** (M3 PR 6, `compare.py`) reads two run folders and prints, never writes: redirect
 stdout to keep the report. It reads git only on the test split (the ledger as committed in HEAD).
@@ -64,9 +79,9 @@ import json
 import logging
 import re
 import sys
-from collections.abc import Callable, Coroutine, Sequence
+from collections.abc import Callable, Coroutine, Mapping, Sequence
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path, PurePosixPath
@@ -82,7 +97,6 @@ from vectapilot_api.embeddings.runner import EMBEDDING_CALL
 from vectapilot_api.evalrun.budget import CostCap, record_for, usd
 from vectapilot_api.evalrun.compare import CompareRefused, compare, load_run, render_comparison
 from vectapilot_api.evalrun.harness import (
-    VECTOR_MODE_ONLY,
     HarnessRefused,
     RunConfig,
     RunOutcome,
@@ -113,16 +127,21 @@ from vectapilot_api.evalrun.report import (
     RATE_MIN_N,
     RESULTS_FILE,
     RUN_FILE,
+    SEARCH_K_ABOVE_CANDIDATE_K,
     ConfigInfo,
     CostInfo,
     IngestInfo,
+    RetrievalInfo,
     RunInfo,
     SplitName,
     SummaryError,
     config_fingerprint,
     label_template,
+    language_map_sha256,
+    m3_spend_reason,
     read_answers,
     render_label_sheet,
+    retrieval_text,
     summarize,
     write_summary,
 )
@@ -132,6 +151,19 @@ from vectapilot_api.evalrun.scoring import (
     MetricFunctions,
     QuestionResult,
     not_run,
+)
+from vectapilot_api.evalrun.spend import (
+    M3_CEILING_USD,
+    M3_LIVE_BRANCH,
+    RECORDED_SPEND_FILE,
+    HeadPaths,
+    M3Spend,
+    SpendError,
+    m3_spend,
+    read_head_paths,
+    read_head_ref,
+    spend_refusal,
+    spend_text,
 )
 from vectapilot_api.evalset.checks import check_dataset, select_split
 from vectapilot_api.evalset.corpus import CORPUS_MANIFEST_FILE, CorpusError, review_problems
@@ -162,6 +194,8 @@ from vectapilot_api.llm_cli import (
 )
 from vectapilot_api.measure.budget import MAX_USD_CEILING
 from vectapilot_api.measure.records import RecordError, parse_llm_call_lines
+from vectapilot_api.retrieval.search import RetrievalConfig
+from vectapilot_api.retrieval.types import RetrievalMode
 
 PROG: Final = "python -m vectapilot_api.evalrun"
 RUNBOOK: Final = "docs/learning/m2-eval-run.md"
@@ -174,6 +208,13 @@ EXIT_LEAK: Final = 4
 EMBEDDINGS_LOGGER: Final = "vectapilot_api.embeddings"
 ANSWER_LOGGER: Final = "vectapilot_api.answer"
 _RERUN_REASON: Final = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+M3_KEEP: Final = (
+    f"this run counts toward M3's {usd(M3_CEILING_USD)}: commit this folder on {M3_LIVE_BRANCH},"
+    f" never delete it (without run.json it counts at the {usd(MAX_USD_CEILING)} per-run ceiling"
+    f" until its spend is recorded in {RECORDED_SPEND_FILE}; runbook §6)"
+)
+"""The failure line's advice for a live run of M3, instead of M1's "commit it as evidence only,
+or delete it" (decided 2026-10-27, shesha: a live folder without run.json counts at the ceiling)."""
 
 
 class Refused(Exception):
@@ -219,6 +260,10 @@ class Io:
     execute: Execute
     metrics: MetricFunctions = H2_METRICS
     """H2's functions; CLI tests pass stand-ins that return prepared values."""
+    head_paths: HeadPaths = read_head_paths
+    """The files under a directory as committed in HEAD (M3's spend, `spend.py`)."""
+    head_ref: Callable[[Path], str] = read_head_ref
+    """The branch and short commit HEAD is at, named in the plan's M3 spend line (`spend.py`)."""
 
 
 def default_io() -> Io:
@@ -279,6 +324,16 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--search-k", type=int, help="k passed to the search (default rag_context_k)")
     run.add_argument("--metric-k", type=int, default=5, help="hit@k and MRR@k's k (default 5)")
     run.add_argument("--min-score", type=float, help="rag_min_score (default: Settings)")
+    run.add_argument(
+        "--retrieval-mode",
+        choices=("vector", "hybrid"),
+        help="vector (M2's path) or hybrid (both legs and RRF; M3); default: rag_retrieval_mode",
+    )
+    run.add_argument(
+        "--m3-spend",
+        action="store_true",
+        help="count this vector run toward M3's $5.00 (D3's re-run); hybrid runs always count",
+    )
     run.add_argument("--test-rerun-reason", help="a slug, recorded in the test-run ledger")
     run.add_argument(
         "--live", action="store_true", help="paid calls (shesha only; needs --max-usd)"
@@ -333,6 +388,34 @@ def committed_dev_run(
             continue
         if (
             info.config_fingerprint == fingerprint
+            and info.status == "complete"
+            and info.split == "dev"
+            and not info.dry_run
+        ):
+            relative = PurePosixPath(path.resolve().relative_to(root.resolve()).as_posix())
+            if head_file(root, relative) == content:
+                return info.run_id
+    return None
+
+
+def committed_vector_dev_run(
+    root: Path,
+    reports: Path,
+    mapping: Mapping[str, str],
+    head_file: Callable[[Path, PurePosixPath], bytes | None],
+) -> str | None:
+    """The id of a complete live vector dev run whose `namespaces` are `mapping` and whose
+    run.json is in HEAD byte for byte, or None (read-only, as `committed_dev_run`): the evidence
+    behind a hybrid plan's "no document embedding expected" (review of PR 5, ananya A1)."""
+    for path in sorted(reports.glob(f"*-live-dev/{RUN_FILE}")):
+        content = path.read_bytes()
+        try:
+            info = RunInfo.model_validate_json(content)
+        except ValidationError:
+            continue
+        if (
+            info.namespaces == dict(mapping)
+            and info.config.retrieval is None
             and info.status == "complete"
             and info.split == "dev"
             and not info.dry_run
@@ -490,14 +573,26 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
         raise Refused(str(refused)) from None
     settings = io.load_settings(live)
     _check_settings(settings, live)
+    mode: RetrievalMode = (
+        settings.rag_retrieval_mode if args.retrieval_mode is None else args.retrieval_mode
+    )
+    search_k = settings.rag_context_k if args.search_k is None else args.search_k
+    if mode == "hybrid" and search_k > settings.rag_candidate_k:
+        raise Refused(
+            f"--search-k {search_k} is above rag_candidate_k {settings.rag_candidate_k}:"
+            f" {SEARCH_K_ABOVE_CANDIDATE_K}"
+        )
     config = RunConfig(
         chunking=ChunkingConfig(max_chars=args.max_chars, overlap_chars=args.overlap),
-        search_k=settings.rag_context_k if args.search_k is None else args.search_k,
+        search_k=search_k,
         metric_k=args.metric_k,
         rag_min_score=settings.rag_min_score if args.min_score is None else args.min_score,
         weak_evidence_outcome=settings.rag_weak_evidence_outcome,
         llm_max_retries=settings.llm_max_retries,
         llm_max_repairs=settings.llm_max_repairs,
+        retrieval=RetrievalConfig(
+            mode=mode, candidate_k=settings.rag_candidate_k, rrf_k=settings.rag_rrf_k
+        ),
     )
     embedding_catalog = load_embedding_catalog()
     spec = embedding_catalog.resolve(
@@ -521,6 +616,7 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
         weak_evidence_outcome=config.weak_evidence_outcome,
         llm_max_retries=config.llm_max_retries,
         llm_max_repairs=config.llm_max_repairs,
+        retrieval=_retrieval_info(config),
     )
     fingerprint = config_fingerprint(
         dataset=dataset.manifest.dataset,
@@ -572,8 +668,10 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
         "test_rerun_reason": args.test_rerun_reason,
         "test_runs_before_config": before_config,
         "test_runs_before_freeze": before_freeze,
+        "m3_spend": args.m3_spend,
     }
-    _provisional(fixed)
+    m3_reason = m3_spend_reason(_provisional(fixed))
+    spend = _m3_spend(io, git, m3_reason) if live or m3_reason is not None else None
     bound = worst_case(
         dataset.corpus,
         dataset.manifest.businesses,
@@ -588,8 +686,23 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
         max_repairs=config.llm_max_repairs,
     )
     cap = CostCap(cap=args.max_usd)
+    documents: str | None = None  # with --fresh, its own line says what is embedded again
+    if config.hybrid and not args.fresh:
+        reports = git.root / REPORTS_DIR / dataset.manifest.dataset / dataset.manifest.version
+        vector_run = committed_vector_dev_run(git.root, reports, mapping, io.head_file)
+        documents = _documents_line(mapping, vector_run, bound.ingest_usd)
     print(
-        _plan_text(dataset, split, questions, config, settings, spec.model, answer_model, live)
+        _plan_text(
+            dataset,
+            split,
+            questions,
+            config,
+            settings,
+            spec.model,
+            answer_model,
+            live,
+            documents=documents,
+        )
         + (
             f"\n--fresh: deletes the documents of {len(mapping)} eval business(es) of this"
             " config first, then embeds them again" + (" (paid, under the cap)." if live else ".")
@@ -606,9 +719,14 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
             " before one that would cross it."
             if args.max_usd is not None
             else "\nCap: none (dry run)."
-        ),
+        )
+        + _spend_lines(spend, m3_reason, live),
         flush=True,
     )
+    if live and spend is not None and m3_reason is not None:
+        refusal = spend_refusal(spend, args.max_usd)
+        if refusal is not None:
+            raise Refused(refusal)
     if live and not confirmed(
         io.stdin, args.max_usd_text, stdout_is_terminal=io.stdout_is_terminal()
     ):
@@ -672,6 +790,8 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
         markdown = write_summary(out, summarize(out, io.metrics))
     except (SummaryError, ValueError, OSError) as error:
         after = f"; {_KEEP_OR_DELETE}" if live else ""
+        if live and m3_reason is not None:  # deleting it would drop its spend from M3's sum
+            after = f"; {M3_KEEP}"
         spent = usd(cap.total) + ("" if live else " (dry run: fake usage)")
         entry = (
             f" Its test-run ledger entry is in {ledger.relative_to(git.root)}: commit it with"
@@ -688,10 +808,15 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
         return EXIT_LEAK if outcome.status == "aborted_leak" else EXIT_FAILED
     print()
     print(markdown)
+    branch = (
+        f"a live run of M3: commit this folder on {M3_LIVE_BRANCH}"
+        if m3_reason is not None
+        else "a live run: commit this folder on a branch"
+    )
     where = (
         "a dry run: git ignores this folder"
         if not live
-        else "a live run: commit this folder on a branch (labels.jsonl after labelling)"
+        else f"{branch} (labels.jsonl after labelling)"
         + (f", with {ledger.relative_to(git.root)}" if split == "test" else "")
     )
     print(f"Written to {out} ({where}).")
@@ -703,11 +828,44 @@ def run_command(args: argparse.Namespace, io: Io) -> int:
     }[outcome.status]
 
 
+def _retrieval_info(config: RunConfig) -> RetrievalInfo | None:
+    """run.json's `config.retrieval` block: None in vector mode (M2's run.json and fingerprint)."""
+    if not config.hybrid:
+        return None
+    return RetrievalInfo(
+        mode="hybrid",
+        candidate_k=config.retrieval.candidate_k,
+        rrf_k=config.retrieval.rrf_k,
+        language_map_sha256=language_map_sha256(),
+    )
+
+
+def _m3_spend(io: Io, git: GitInfo, why: str | None) -> M3Spend | None:
+    """M3's spend from HEAD (`spend.py`). A run of M3 is refused when it cannot be counted; any
+    other live run only says so (its own spend is not M3's)."""
+    try:
+        spend = m3_spend(git.root, io.head_paths, io.head_file)
+        return replace(spend, head=f"HEAD ({io.head_ref(git.root)})")
+    except (SpendError, GitError) as error:
+        if why is not None:
+            raise Refused(f"M3's spend cannot be counted: {error}") from None
+        return None
+
+
+def _spend_lines(spend: M3Spend | None, why: str | None, live: bool) -> str:
+    if spend is None:
+        if not live:
+            return ""
+        return (
+            "\nM3 spend: this run does not count toward M3's $5.00 (vector mode without"
+            " --m3-spend), and M3's spend could not be read from HEAD."
+        )
+    return "\n" + spend_text(spend, why)
+
+
 def _check_settings(settings: Settings, live: bool) -> None:
     if settings.environment == "production":
         raise Refused("the eval harness never runs with environment production")
-    if settings.rag_retrieval_mode != "vector":
-        raise Refused(VECTOR_MODE_ONLY)
     if live and (settings.llm_provider == "fake" or settings.embeddings_provider == "fake"):
         raise Refused(
             "--live needs the paid providers in Settings: llm_provider anthropic and"
@@ -775,6 +933,8 @@ def _plan_text(
     embedding_model: str,
     answer_model: str,
     live: bool,
+    *,
+    documents: str | None = None,
 ) -> str:
     mode = (
         "LIVE: paid embedding and answer-model calls, billed to the keys' accounts."
@@ -805,7 +965,32 @@ def _plan_text(
             f" {config.search_k} · metric k {config.metric_k} · rag_min_score"
             f" {config.rag_min_score} (provisional, ADR 0011) · weak evidence →"
             f" {config.weak_evidence_outcome}",
+            f"Retrieval: {retrieval_text(_retrieval_info(config), config.search_k)}",
+            *(() if documents is None else (documents,)),
         ]
+    )
+
+
+def _documents_line(mapping: Mapping[str, str], vector_run: str | None, ingest_usd: Decimal) -> str:
+    """A hybrid plan's line on document embeddings (M3 PR 5), checked against HEAD
+    (`committed_vector_dev_run`, review of PR 5, ananya A1): "no document embedding expected"
+    only when a committed live vector dev run used these namespaces, else a warning."""
+    ids = ", ".join(sorted(mapping.values()))
+    if vector_run is not None:
+        return (
+            f"Document embeddings: same namespaces as {vector_run} (a complete live vector dev"
+            f" run committed in HEAD): no document embedding expected. The eval namespaces ({ids})"
+            " depend on the embedding model and chunk config, never on the retrieval mode; ingest"
+            " embeds only documents a namespace does not hold yet (D3's volume rule: no reset-db"
+            " or volume prune since that run), and the text leg embeds nothing: one query"
+            " embedding per question, as in vector mode."
+        )
+    return (
+        "Document embeddings: WARNING: no committed live vector dev run used these namespaces"
+        f" ({ids}): ingest may embed the corpus (worst case {usd(ingest_usd)}), and compare"
+        " refuses a different chunk config. For M3's hybrid dev runs, pass M2's dev folder's"
+        f" --max-chars and --overlap (and --search-k) when they are not the defaults ({RUNBOOK}"
+        " §6)."
     )
 
 

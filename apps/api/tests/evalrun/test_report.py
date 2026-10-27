@@ -7,6 +7,7 @@ import json
 import math
 import random
 import re
+import sys
 from collections.abc import Mapping
 from fractions import Fraction
 from pathlib import Path
@@ -18,6 +19,7 @@ from pydantic import ValidationError
 from tests.canary.read_paths import pending_hand_writes
 from tests.evalrun.helpers import (
     CONFIG,
+    HYBRID_RETRIEVAL,
     PAWS,
     RUN_ID,
     SUNRISE,
@@ -26,17 +28,24 @@ from tests.evalrun.helpers import (
     question,
     run_info,
 )
+from vectapilot_api.answer.prompt import PROMPT_VERSION
+from vectapilot_api.answer.service import ANSWER_ALIAS
+from vectapilot_api.evalrun import report
 from vectapilot_api.evalrun.intervals import bootstrap_interval, wilson_interval
 from vectapilot_api.evalrun.report import (
     LABELS_FILE,
     RESULTS_FILE,
     RUN_FILE,
     ConfigInfo,
+    RetrievalInfo,
     SummaryError,
     config_fingerprint,
     label_template,
+    language_map_canonical,
+    language_map_sha256,
     render_label_sheet,
     render_markdown,
+    run_fingerprint_payload,
     status_of,
     summarize,
     write_summary,
@@ -50,6 +59,7 @@ from vectapilot_api.evalrun.scoring import (
     SourceRef,
 )
 from vectapilot_api.evalset.ranking import RankedRelevance
+from vectapilot_api.gateway.catalog import load_catalog
 
 
 def result(
@@ -1044,6 +1054,150 @@ def test_the_config_fingerprint_moves_with_everything_a_run_measures(
 ) -> None:
     assert fingerprint() == fingerprint()
     assert fingerprint(**change) != fingerprint()
+
+
+VECTOR_PIN: Final = "226ee6440a16d96d39733df5bc03ca9490e12e6d90545386a85e4511d1dff3f3"
+"""The fingerprint of `pinned_vector_fingerprint()`'s fixed vector config, computed on M3 PR 6's
+merged code (4140a48, before PR 5) with catalog 2026-10-14.1 and prompt rag-answer.1: so it also
+proves PR 5's optional `retrieval` block leaves a vector fingerprint exactly as M2 made it."""
+
+
+def pinned_vector_fingerprint() -> str:
+    """A fixed vector config's fingerprint, with the catalog version read from
+    gateway/models.toml and the prompt version from answer/prompt.py: never literals."""
+    catalog = load_catalog()
+    return config_fingerprint(
+        dataset="support_qa",
+        version="v0.1",
+        freeze_sha256="0" * 64,
+        embedding_model="voyage-4",
+        answer_model=catalog.aliases[ANSWER_ALIAS].model,
+        catalog_version=catalog.catalog_version,
+        prompt_version=PROMPT_VERSION,
+        config=ConfigInfo(
+            max_chars=1200,
+            overlap_chars=150,
+            search_k=5,
+            metric_k=5,
+            rag_min_score=0.3,
+            weak_evidence_outcome="dont_know",
+            llm_max_retries=2,
+            llm_max_repairs=1,
+        ),
+    )
+
+
+def test_the_fingerprint_pin_turns_red_on_any_catalog_or_prompt_bump() -> None:
+    # D3's tripwire (M3 plan, "Order of work" 1): from M2's first live dev run to M3's last live
+    # answer run, nothing may change `models.toml` or `PROMPT_VERSION`, since either changes every
+    # run's fingerprint (refusing M2's test run, splitting M2's and M3's runs). A bump turns this
+    # test red. After the window, updating VECTOR_PIN is a deliberate, reviewed change.
+    assert pinned_vector_fingerprint() == VECTOR_PIN, (
+        "the config fingerprint moved: gateway/models.toml's catalog_version or answer/prompt.py's"
+        " PROMPT_VERSION changed (or the fingerprint rule did). Inside D3's measurement window that"
+        " is not allowed (docs/plans/m3-pr-checks.md, Order of work 1); after it, update VECTOR_PIN"
+        " in a reviewed change."
+    )
+
+
+@pytest.mark.parametrize(
+    ("module", "name", "value"),
+    [
+        ("catalog", "catalog_version", "2026-11-01.1"),
+        ("prompt", "PROMPT_VERSION", "rag-answer.2"),
+    ],
+)
+def test_the_pin_reads_the_live_catalog_and_prompt_version(
+    monkeypatch: pytest.MonkeyPatch, module: str, name: str, value: str
+) -> None:
+    # The red proof: a bumped catalog or prompt version reaches the pinned computation.
+    if module == "prompt":
+        monkeypatch.setattr(sys.modules[__name__], "PROMPT_VERSION", value)
+    else:
+        real = load_catalog()
+        bumped = real.model_copy(update={name: value})
+        monkeypatch.setattr(sys.modules[__name__], "load_catalog", lambda: bumped)
+
+    assert pinned_vector_fingerprint() != VECTOR_PIN
+
+
+def test_a_vector_config_dumps_without_a_retrieval_key_never_as_null() -> None:
+    dumped = CONFIG.model_dump(mode="json")
+    assert "retrieval" not in dumped
+    assert '"retrieval"' not in CONFIG.model_dump_json()
+    info = run_info()
+    assert "retrieval" not in run_fingerprint_payload(info)["config"]  # type: ignore[operator]
+    assert ConfigInfo.model_validate_json(CONFIG.model_dump_json()) == CONFIG
+
+
+def test_a_hybrid_block_is_dumped_read_back_and_fingerprinted() -> None:
+    hybrid = CONFIG.model_copy(update={"retrieval": HYBRID_RETRIEVAL})
+
+    dumped = hybrid.model_dump(mode="json")
+
+    assert dumped["retrieval"] == {
+        "mode": "hybrid",
+        "candidate_k": 20,
+        "rrf_k": 60,
+        "language_map_sha256": language_map_sha256(),
+    }
+    assert ConfigInfo.model_validate(dumped) == hybrid
+    assert fingerprint(config=hybrid) != fingerprint()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"candidate_k": 30}, {"rrf_k": 61}, {"language_map_sha256": "1" * 64}],
+    ids=["candidate-k", "rrf-k", "language-map"],
+)
+def test_the_hybrid_fingerprint_moves_with_every_retrieval_field(change: dict[str, Any]) -> None:
+    base = CONFIG.model_copy(update={"retrieval": HYBRID_RETRIEVAL})
+    moved = CONFIG.model_copy(update={"retrieval": HYBRID_RETRIEVAL.model_copy(update=change)})
+
+    assert fingerprint(config=moved) != fingerprint(config=base)
+
+
+def test_the_language_maps_version_is_the_sha256_of_its_fixed_canonical_form() -> None:
+    # Decided 2026-10-25 (shesha; M3 PR 5): the version a hybrid run records is the sha256 of the
+    # canonical TEXT_SEARCH_CONFIGS plus FALLBACK_CONFIG (ingestion/language_map.py), never a
+    # hand-bumped constant. Both literals are pinned: the form, and its digest computed outside
+    # Python (`printf '%s' '<the form>' | shasum -a 256`, 2026-10-27). A map change moves the
+    # digest (and needs its own migration anyway, ADR 0014 decision 2); a change to the form
+    # itself fails here first.
+    canonical = '{"fallback":"simple","map":{"en":"english","hi":"hindi"}}'
+    assert language_map_canonical() == canonical
+    assert language_map_sha256() == (
+        "bb1f8ec0000f92a26447d9f0d89cbda36c59ffbf230547144c11317fdf280dd9"
+    )
+
+
+def test_the_language_maps_version_moves_with_the_map_and_the_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    today = language_map_sha256()
+
+    monkeypatch.setattr(report, "TEXT_SEARCH_CONFIGS", {"en": "english", "hi": "simple"})
+    assert language_map_sha256() != today
+    monkeypatch.setattr(report, "TEXT_SEARCH_CONFIGS", {"hi": "hindi", "en": "english"})
+    assert language_map_sha256() == today  # the order of the entries does not count
+    monkeypatch.setattr(report, "FALLBACK_CONFIG", "english")
+    assert language_map_sha256() != today
+
+
+def test_a_hybrid_config_refuses_a_search_k_above_its_candidate_k() -> None:
+    values = CONFIG.model_dump() | {
+        "search_k": 21,
+        "retrieval": HYBRID_RETRIEVAL.model_dump(),
+    }
+    with pytest.raises(ValidationError, match="must be at most rag_candidate_k"):
+        ConfigInfo.model_validate(values)
+    assert ConfigInfo.model_validate(values | {"search_k": 20}).search_k == 20
+    with pytest.raises(ValidationError):
+        RetrievalInfo.model_validate(
+            HYBRID_RETRIEVAL.model_dump() | {"language_map_sha256": "not-a-sha"}
+        )
+    with pytest.raises(ValidationError):
+        RetrievalInfo.model_validate(HYBRID_RETRIEVAL.model_dump() | {"mode": "vector"})
 
 
 def test_the_label_sheet_shows_question_and_answer_for_the_terminal_only() -> None:

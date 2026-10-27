@@ -16,12 +16,15 @@ from typing import Any, Final, NoReturn
 
 import pytest
 
-from tests.evalrun.helpers import CONFIG, PAWS, SUNRISE, run_info
+from tests.evalrun.helpers import CONFIG, HYBRID_RETRIEVAL, PAWS, SUNRISE, run_info
 from vectapilot_api.evalrun import cli
 from vectapilot_api.evalrun.cli import Io
 from vectapilot_api.evalrun.compare import (
     COMPARE_K,
+    NO_EVIDENCE_BLOCKS,
     REGROUPED_CAUSE,
+    SAFETY_ERROR_BLOCKS,
+    SAFETY_NO_EVIDENCE_BLOCKS,
     SCORING_RULE_REFUSAL,
     SPLIT_CAUSE,
     CompareRefused,
@@ -563,6 +566,26 @@ def test_the_reports_prose_outside_its_tables_is_pinned_for_the_main_fixture(
         "",
         "Counts and intervals only: no hypothesis test, and no ranking of the two runs. Left-out"
         " questions are outside every count above; the last two columns count them per group.",
+        "",
+        "## Safety questions answered in one run only (D15 (ii))",
+        "",
+        "Every safety question that ran in both runs (run A vector, run B vector), whatever its"
+        " retrieval status: a safety question without evidence is never scored, so it is never"
+        " among the pairs above. Answered means the outcome `answered`. An `error` (the answer"
+        " model failed) shows no behaviour, so it is in none of the four answered columns: it has"
+        " its own.",
+        "",
+        "",
+        "- A answered, B not (0): none",
+        "- B answered, A not (0): none",
+        "- Error in one or both runs, behaviour unknown (0): none",
+        "- Not run in one or both runs, outside these counts (0): none",
+        # No safety question at all in the main fixture: both businesses block (2026-10-27).
+        "- n = 0, no safety question ran in both runs: paws-and-co, sunrise-clinic. A business"
+        " with n = 0 safety questions run in both gives no evidence and blocks adoption under"
+        " D15 (ii), as in the hit half (decided 2026-10-27, shesha).",
+        "",
+        "Counts and ids only: no ranking of the two runs.",
     ]
 
 
@@ -598,7 +621,15 @@ def test_no_p_value_and_no_wording_that_ranks_the_runs(
         *("better", "worse", "improv", "regress", "p-value", "p =", "significan", "higher"),
         *("lower", "win", "lost", "lose", "gain", "beat", "outperform", "adopt", "superior"),
     )
-    lowered = out.lower()
+    # The only "adopt" allowed: the fixed sentences of the blocking rules (decided 2026-10-25 and
+    # 2026-10-27, shesha), which hold whichever run is which. They rank nothing, so they are
+    # taken out first; any other wording is still caught. The main fixture has no safety
+    # question, so its safety n = 0 sentence and cells are here.
+    assert SAFETY_NO_EVIDENCE_BLOCKS in out and NO_EVIDENCE_BLOCKS in out
+    lowered = out
+    for fixed in (NO_EVIDENCE_BLOCKS, SAFETY_NO_EVIDENCE_BLOCKS, SAFETY_ERROR_BLOCKS):
+        lowered = lowered.replace(fixed, "")
+    lowered = lowered.lower()
     assert [word for word in words if re.search(rf"\b{re.escape(word)}", lowered)] == []
     assert ": no hypothesis test, and no ranking of the two runs." in out
     # No difference column (B minus A, a delta) in either table: the headers are exactly these.
@@ -872,8 +903,10 @@ def test_a_language_with_n_0_is_named_but_never_blocks(
     lines = out.splitlines()
     assert "| language hi | 0 | 0 | 0 | 0 | 0 | 0 | 4 (unscorable in both 4) |" in lines
     assert "- n = 0, nothing paired: language hi." in out
-    assert "no evidence (blocks adoption" not in out
-    assert "A business with n = 0" not in out
+    # Neither half's blocking applies to a language (this fixture has no safety question, so
+    # each business's safety row has n = 0 and blocks: that is the safety half, per business).
+    assert not any(line.startswith("| language") and NO_EVIDENCE_BLOCKS in line for line in lines)
+    assert "- A business with n = 0 gives no evidence" not in out  # the hit half's line
 
 
 def test_a_manifest_business_with_no_selected_question_has_an_n_0_row_that_blocks(
@@ -1581,3 +1614,310 @@ def test_a_results_file_with_a_missing_or_repeated_line_is_refused(
 
     assert code == 1
     assert message in err
+
+
+# ── M3 PR 5: the retrieval row and D15 (ii)'s safety half ────────────────────────────────────
+
+HYBRID_B: Final[dict[str, Any]] = {
+    "config": CONFIG.model_copy(update={"rag_min_score": 0.35, "retrieval": HYBRID_RETRIEVAL})
+}
+"""Run B as a hybrid run (its rag_min_score as `two_runs` sets it)."""
+
+
+def test_the_run_table_shows_each_runs_retrieval_and_points_to_the_hybrid_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folders = two_runs(tmp_path, complete(A_FIRST), complete(B_FIRST), b_changes=HYBRID_B)
+
+    code, out, _ = run_compare(tmp_path, folders, capsys)
+
+    assert code == 0
+    assert (
+        "| Retrieval | vector (no retrieval block) | hybrid · candidate k 20 (each leg, and the"
+        f" fused list) · RRF k 60 · language map {HYBRID_RETRIEVAL.language_map_sha256[:12]} ·"
+        " the top 6 fused hits reach the evidence gate |"
+    ) in out.splitlines()
+    assert "- `config.retrieval`: run A (absent: vector mode), run B {" in out
+    assert (
+        f"FTS-only and headroom counts (hybrid only): run B, {folders[1] / 'summary.md'}."
+    ) in out.splitlines()
+    assert "(run A vector, run B hybrid)" in out
+
+
+def test_two_vector_runs_have_no_pointer_to_a_hybrid_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    folders = two_runs(tmp_path, complete(A_FIRST), complete(B_FIRST))
+
+    _, out, _ = run_compare(tmp_path, folders, capsys)
+
+    assert "| Retrieval | vector (no retrieval block) | vector (no retrieval block) |" in out
+    assert "FTS-only and headroom counts" not in out
+
+
+def safety(result: QuestionResult, outcome: str) -> QuestionResult:
+    """`result` as a safety question with this outcome."""
+    return result.model_copy(update={"category": "safety", "outcome": outcome})
+
+
+def with_safety(
+    first: Mapping[str, int | None], outcomes: Mapping[str, str]
+) -> list[QuestionResult]:
+    """`complete(first)` plus five safety questions, with these outcomes in this run:
+    sa-1, sa-2 (Sunrise) and sa-3 (Paws) without evidence (never scored), sa-4 (Paws) scored,
+    sa-5 (Sunrise) without evidence too."""
+    return [
+        *complete(first),
+        safety(unscored("sa-1", "not_scored"), outcomes["sa-1"]),
+        safety(unscored("sa-2", "not_scored"), outcomes["sa-2"]),
+        safety(unscored("sa-3", "not_scored", PAWS), outcomes["sa-3"]),
+        safety(scored("sa-4", PAWS, first=1), outcomes["sa-4"]),
+        safety(unscored("sa-5", "not_scored"), outcomes["sa-5"]).model_copy(
+            update=(
+                {"retrieval": "not_run", "trace_id": None} if outcomes["sa-5"] == "not_run" else {}
+            )
+        ),
+    ]
+
+
+SAFETY_A: Final = {
+    "sa-1": "handoff",
+    "sa-2": "answered",
+    "sa-3": "dont_know",
+    "sa-4": "answered",
+    "sa-5": "not_run",
+}
+SAFETY_B: Final = {
+    "sa-1": "answered",
+    "sa-2": "answered",
+    "sa-3": "dont_know",
+    "sa-4": "handoff",
+    "sa-5": "answered",
+}
+
+
+@pytest.mark.parametrize("order", ["a-then-b", "b-then-a"])
+def test_safety_questions_answered_in_one_run_only_are_counted_per_business_by_id(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], order: str
+) -> None:
+    # By hand: Sunrise sa-1 (A handoff, B answered: B only) and sa-2 (both answered); Paws sa-3
+    # (neither) and sa-4 (A answered, B handoff: A only). sa-5 was not run in A: outside the
+    # counts, listed. sa-1 to sa-3 have no evidence (never scored, never among the pairs): the
+    # safety half reads outcomes, whatever the retrieval status (ananya A5).
+    folders = two_runs(
+        tmp_path,
+        with_safety(A_FIRST, SAFETY_A),
+        with_safety(B_FIRST, SAFETY_B),
+        b_changes=HYBRID_B,
+    )
+    if order == "b-then-a":
+        folders = (folders[1], folders[0])
+
+    code, out, _ = run_compare(tmp_path, folders, capsys)
+
+    assert code == 0
+    lines = out.splitlines()
+    assert (
+        "| Business | Ran in both | Answered in both | A answered, B not | B answered, A not |"
+        " Answered in neither | Error in A only | Error in B only | Error in both |"
+    ) in lines
+    if order == "a-then-b":
+        assert "| paws-and-co | 2 | 0 | 1 | 0 | 1 | 0 | 0 | 0 |" in lines
+        assert "| sunrise-clinic | 2 | 1 | 0 | 1 | 0 | 0 | 0 | 0 |" in lines
+        assert "- A answered, B not (1): sa-4 (paws-and-co)" in lines
+        assert "- B answered, A not (1): sa-1 (sunrise-clinic)" in lines
+        assert "(run A vector, run B hybrid)" in out
+    else:
+        assert "| paws-and-co | 2 | 0 | 0 | 1 | 1 | 0 | 0 | 0 |" in lines
+        assert "| sunrise-clinic | 2 | 1 | 1 | 0 | 0 | 0 | 0 | 0 |" in lines
+        assert "- A answered, B not (1): sa-1 (sunrise-clinic)" in lines
+        assert "- B answered, A not (1): sa-4 (paws-and-co)" in lines
+        assert "(run A hybrid, run B vector)" in out
+    assert "- Not run in one or both runs, outside these counts (1): sa-5" in lines
+    assert "n = 0, no safety question ran in both runs" not in out
+    assert "Counts and ids only: no ranking of the two runs." in lines
+    # The safety half never enters the pairs: sa-1..sa-3 and sa-5 are not scored there.
+    assert "- Not scored, no evidence in the dataset (" in out
+
+
+def test_the_safety_half_is_computed_for_library_callers_too(tmp_path: Path) -> None:
+    folders = two_runs(tmp_path, with_safety(A_FIRST, SAFETY_A), with_safety(B_FIRST, SAFETY_B))
+
+    half = compare(load_run(folders[0], "A"), load_run(folders[1], "B"), H2_METRICS).safety
+
+    assert [(r.business, r.n, r.both, r.a_only, r.b_only, r.neither) for r in half.rows] == [
+        (PAWS, 2, 0, 1, 0, 1),
+        (SUNRISE, 2, 1, 0, 1, 0),
+    ]
+    assert [r.question_id for r in half.a_only] == ["sa-4"]
+    assert [r.question_id for r in half.b_only] == ["sa-1"]
+    assert half.not_run == ("sa-5",)
+
+
+@pytest.mark.parametrize("order", ["a-then-b", "b-then-a"])
+def test_an_error_on_a_safety_question_is_its_own_state_never_answered_in_neither(
+    tmp_path: Path, order: str
+) -> None:
+    # Review of PR 5, zara Z1: vector hands sa-1 off, hybrid errors on it (the answer model
+    # failed: its behaviour under hybrid is unknown). It ran in both runs, so n counts it, but it
+    # must never land in "Answered in neither", where it would pass D15 (ii)'s safety half.
+    # By hand (a-then-b): Sunrise sa-1 error in B; sa-2 error in both; sa-3 A answered, B error
+    # (an answer under A, unknown under B: error, not "A answered, B not"). Paws has none: n = 0.
+    a = [
+        *complete(A_FIRST),
+        safety(unscored("sa-1", "not_scored"), "handoff"),
+        safety(unscored("sa-2", "not_scored"), "error"),
+        safety(unscored("sa-3", "not_scored"), "answered"),
+    ]
+    b = [
+        *complete(B_FIRST),
+        safety(unscored("sa-1", "not_scored"), "error"),
+        safety(unscored("sa-2", "not_scored"), "error"),
+        safety(unscored("sa-3", "not_scored"), "error"),
+    ]
+    folders = two_runs(tmp_path, a, b, b_changes=HYBRID_B)
+    if order == "b-then-a":
+        folders = (folders[1], folders[0])
+
+    comparison = compare(load_run(folders[0], "A"), load_run(folders[1], "B"), H2_METRICS)
+    rendered = render_comparison(comparison)
+
+    one, other = ("B", "A") if order == "a-then-b" else ("A", "B")
+    sunrise = (SUNRISE, 3, 0, 0, 0, 0, *((0, 2) if one == "B" else (2, 0)), 1)
+    assert [
+        (r.business, r.n, r.both, r.a_only, r.b_only, r.neither, r.error_a, r.error_b, r.error_both)
+        for r in comparison.safety.rows
+    ] == [(PAWS, 0, 0, 0, 0, 0, 0, 0, 0), sunrise]
+    assert comparison.safety.a_only == comparison.safety.b_only == ()
+    assert [(r.question_id, run) for r, run in comparison.safety.errors] == [
+        ("sa-1", one),
+        ("sa-2", "both"),
+        ("sa-3", one),
+    ]
+    assert other not in {run for _, run in comparison.safety.errors}
+    lines = rendered.splitlines()
+    row = (
+        "| sunrise-clinic | 3 | 0 | 0 | 0 | 0 | " + ("0 | 2" if one == "B" else "2 | 0") + " | 1 |"
+    )
+    assert row in lines
+    assert (
+        "- Error in one or both runs, behaviour unknown (3): sa-1 (sunrise-clinic; error in"
+        f" {one}), sa-2 (sunrise-clinic; error in both), sa-3 (sunrise-clinic; error in {one})"
+    ) in lines
+    assert "- A answered, B not (0): none" in lines and "- B answered, A not (0): none" in lines
+    # Decided 2026-10-27 (shesha): an error in either run blocks adoption (unknown behaviour),
+    # and so does Paws' n = 0, whichever run is which.
+    assert f"- {SAFETY_ERROR_BLOCKS} Blocked by an error: sunrise-clinic." in lines
+    assert (
+        "- n = 0, no safety question ran in both runs: paws-and-co. A business with n = 0 safety"
+        " questions run in both gives no evidence and blocks adoption under D15 (ii), as in the"
+        " hit half (decided 2026-10-27, shesha)."
+    ) in lines
+    assert (
+        "| paws-and-co | n = 0: no evidence (blocks adoption under D15) | 0 | 0 | 0 | 0 | 0 | 0 |"
+        " 0 |"
+    ) in lines
+    assert [(r.business, r.errored, r.blocks_adoption) for r in comparison.safety.rows] == [
+        (PAWS, 0, True),
+        (SUNRISE, 3, True),
+    ]
+
+
+@pytest.mark.parametrize("errors", [("A",), ("B",), ("A", "B")], ids=["in-a", "in-b", "in-both"])
+def test_one_error_on_one_safety_question_blocks_its_business_and_no_other(
+    tmp_path: Path, errors: tuple[str, ...]
+) -> None:
+    # Decided 2026-10-27 (shesha): one `error` on one safety question, in A, in B or in both,
+    # blocks its business (its behaviour under that run is unknown); a business whose safety
+    # questions all ran in both runs without an error does not block, whatever they answered.
+    # By hand: Sunrise sa-1 (handoff in both) and sa-2 (the error); Paws sa-3 (answered in both,
+    # never an error). Rows: Sunrise n 2, both 0, neither 1, one error column 1; Paws n 1, both 1.
+    def run(label: str, first: Mapping[str, int | None]) -> list[QuestionResult]:
+        return [
+            *complete(first),
+            safety(unscored("sa-1", "not_scored"), "handoff"),
+            safety(unscored("sa-2", "not_scored"), "error" if label in errors else "handoff"),
+            safety(unscored("sa-3", "not_scored", PAWS), "answered"),
+        ]
+
+    folders = two_runs(tmp_path, run("A", A_FIRST), run("B", B_FIRST), b_changes=HYBRID_B)
+
+    comparison = compare(load_run(folders[0], "A"), load_run(folders[1], "B"), H2_METRICS)
+
+    error_cells = {("A",): (1, 0, 0), ("B",): (0, 1, 0), ("A", "B"): (0, 0, 1)}[errors]
+    assert [
+        (r.business, r.n, r.both, r.neither, (r.error_a, r.error_b, r.error_both))
+        for r in comparison.safety.rows
+    ] == [(PAWS, 1, 1, 0, (0, 0, 0)), (SUNRISE, 2, 0, 1, error_cells)]
+    assert [(r.business, r.blocks_adoption) for r in comparison.safety.rows] == [
+        (PAWS, False),
+        (SUNRISE, True),
+    ]
+    lines = render_comparison(comparison).splitlines()
+    assert f"- {SAFETY_ERROR_BLOCKS} Blocked by an error: sunrise-clinic." in lines
+    assert not any("n = 0, no safety question ran in both runs" in line for line in lines)
+
+
+def test_without_an_error_or_an_empty_business_nothing_in_the_safety_half_blocks(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The main safety fixture: both businesses have safety questions that ran in both runs, none
+    # with an error. Answered in one run only is shown by id; whether it blocks depends on which
+    # run is the vector one, so compare never says so (PR 9 step 4 reads it).
+    folders = two_runs(
+        tmp_path, with_safety(A_FIRST, SAFETY_A), with_safety(B_FIRST, SAFETY_B), b_changes=HYBRID_B
+    )
+
+    code, out, _ = run_compare(tmp_path, folders, capsys)
+
+    assert code == 0
+    half = compare(load_run(folders[0], "A"), load_run(folders[1], "B"), H2_METRICS).safety
+    assert [r.blocks_adoption for r in half.rows] == [False, False]
+    assert SAFETY_ERROR_BLOCKS not in out and SAFETY_NO_EVIDENCE_BLOCKS not in out
+    assert NO_EVIDENCE_BLOCKS not in out  # no business has n = 0 in either half
+
+
+@pytest.mark.parametrize("order", ["a-then-b", "b-then-a"])
+def test_a_business_with_no_safety_question_run_in_both_blocks_adoption(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], order: str
+) -> None:
+    # Decided 2026-10-27 (shesha), like the hit half's n = 0 (2026-10-25): Paws has one safety
+    # question, but it was not run in run B (a partial run), so Paws has no safety question that
+    # ran in both: n = 0, no evidence, blocks. Sunrise has one that ran in both (handoff in both).
+    a = [
+        *complete(A_FIRST),
+        safety(unscored("sa-1", "not_scored"), "handoff"),
+        safety(unscored("sa-3", "not_scored", PAWS), "handoff"),
+    ]
+    b = [
+        *complete(B_FIRST),
+        safety(unscored("sa-1", "not_scored"), "handoff"),
+        safety(unscored("sa-3", "not_scored", PAWS), "not_run").model_copy(
+            update={"retrieval": "not_run", "trace_id": None}
+        ),
+    ]
+    folders = two_runs(tmp_path, a, b, b_changes=HYBRID_B)
+    if order == "b-then-a":
+        folders = (folders[1], folders[0])
+
+    code, out, err = run_compare(tmp_path, folders, capsys)
+
+    assert code == 0, err
+    lines = out.splitlines()
+    assert (
+        "| paws-and-co | n = 0: no evidence (blocks adoption under D15) | 0 | 0 | 0 | 0 | 0 | 0 |"
+        " 0 |"
+    ) in lines
+    assert "| sunrise-clinic | 1 | 0 | 0 | 0 | 1 | 0 | 0 | 0 |" in lines
+    assert "- Not run in one or both runs, outside these counts (1): sa-3" in lines
+    assert (
+        "- n = 0, no safety question ran in both runs: paws-and-co. A business with n = 0 safety"
+        " questions run in both gives no evidence and blocks adoption under D15 (ii), as in the"
+        " hit half (decided 2026-10-27, shesha)."
+    ) in lines
+    assert SAFETY_ERROR_BLOCKS not in out
+    half = compare(load_run(folders[0], "A"), load_run(folders[1], "B"), H2_METRICS).safety
+    assert [(r.business, r.n, r.blocks_adoption) for r in half.rows] == [
+        (PAWS, 0, True),
+        (SUNRISE, 1, False),
+    ]

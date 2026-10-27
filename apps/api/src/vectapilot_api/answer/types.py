@@ -109,8 +109,8 @@ class AnswerRun:
     hits: tuple[SearchHit, ...] = field(repr=False)
     """Everything retrieved, best first. In hybrid mode (M3 PR 4) the whole fused list in fused
     order, as plain `SearchHit`s (each `score` the cosine): only its top `rag_context_k` reached
-    the answer step, and PR 5's harness will score the whole list (today's harness refuses
-    hybrid mode: `evalrun.harness.VECTOR_MODE_ONLY`)."""
+    the answer step, and the eval harness scores the whole list (M3 PR 5,
+    `evalrun.harness`)."""
     evidence: tuple[SearchHit, ...] = field(repr=False)
     """The hits at or above the threshold: the chunks the prompt held (empty: no model call). In
     hybrid mode, those of the top `rag_context_k` fused hits whose cosine is at least
