@@ -661,6 +661,9 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
     is left is refused before any call.
   - Like the typed cap, this only catches mistakes. The providers' own limits stay the real cap
     (ADR 0007).
+- **[decided 2026-10-27] (shesha)** PR 5 also builds D15 (ii)'s safety half in `compare`: every
+  `category == "safety"` question that ran in both runs (whatever its retrieval status), answered
+  under one mode but not the other, as counts and ids per business (PR 6 decision 7's reading).
 
 ## PR 6 — `m3/eval-compare` (noah; ananya reviews) · S — can start now
 - `uv run python -m vectapilot_api.evalrun compare <run A> <run B>`:
@@ -780,9 +783,9 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
   - Checks: ruff, format check and mypy clean; `make check` passed (2757 passed, 206 skipped,
     42 xfailed; gateway coverage gate passed). No database, no paid call; `pyproject.toml`,
     `uv.lock` and the migrations unchanged.
-- **Not built:** D15 (ii)'s safety half (decision 7's reading) is a per-question outcome check
-  that `compare` does not print yet. Until it is built, it is read from both folders'
-  results.jsonl.
+- **Not built here:** D15 (ii)'s safety half (decision 7's reading) is a per-question outcome
+  check that `compare` does not print yet. **[decided 2026-10-27] (shesha): it is built in PR 5**,
+  so it is ready before the first hybrid dev run.
   - **Its range is not the pairs** (review of PR 6, ananya A5). A safety question must be
     handed off but need not have evidence, and a question without evidence is `not_scored`, so
     it never enters the pairs. Its test uses a safety question without evidence.
