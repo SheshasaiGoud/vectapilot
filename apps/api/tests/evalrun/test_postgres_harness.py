@@ -2,7 +2,9 @@
 through `KbService` into salted eval businesses, check the stored chunks, read each hit's document
 row under RLS, abort a run on a hit from the other namespace (H1 replaced by a stand-in, so this
 runs now), delete only the run's own namespaces, and (once H1 and H2 are written) answer, score
-and summarise TEST-ONLY questions end to end.
+and summarise TEST-ONLY questions end to end. M3 PR 5: a hybrid run over the real vector leg with
+team-side stand-ins for M3's text leg and fusion (no document embedded again on an ingested
+namespace; a leak in the text leg aborts), and over the real legs once M3's H1 and H2 exist.
 
 Each test salts its namespaces (`namespace.eval_business_id(..., salt=...)`), so it never touches
 a namespace a human dry run made, and removes them afterwards as the owner. The fake embedder and
@@ -14,8 +16,11 @@ both are written (`tests/canary/read_paths.py`, `PENDING_HAND_WRITE`).
 """
 
 import io
+import json
+import logging
 import secrets
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Final
 
@@ -37,6 +42,7 @@ from tests.evalrun.helpers import (
     question,
     run_info,
 )
+from tests.retrieval.standins import StandInFuse, StandInTextSearch
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import Database, business_transaction
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
@@ -50,7 +56,8 @@ from vectapilot_api.evalrun.store import PostgresEvalStore, document_rows
 from vectapilot_api.gateway.gateway import logger as gateway_logger
 from vectapilot_api.ingestion.types import ChunkingConfig
 from vectapilot_api.llm_cli import LogCapture
-from vectapilot_api.retrieval.types import SearchHit, VectorQuery
+from vectapilot_api.retrieval.search import RetrievalConfig
+from vectapilot_api.retrieval.types import SearchHit, TextQuery, VectorQuery
 
 pytestmark = [integration, pytest.mark.anyio]
 
@@ -337,3 +344,136 @@ async def test_a_dry_run_answers_and_scores_test_only_questions_end_to_end(
     everything = summarize(folder).retrieval[0]
     assert (everything.group, everything.hit.x, everything.hit.n) == ("all", 2, 2)
     assert (everything.mrr.value, everything.mrr.ranks["1"]) == ("1", 2)
+
+
+# ── Hybrid runs (M3 PR 5) ────────────────────────────────────────────────────────────────────
+
+HYBRID: Final = RetrievalConfig(mode="hybrid", candidate_k=20, rrf_k=60)
+STAFF_HANDBOOK: Final = text(
+    "SELECT id FROM documents WHERE business_id = :b AND source_id = 'staff-handbook'"
+)
+
+
+def hybrid_config() -> RunConfig:
+    return replace(config(), retrieval=HYBRID)
+
+
+@pytest.fixture
+def embedding_records() -> Iterator[LogCapture]:
+    handler = LogCapture(io.StringIO())
+    embeddings_logger = logging.getLogger("vectapilot_api.embeddings")
+    embeddings_logger.addHandler(handler)
+    try:
+        yield handler
+    finally:
+        embeddings_logger.removeHandler(handler)
+
+
+async def run_hybrid(
+    mapping: dict[str, str], questions: tuple[Any, ...], capture: LogCapture, **seams: Any
+) -> RunOutcome:
+    return await execute(
+        Target(corpus=CORPUS, corpus_dir=CORPUS_DIR, questions=questions, mapping=mapping),
+        Settings(),
+        hybrid_config(),
+        CostCap(cap=None),
+        dry_run=True,
+        owner_url=str(MigrationSettings().migration_database_url.get_secret_value()),
+        records=lambda trace_id: record_for(capture.lines, trace_id),
+        sink=lambda result, answer: None,
+        progress=lambda line: None,
+        **seams,
+    )
+
+
+async def test_a_hybrid_run_on_an_ingested_namespace_embeds_no_document(
+    salts: list[str], capture: LogCapture, embedding_records: LogCapture
+) -> None:
+    # The real vector leg (M2 H1) over Postgres; the text leg and the fusion are team-side
+    # stand-ins (no full-text search, no RRF), so this runs before M3's H1 and H2.
+    mapping = salted(salts)
+    await ingest(mapping)  # as M2's vector runs leave the namespace
+    embedding_records.lines.clear()
+    text_leg = StandInTextSearch()
+    question_text = _chunk_text(SUNRISE, "faq", "2026-10", SUNRISE_HOURS.anchor)
+
+    outcome = await run_hybrid(
+        mapping,
+        (question("test-only-pg-h1", text=question_text),),
+        capture,
+        text=text_leg,
+        fuse=StandInFuse(),
+    )
+
+    assert (outcome.status, outcome.stop) == ("complete", None)
+    assert [count.chunks_written for count in outcome.ingest] == [0, 0]
+    calls = [json.loads(line)["embedding_call"] for line in embedding_records.lines]
+    assert [(c["operation"], c["input_type"], c["inputs"]) for c in calls] == [
+        ("rag-answer", "query", 1)
+    ]  # the question only: no document was embedded again
+    [result] = outcome.results
+    assert result.components is not None and result.components.text == ()
+    assert [h.chunk_id for h in result.components.vector] == [h.chunk_id for h in result.hits]
+    assert (result.retrieval, result.hit_at_k, result.reciprocal_rank) == ("scored", True, "1")
+    [(_, query)] = text_leg.calls
+    assert query.k == 20 and query.business_id == mapping[SUNRISE]
+
+
+@pytest.mark.parametrize("leak", ["other-business", "staff-only"])
+async def test_a_leak_in_the_text_leg_aborts_a_hybrid_run_against_postgres(
+    salts: list[str], capture: LogCapture, app_engine: AsyncEngine, leak: str
+) -> None:
+    mapping = salted(salts)
+    await ingest(mapping)
+    if leak == "other-business":
+        document = (await document_ids(app_engine, mapping))[PAWS][0]
+    else:
+        async with business_transaction(app_engine, mapping[SUNRISE]) as connection:
+            document = (
+                await connection.execute(STAFF_HANDBOOK, {"b": mapping[SUNRISE]})
+            ).scalar_one()
+
+    async def leaking(connection: AsyncConnection, query: TextQuery) -> list[SearchHit]:
+        # M3 H1's stand-in: one hit whose document is a real stored row (no SQL, no matching).
+        return [hit("TEST-ONLY leaked chunk text", document_id=document)]
+
+    outcome = await run_hybrid(
+        mapping, (question("test-only-pg-h2"),), capture, text=leaking, fuse=StandInFuse()
+    )
+
+    assert outcome.status == "aborted_leak" and outcome.stop is not None
+    if leak == "other-business":
+        assert outcome.stop == (
+            "CROSS-BUSINESS LEAK: question test-only-pg-h2, rank 1 of the text leg: document"
+            f" {document} is not visible in it, not the question's business"
+        )  # RLS hid the row
+    else:
+        assert outcome.stop.startswith(
+            "AUDIENCE LEAK: question test-only-pg-h2, rank 1 of the text leg: document"
+            f" {document} is status approved, audience staff_only"
+        )
+    assert [r.outcome for r in outcome.results] == ["not_run"]
+
+
+@pytest.mark.parametrize(
+    "marks",
+    [pytest.param(None, marks=pending_hand_writes("text_search", "rrf_fuse"))],
+    ids=["m3-h1-and-h2"],
+)
+async def test_a_hybrid_run_over_the_real_legs_scores_the_fused_list(
+    salts: list[str], capture: LogCapture, marks: None
+) -> None:
+    # No stand-in: M3 H1's text_search and M3 H2's rrf_fuse. A strict xfail while either stub
+    # raises NotImplementedError (the harness never turns it into an outcome).
+    mapping = salted(salts)
+    question_text = _chunk_text(SUNRISE, "faq", "2026-10", SUNRISE_HOURS.anchor)
+
+    outcome = await run_hybrid(mapping, (question("test-only-pg-h3", text=question_text),), capture)
+
+    assert (outcome.status, outcome.stop) == ("complete", None)
+    [result] = outcome.results
+    assert result.components is not None
+    legs = {h.chunk_id for h in (*result.components.vector, *result.components.text)}
+    assert {h.chunk_id for h in result.hits} <= legs
+    # The question is the chunk's own text: rank 1 in the vector leg, so RRF keeps it in the top 5.
+    assert (result.retrieval, result.hit_at_k) == ("scored", True)

@@ -180,8 +180,9 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - **M3 (RAG v2: hybrid search, abstention) — planned and decided 2026-10-23**
   (`docs/plans/m3-pr-checks.md`, ADR 0014); merged: PR 0 (#38), PR 1 guards (#39), PR 2
   full-text column (#40), its `audience_conflict` follow-up (#41), PR 3 hybrid scaffold (#42),
-  PR 4 hybrid search (#43; `rag_retrieval_mode`, default vector). PR 6 `evalrun compare` in review.
-  - Can start now: PR 5 eval hybrid, PR 7 faithfulness labels.
+  PR 4 hybrid search (#43; `rag_retrieval_mode`, default vector), PR 6 `evalrun compare` (#44).
+  PR 5 eval hybrid (`--retrieval-mode`, every list leak-checked, $5 M3 spend check) in review.
+  - Can start now: PR 7 faithfulness labels.
   - shesha writes H1 `text_search` and H2 `rrf_fuse` (D5, decided 2026-10-24).
   - No reranking and no LLM judge in M3.
   - Live spend: $5.00 for all of M3's paid runs, each still ≤ $1.00.

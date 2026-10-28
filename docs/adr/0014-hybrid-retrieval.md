@@ -188,3 +188,24 @@ a proposal, and shesha accepted all of them on 2026-10-25 (`docs/plans/m3-pr-che
   `ingest`), with a fixed message naming the setting (`evalrun/harness.py`, `VECTOR_MODE_ONLY`;
   checked by the CLI and again by `check_run`), so no run reports vector numbers under a hybrid
   setting. PR 5 replaces the refusal with `--retrieval-mode`.
+
+**Built 2026-10-27 (M3 PR 5, noah; in review, ananya and zara review).** PR 4's "Not built here"
+is built: the eval harness measures hybrid mode (`--retrieval-mode`, default `rag_retrieval_mode`;
+PR 4's refusal and its two tests removed) and records and checks every list (ADR 0013, amended
+2026-10-27). For this ADR:
+- **Decision 2's map gets a version:** the sha256 of its canonical form, recorded in a hybrid
+  run's `config.retrieval` block, so a map change gives hybrid runs a new fingerprint (decided
+  2026-10-25, shesha). The hash is computed in `evalrun/report.py`, while the map stays in
+  `ingestion/language_map.py`: `ingestion/` imports nothing outside its allowlist, which has no
+  `json` (decided 2026-10-27, shesha).
+- **Decision 7's FTS-only rescues** are counted per run from the files (fused hits, and evidence
+  hits, not in the vector leg's list), per business.
+- **Decision 8's inputs:** `compare`'s discordant pairs per business and its safety half are the
+  two halves of D15 (ii)'s rule, both as counts and ids, never a ranking. In both halves a
+  business with n = 0 blocks adoption, and in the safety half so does an `error` in either run
+  (decided 2026-10-25 and 2026-10-27, shesha).
+- **Decision 10's headroom count** is in every hybrid run's summary.md: scored questions with
+  H2's hit@10 and not its hit@5 on the fused list, by id and per business. It needs a fused list
+  of at least 10 (`rag_candidate_k` ≥ 10 by Settings); a shorter one says "not computed".
+- Nothing here changes `text_search`, `rrf_fuse`, the search or the answer. Local tests use
+  team-side stand-ins; the harness over the real legs is a strict xfail until H1 and H2.

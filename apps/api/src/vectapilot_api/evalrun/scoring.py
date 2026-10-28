@@ -22,6 +22,11 @@ a chunking artefact, not a retrieval miss, reported as its own count. Every othe
 finds a group, ADR 0012); a single key no stored chunk holds, in a group another key still finds,
 is kept too (`unheld_keys`, by index) and counted in the report.
 
+**Hybrid runs (M3 PR 5).** The ranked list is the fused one, and `ComponentLists` keeps each
+leg's list per question (chunk ids, ranks, matched groups; no text) with the harness's own time
+inside each stage (`HarnessTime`). A leak line then names its list ("rank 2 of the text leg");
+vector-mode lines stay exactly M2's.
+
 **The metrics are H2's** (`evalset/metrics.py`, shesha's [HAND-WRITE]), passed in as a
 `MetricFunctions` bundle (default `H2_METRICS`) so local tests can use stand-ins that return
 prepared values; nothing here computes hit@k, a reciprocal rank or a mean itself. hit@k and MRR@k
@@ -34,9 +39,15 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from fractions import Fraction
-from typing import Final, Literal
+from typing import Annotated, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SerializerFunctionWrapHandler,
+    model_serializer,
+)
 
 from vectapilot_api.evalrun.namespace import dataset_business
 from vectapilot_api.evalset import metrics
@@ -120,18 +131,22 @@ class HitPolicyViolation(Exception):
     the search (`harness.RecordingSearch`), so nothing after the search runs; the question loop
     turns it into the run's abort line with `report`. Ids and labels only, never text."""
 
-    def __init__(self, kind: str, rank: int, document_id: uuid.UUID, detail: str) -> None:
-        super().__init__(f"{kind} at rank {rank}: document {document_id} {detail}")
+    def __init__(
+        self, kind: str, rank: int, document_id: uuid.UUID, detail: str, where: str = ""
+    ) -> None:
+        super().__init__(f"{kind} at rank {rank}{where}: document {document_id} {detail}")
         self.kind = kind
         self.rank = rank
         self.document_id = document_id
         self.detail = detail
+        self.where = where
+        """Which list, in a hybrid run (" of the text leg"); empty in vector mode (M2's line)."""
 
     def report(self, question_id: str) -> str:
         """The run's abort line for `question_id`."""
         return (
-            f"{self.kind}: question {question_id}, rank {self.rank}: document {self.document_id}"
-            f" {self.detail}"
+            f"{self.kind}: question {question_id}, rank {self.rank}{self.where}: document"
+            f" {self.document_id} {self.detail}"
         )
 
 
@@ -139,10 +154,12 @@ class SearchLeak(HitPolicyViolation):
     """A hit whose document row is another business's, or not visible in the searched one. Its
     `report` reads exactly as `CrossBusinessLeak`'s message."""
 
-    def __init__(self, rank: int, document_id: uuid.UUID, row_business: str | None) -> None:
+    def __init__(
+        self, rank: int, document_id: uuid.UUID, row_business: str | None, where: str = ""
+    ) -> None:
         found = "is not visible in it" if row_business is None else f"belongs to {row_business}"
         super().__init__(
-            CROSS_BUSINESS_LEAK, rank, document_id, f"{found}, not the question's business"
+            CROSS_BUSINESS_LEAK, rank, document_id, f"{found}, not the question's business", where
         )
         self.row_business = row_business
 
@@ -151,30 +168,37 @@ class AudienceLeak(HitPolicyViolation):
     """A hit of the searched business whose document a customer may never see: not approved, or
     an audience outside `CUSTOMER_AUDIENCES` (business-context §3.4)."""
 
-    def __init__(self, rank: int, document_id: uuid.UUID, status: str, audience: str) -> None:
+    def __init__(
+        self, rank: int, document_id: uuid.UUID, status: str, audience: str, where: str = ""
+    ) -> None:
         super().__init__(
             AUDIENCE_LEAK,
             rank,
             document_id,
             f"is status {status}, audience {audience}; a customer's search must return only"
             " approved documents of a customer audience",
+            where,
         )
         self.status = status
         self.audience = audience
 
 
 def check_hit_rows(
-    eval_business_id: str, hits: Sequence[SearchHit], rows: Mapping[uuid.UUID, DocumentRow]
+    eval_business_id: str,
+    hits: Sequence[SearchHit],
+    rows: Mapping[uuid.UUID, DocumentRow],
+    where: str = "",
 ) -> None:
     """Raise for the first hit, best first, whose document row is missing (not visible in the
     searched business) or another business's (`SearchLeak`), or that a customer may never see
-    (`AudienceLeak`). The business is checked first: a leak is the harder gate."""
+    (`AudienceLeak`). The business is checked first: a leak is the harder gate. `where` names
+    the list in a hybrid run (" of the text leg"), after the rank."""
     for rank, hit in enumerate(hits, start=1):
         row = rows.get(hit.document_id)
         if row is None or row.business_id != eval_business_id:
-            raise SearchLeak(rank, hit.document_id, None if row is None else row.business_id)
+            raise SearchLeak(rank, hit.document_id, None if row is None else row.business_id, where)
         if row.status != "approved" or row.audience not in CUSTOMER_AUDIENCES:
-            raise AudienceLeak(rank, hit.document_id, row.status, row.audience)
+            raise AudienceLeak(rank, hit.document_id, row.status, row.audience, where)
 
 
 def retrieved_chunks(
@@ -269,6 +293,43 @@ class SourceRef(_Closed):
 
 RetrievalStatus = Literal["scored", "not_scored", "unscorable", "not_run"]
 AnswerStatus = Literal["answered", "dont_know", "handoff", "error", "not_run"]
+ComponentName = Literal["vector", "text"]
+Milliseconds = Annotated[float, Field(ge=0, allow_inf_nan=False)]
+
+
+class ComponentHit(_Closed):
+    """One hit of one leg's list in a hybrid run (M3 PR 5): its rank, chunk id and the groups it
+    finds. No text, and no score: the fused list (`QuestionResult.hits`) carries each hit's
+    cosine."""
+
+    rank: int = Field(ge=1)
+    chunk_id: str
+    groups: tuple[int, ...]
+
+
+class HarnessTime(_Closed):
+    """The recorder's own time inside one hybrid search's stages, in milliseconds on the search's
+    monotonic clock (noah N4): in each leg, its document lookup (one query) and the leak check; in
+    the fusion, the check of the fused list (no query). `summarize` subtracts it from the
+    `rag_answer` record's stage durations."""
+
+    vector_ms: Milliseconds
+    text_ms: Milliseconds
+    fuse_ms: Milliseconds
+
+    @property
+    def total_ms(self) -> float:
+        return self.vector_ms + self.text_ms + self.fuse_ms
+
+
+class ComponentLists(_Closed):
+    """A hybrid run's per-question record of each leg's list as the fusion got it (M3 PR 5; ADR
+    0013 amendment 2026-10-23): ids, ranks and matched groups, no text. The fused list is
+    `QuestionResult.hits`."""
+
+    vector: tuple[ComponentHit, ...]
+    text: tuple[ComponentHit, ...]
+    harness: HarnessTime
 
 
 class QuestionResult(_Closed):
@@ -312,13 +373,35 @@ class QuestionResult(_Closed):
     confidence: float | None = None
     trace_id: str | None = None
     prompt_version: str | None = None
+    components: ComponentLists | None = None
+    """Hybrid only (M3 PR 5): each leg's list, and the harness's own time; `hits` is then the
+    fused list. Absent from the line in vector mode, so a vector line is exactly M2's."""
+
+    @model_serializer(mode="wrap")
+    def _without_absent_components(self, handler: SerializerFunctionWrapHandler) -> object:
+        data = handler(self)
+        if self.components is None and isinstance(data, dict):
+            data.pop("components", None)
+        return data
 
     def ranked(self) -> RankedRelevance:
-        """The H2 record of the search's ranked list (scored questions only)."""
+        """The H2 record of the search's ranked list (scored questions only): in a hybrid run,
+        the fused list."""
         return RankedRelevance(
             question_id=self.question_id,
             n_groups=self.n_groups,
             groups_by_rank=tuple(hit.groups for hit in self.hits),
+        )
+
+    def ranked_component(self, name: ComponentName) -> RankedRelevance:
+        """The H2 record of one leg's list (a hybrid run's scored questions only)."""
+        if self.components is None:
+            raise ValueError(f"question {self.question_id} has no component lists")
+        hits = self.components.vector if name == "vector" else self.components.text
+        return RankedRelevance(
+            question_id=self.question_id,
+            n_groups=self.n_groups,
+            groups_by_rank=tuple(hit.groups for hit in hits),
         )
 
     def ranked_evidence(self) -> RankedRelevance | None:
@@ -394,6 +477,16 @@ def hit_refs(
             score=hit.score,
             groups=matched_groups(chunk, question),
         )
+        for rank, (hit, chunk) in enumerate(zip(hits, chunks, strict=True), start=1)
+    )
+
+
+def component_hits(
+    hits: Sequence[SearchHit], chunks: Sequence[RetrievedChunk], question: EvalQuestion
+) -> tuple[ComponentHit, ...]:
+    """One leg's list without text or score: rank, chunk id, the groups each hit finds."""
+    return tuple(
+        ComponentHit(rank=rank, chunk_id=str(hit.chunk_id), groups=matched_groups(chunk, question))
         for rank, (hit, chunk) in enumerate(zip(hits, chunks, strict=True), start=1)
     )
 

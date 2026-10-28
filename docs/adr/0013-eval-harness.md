@@ -187,3 +187,75 @@ plan, PR 6, "[decided 2026-10-25] (shesha)"):
 - Not built yet: D15 (ii)'s safety half. Its reading is decided: every safety question that ran
   in both runs, whatever its retrieval status, answered under one mode but not the other, as
   counts and ids per business. Whether it lands in PR 5 or a follow-up is open.
+
+**Amended 2026-10-27 (M3 PR 5, noah; in review, ananya and zara review).** The 2026-10-23
+amendment's retrieval block, "every list is checked" and the spend ceiling are built, and so is
+D15 (ii)'s safety half in `compare` (decided 2026-10-27, shesha). Plan: `docs/plans/m3-pr-checks.md`,
+PR 5, "Built (2026-10-27, noah)". The items once marked [proposal] were decided by shesha on
+2026-10-27, all as proposed or recommended (plan, PR 5, "[decided 2026-10-27] (shesha)").
+- **The retrieval mode is the run's own:** `--retrieval-mode vector|hybrid`, like `--min-score`,
+  defaults to Settings' `rag_retrieval_mode`, and the harness builds `SearchService` in that mode
+  whatever Settings say. PR 4's refusal of a hybrid setting (`VECTOR_MODE_ONLY`) is removed with
+  its two tests. `ingest` runs in either mode: the namespaces depend on the embedding model and
+  chunk config only, so a hybrid run reuses the vector runs' namespaces and embeds no document
+  once they are ingested. The plan the CLI prints checks this against HEAD (review of PR 5,
+  ananya A1): "no document embedding expected" only when a complete live vector dev run committed
+  in HEAD has the same `namespaces`; otherwise a WARNING with the ingest's worst case.
+- **run.json's `config.retrieval`** (hybrid only): mode, `candidate_k`, `rrf_k` and
+  `language_map_sha256`, the sha256 of the map's fixed canonical form (compact sorted JSON of
+  `{"fallback": FALLBACK_CONFIG, "map": TEXT_SEARCH_CONFIGS}`; decided 2026-10-25). It lives in
+  `evalrun/report.py`, not `ingestion/`, whose import allowlist excludes `json` (decided
+  2026-10-27, shesha); the map itself stays in `ingestion/language_map.py`. A None block is
+  left out of every dump (a wrap serializer, as `RagAnswerRecord`'s), and so is `m3_spend` when
+  false (review of PR 5, ananya A5), so a vector run's run.json has exactly M2's keys and its
+  fingerprint is M2's: a pin test computes a fixed vector config's fingerprint from the live
+  `catalog_version` and `PROMPT_VERSION` and compares it with the literal computed on PR 6's
+  merged code (D3's tripwire). A hybrid `--search-k` above `rag_candidate_k` is refused (the API
+  refuses such Settings at startup), never recorded as `max(rag_candidate_k, search_k)`
+  (decided 2026-10-27, shesha).
+- **Every list is recorded and checked** before the answer step: `RecordingSearch` wraps the
+  vector leg, the text leg and the fusion. Each leg's rows are read on the search's connection;
+  the fused list is checked against the rows its legs read (document level: a hit whose document
+  no leg returned fails closed), then at chunk level (review of PR 5, ananya A2): every fused hit
+  must equal (`==`) a hit with its chunk id in one of the legs' lists, with no chunk id twice, or
+  the run stops before the answer step (`FusedListMismatch`, partial). A hybrid leak line names its list ("rank 2 of the text leg"); vector lines are M2's.
+  In hybrid mode `_score` scores the fused list (`AnswerRun.hits`) with H2 and checks the legs at
+  `max(candidate_k, search_k)`, the fusion's input lists, RRF k and limit (review of PR 4, N2).
+  `results.jsonl` gains `components` per question (each leg's chunk ids, ranks and matched
+  groups; no text), absent in vector mode.
+- **The recorder's own time** (N4; decided 2026-10-27, shesha: subtracted, not labelled): the recorder times its lookup
+  and check inside each stage on the search's monotonic clock and writes it per question
+  (`components.harness`); the summary subtracts it from the `rag_answer` stage durations and
+  shows it as its own row. A difference below 0 beyond a nanosecond refuses the summary.
+- **summary.md** gains, for hybrid runs: each list's rows (vector leg, text leg, fused) for "all"
+  and each business at the metric k, with decision 7's intervals; the FTS-only counts; the
+  headroom count (D13; harness counting over H2's hit@10 and hit@5, D5), listed by id; and
+  per-stage latency through M1's `latency_summary` (p95 only at n ≥ 20), labelled "local Docker
+  on an 8 GB Mac, synthetic", never compared with §6. Every run gains the safety questions by
+  outcome per business (zara S7), counts only.
+- **`compare`** gains a "Retrieval" row ("vector (no retrieval block)" when absent), a pointer to
+  each hybrid folder's summary.md for the FTS-only and headroom counts, and D15 (ii)'s safety
+  half: every safety question that ran in both runs, whatever its retrieval status, answered in
+  one run but not the other, as counts and ids per business (every business of either run's
+  namespaces keeps a row). An `error` outcome shows no behaviour, so it is never "not answered":
+  it has its own columns (error in A only, in B only, in both) and is listed by id (review of
+  PR 5, zara Z1). Two things block adoption under D15 (ii) whichever run is which (decided
+  2026-10-27, shesha): a business with no safety question that ran in both runs (its n cell is
+  "n = 0: no evidence (blocks adoption under D15)", as in the hit half), and a safety question
+  whose outcome is `error` in either run (behaviour unknown; the business is named). The
+  2026-10-25 amendment's "not built yet" no longer holds.
+- **M3's spend** (D15 (iii); `evalrun/spend.py`): before the cap prompt of a live run, the plan
+  prints the sum of `cost.total_usd` over the counted folders' run.json as committed in HEAD, the
+  $5.00 ceiling and what is left, "lower bound" when a counted folder's answer-model cost was
+  incomplete. It names the branch and commit whose HEAD it read (diego D1): HEAD is one
+  branch's, so every M3 live run is made and committed on `m3/close-out`, and the plan says so
+  (decided 2026-10-27, shesha). Counted (decided 2026-10-27, shesha): a committed live folder
+  whose run.json has the `retrieval` block, or a vector run named with `--m3-spend` (run.json
+  `m3_spend: true`, outside the fingerprint; D3's re-run); M2's runs never count. A live folder
+  without run.json (a kill, a failed write, a run still going) counts at M1's $1.00 per-run
+  ceiling until shesha records its real spend in that folder's `recorded-spend.json` (total as a
+  decimal string, at most $1.00; whether it was M3's; who, when, and where the figure was read)
+  and commits it; "left" subtracts it either way (zara Z4, decided 2026-10-27). A live run of M3
+  is refused when its cap exceeds what is left (the refusal names the ceiling, the sum and the
+  folders), and while one of M3's live folders on disk is not committed as it is (its run.json
+  or its recorded-spend.json). Like the typed cap, this only catches mistakes (ADR 0007).

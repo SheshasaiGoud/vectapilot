@@ -1,21 +1,39 @@
-"""The eval run itself (M2 PR 8): ingest, check the stored chunks, answer and score each question.
+"""The eval run itself (M2 PR 8, M3 PR 5): ingest, check the stored chunks, answer and score each
+question.
 
 One question at a time, in dataset order, through the product's own `AnswerService` (ADR 0011):
-one embedding call for the question, H1's search as reader `customer` with k = the run's search
-k, the threshold, the prompt, the answer model (`large`) and the citation check. The harness adds
-three things around it, and changes nothing inside it:
+one embedding call for the question, the search as reader `customer`, the threshold, the prompt,
+the answer model (`large`) and the citation check. The run's retrieval mode is its own
+(`RunConfig.retrieval`, from `--retrieval-mode`, default Settings' `rag_retrieval_mode`; M3 PR 5):
+- **vector** (M2's path): H1's `vector_search` with k = the run's search k;
+- **hybrid** (ADR 0014): both legs at the candidate k, M3 H2's `rrf_fuse` limited to it, in one
+  snapshot; the whole fused list is the answer's `AnswerRun.hits`, and its top search-k hits reach
+  the evidence gate.
+The harness adds three things around it, and changes nothing inside it:
 
-1. **`RecordingSearch`** wraps H1's `vector_search` (the `search` seam `SearchService` already
-   has). On the same connection, inside the same business transaction, it reads each hit's
-   document row (`store.document_rows`: business, status, audience), records the hits, and
-   **checks them before returning** (`scoring.check_hit_rows`): a hit of another business, or one
-   a customer may never see, raises inside the search, so the run aborts whatever the answer
-   step would have done next (a cap refusal, Ctrl-C, an error). `_score` checks the business
-   again (`scoring.retrieved_chunks`), and retrieval is scored even when the answer model fails.
+1. **`RecordingSearch`** wraps every list: H1's `vector_search` (the `search` seam
+   `SearchService` already has), and in hybrid mode M3 H1's `text_search` and M3 H2's
+   `rrf_fuse` too (its `text` and `fuse` seams). On the same connection, inside the same business
+   transaction, each leg's wrapper reads each hit's document row (`store.document_rows`:
+   business, status, audience), records the hits, and **checks them before returning**
+   (`scoring.check_hit_rows`); the fusion's wrapper checks the fused list against the rows its
+   legs read (a hit whose document no leg returned has no row, so it fails closed), then at
+   chunk level (`FusedListMismatch`): every fused hit must be, unchanged (`==`), a hit with the
+   same chunk id in one of the lists the fusion was given, and no chunk id may repeat, so a
+   sibling chunk no leg returned, or a leg's hit with a changed `score`, stops the run before the
+   answer step (review of PR 5, ananya A2). A hit of another business,
+   or one a customer may never see, raises inside the search, so the run aborts whatever the
+   answer step would have done next (a cap refusal, Ctrl-C, an error): a leak that fusion drops
+   is still a leak. `_score` checks the business again (`scoring.retrieved_chunks`, on every
+   list), and retrieval is scored even when the answer model fails. The recorder times its own
+   work inside each stage on the search's monotonic clock (`scoring.HarnessTime`), so the
+   summary can subtract it from the `rag_answer` record's stage durations.
 2. **The cost cap** (`budget.py`): the embedder and the gateway reserve each paid request's worst
    case before it is sent; a request that would cross `--max-usd` is not sent (`CapReached`),
    and the run stops, partial.
-3. **H2's metrics** (`scoring.score_retrieval`) on the search's ranked list.
+3. **H2's metrics** (`scoring.score_retrieval`) on the answer's ranked list: the vector list, or
+   in hybrid mode the fused list (each leg's list is kept per question, `ComponentLists`, and
+   scored in the summary).
 
 Each question is first validated as `POST /v1/answer` validates it (`retrieval.search.Question`:
 stripped, not only whitespace, valid UTF-8), so the run embeds and prompts exactly what the
@@ -23,24 +41,28 @@ product would; a question that fails is refused by id before anything is sent.
 
 What stops a run: the cap, a stop rule after a paid call (`CostCap.stop`; during ingest it is
 checked before each document), a failure before the answer step finished (the search, an
-embedding or database error: every later question would likely fail the same way), Ctrl-C (also
-while registering, deleting, ingesting or checking the stored chunks: the run is then partial and
-its folder is still written), and a hit no customer may see (aborted: a cross-business leak is a
-hard gate). An answer model failure (`ModelUnavailable`, `AnswerFailed`) is an outcome, recorded
-as `error`, and the run goes on. A `NotImplementedError` (H1 or H2 not written yet) propagates: it
-is never an outcome. Questions after a stop are kept as `not_run`, never dropped, and the run is
-`partial`; a stop rule tripped by the last question leaves none unrun, so the run is `complete`
-with its stop recorded, never for the note (`final_status`, decided 2026-10-22).
+embedding or database error: every later question would likely fail the same way; only the class
+name is kept, except a `FusedListMismatch`, whose own message names a rank and a chunk id),
+Ctrl-C (also while registering, deleting, ingesting or checking the stored chunks: the run is then
+partial and its folder is still written), and a hit no customer may see (aborted: a
+cross-business leak is a hard gate). An answer model failure (`ModelUnavailable`,
+`AnswerFailed`) is an outcome, recorded as `error`, and the run goes on. A `NotImplementedError`
+(H1 or H2 not written yet) propagates: it is never an outcome. Questions after a stop are kept as
+`not_run`, never dropped, and the run is `partial`; a stop rule tripped by the last question
+leaves none unrun, so the run is `complete` with its stop recorded, never for the note
+(`final_status`, decided 2026-10-22).
 
 `execute` refuses (`HarnessRefused`) a dry run whose Settings name a paid provider, a live run
-without a cap, a `--fresh` delete of any id that is not a derived eval id of its business, or in
-production, and any `rag_retrieval_mode` but `vector` (`VECTOR_MODE_ONLY`).
+without a cap, and a `--fresh` delete of any id that is not a derived eval id of its business, or
+in production. (M3 PR 4's refusal of a hybrid `rag_retrieval_mode` is gone: PR 5 measures the
+mode `RunConfig.retrieval` names, whatever Settings say.)
 
 Nothing here logs or prints question, chunk or answer text: progress lines carry ids, labels,
 H2's values and dollar amounts.
 """
 
 import asyncio
+import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -73,12 +95,14 @@ from vectapilot_api.evalrun.namespace import (
     dataset_business,
     is_eval_business_id,
 )
-from vectapilot_api.evalrun.report import RunStatus
+from vectapilot_api.evalrun.report import SEARCH_K_ABOVE_CANDIDATE_K, RunStatus
 from vectapilot_api.evalrun.scoring import (
     H2_METRICS,
     AnswerLine,
+    ComponentLists,
     CrossBusinessLeak,
     DocumentRow,
+    HarnessTime,
     HitPolicyViolation,
     MetricFunctions,
     QuestionResult,
@@ -86,6 +110,7 @@ from vectapilot_api.evalrun.scoring import (
     base_fields,
     check_hit_rows,
     check_metric_k,
+    component_hits,
     first_relevant_rank,
     hit_refs,
     not_run,
@@ -110,8 +135,18 @@ from vectapilot_api.gateway.types import CallRecord
 from vectapilot_api.ingestion.types import ChunkingConfig
 from vectapilot_api.kb.service import KbService
 from vectapilot_api.kb.store import PostgresKbStore
-from vectapilot_api.retrieval.search import Question, SearchService, VectorSearch, new_trace_id
-from vectapilot_api.retrieval.types import MAX_K, SearchHit, VectorQuery
+from vectapilot_api.retrieval.fusion import rrf_fuse
+from vectapilot_api.retrieval.search import (
+    Fuse,
+    Question,
+    RetrievalConfig,
+    SearchService,
+    TextSearch,
+    VectorSearch,
+    new_trace_id,
+)
+from vectapilot_api.retrieval.text import text_search
+from vectapilot_api.retrieval.types import MAX_K, FusedHit, SearchHit, TextQuery, VectorQuery
 from vectapilot_api.retrieval.vector import vector_search
 
 PROGRESS_WIDTH: Final = 3
@@ -124,14 +159,12 @@ class HarnessRefused(Exception):
     """The run cannot start as configured. The message names settings and ids, never text."""
 
 
-VECTOR_MODE_ONLY: Final = (
-    "rag_retrieval_mode must be vector: the eval harness measures vector mode only until M3 PR 5"
-    " adds --retrieval-mode (ADR 0014), so a run never reports one mode while Settings name another"
-)
-"""Why the harness refuses a hybrid `rag_retrieval_mode` (decided 2026-10-25, shesha): it builds
-`SearchService` in vector mode, and its scoring and recording know only the vector list. Fixed
-text: it names the setting, never a value. Dry and live runs, and `ingest` too (one rule for
-every command)."""
+class FusedListMismatch(RuntimeError):
+    """A fused hit that is not, unchanged, a hit one of the legs returned: a chunk no leg
+    returned, a leg's hit with a field changed (its `score`, say), or a chunk id twice.
+    `rrf_fuse`'s contract (`FusedHit.hit`: "the hit as its leg returned it, unchanged") is
+    broken, so it is a bug, never an outcome: the run stops before the answer step. The message
+    names the rank and the chunk id, never text (review of PR 5, ananya A2)."""
 
 
 def api_questions(questions: Sequence[EvalQuestion]) -> dict[str, str]:
@@ -168,6 +201,9 @@ class RunConfig:
     weak_evidence_outcome: WeakEvidenceOutcome
     llm_max_retries: int
     llm_max_repairs: int
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    """The run's retrieval mode, and in hybrid mode its candidate k and RRF k (M3 PR 5):
+    `--retrieval-mode`, else Settings. Vector by default: M2's path."""
 
     def __post_init__(self) -> None:
         check_metric_k(self.metric_k, self.search_k)
@@ -175,6 +211,21 @@ class RunConfig:
             raise ValueError(f"search k must be at most {MAX_K} (retrieval.types.MAX_K)")
         if not 0.0 <= self.rag_min_score <= 1.0:
             raise ValueError("rag_min_score must be between 0 and 1")
+        if self.hybrid and self.search_k > self.retrieval.candidate_k:
+            raise ValueError(SEARCH_K_ABOVE_CANDIDATE_K)
+
+    @property
+    def hybrid(self) -> bool:
+        return self.retrieval.mode == "hybrid"
+
+    @property
+    def search_call_k(self) -> int:
+        """The k the answer asks the search for: the search k in vector mode; in hybrid mode
+        `max(candidate_k, search_k)`, each leg's k and the fused list's length
+        (`AnswerService`)."""
+        if self.hybrid:
+            return max(self.retrieval.candidate_k, self.search_k)
+        return self.search_k
 
     def rag(self) -> RagConfig:
         return RagConfig(
@@ -193,35 +244,162 @@ DocumentLookup = Callable[
 
 @dataclass(frozen=True)
 class SearchCall:
-    """One search as the harness saw it: the hits (best first) and their documents' rows."""
+    """One leg's search as the harness saw it: the hits (best first) and their documents' rows."""
 
     business_id: str
     k: int
     hits: tuple[SearchHit, ...] = field(repr=False)
     documents: Mapping[uuid.UUID, DocumentRow]
+    harness_ms: float = 0.0
+    """The recorder's own time inside this leg: the document lookup and the check."""
 
     @property
     def document_businesses(self) -> dict[uuid.UUID, str]:
         return {document_id: row.business_id for document_id, row in self.documents.items()}
 
 
+@dataclass(frozen=True)
+class FuseCall:
+    """One fusion as the harness saw it: the lists it was given and the fused list it returned."""
+
+    lists: tuple[tuple[SearchHit, ...], ...] = field(repr=False)
+    rrf_k: int
+    limit: int
+    fused: tuple[FusedHit, ...] = field(repr=False)
+    harness_ms: float = 0.0
+    """The recorder's own time inside the fusion: the check of the fused list."""
+
+
+def _ms(seconds: float) -> float:
+    return max(0.0, seconds * 1000)
+
+
+def check_fused_from_legs(
+    ranked_lists: Sequence[Sequence[SearchHit]], fused: Sequence[FusedHit]
+) -> None:
+    """Raise `FusedListMismatch` for the first fused hit, best first, whose chunk id is in none
+    of `ranked_lists`, that equals (`==`, every field) none of the hits with its chunk id there,
+    or whose chunk id came earlier in the fused list."""
+    given: dict[uuid.UUID, list[SearchHit]] = {}
+    for ranked in ranked_lists:
+        for hit in ranked:
+            given.setdefault(hit.chunk_id, []).append(hit)
+    seen: set[uuid.UUID] = set()
+    for rank, item in enumerate(fused, start=1):
+        chunk_id = item.hit.chunk_id
+        where = f"rank {rank} of the fused list: chunk {chunk_id}"
+        if chunk_id in seen:
+            raise FusedListMismatch(f"{where} is in the fused list twice")
+        seen.add(chunk_id)
+        returned = given.get(chunk_id)
+        if returned is None:
+            raise FusedListMismatch(f"{where} is in neither leg's list")
+        if not any(item.hit == hit for hit in returned):
+            raise FusedListMismatch(
+                f"{where} is not the hit its leg returned (a field such as its score changed;"
+                " rrf_fuse returns each hit unchanged)"
+            )
+
+
 class RecordingSearch:
-    """H1's `vector_search` (or a test's stand-in) plus the document lookup, on one connection;
-    every hit is checked before the hits go back to the answer step (module docstring)."""
+    """Every list one search makes, each checked before it goes on (module docstring): H1's
+    `vector_search` (the instance itself is the vector seam), M3 H1's `text_search`
+    (`text_leg`) and M3 H2's `rrf_fuse` (`fuse`), or a test's stand-ins, plus the document lookup
+    on the search's connection. `clock` must be the search's own (monotonic seconds), so the
+    recorder's time is measured as the search measures its stages."""
 
     def __init__(
-        self, search: VectorSearch | None = None, lookup: DocumentLookup | None = None
+        self,
+        search: VectorSearch | None = None,
+        lookup: DocumentLookup | None = None,
+        *,
+        text: TextSearch | None = None,
+        fuse: Fuse | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        name_lists: bool = False,
     ) -> None:
         self._search = vector_search if search is None else search
         self._lookup = document_rows if lookup is None else lookup
+        self._text = text_search if text is None else text
+        self._fuse: Fuse = rrf_fuse if fuse is None else fuse
+        self._clock = clock
+        self._name_lists = name_lists
+        """A hybrid run's leak lines name the list (" of the text leg"); vector lines are M2's."""
         self.calls: list[SearchCall] = []
+        """The vector leg's searches."""
+        self.text_calls: list[SearchCall] = []
+        self.fuse_calls: list[FuseCall] = []
+
+    def clear(self) -> None:
+        """Forget the previous question's lists."""
+        self.calls.clear()
+        self.text_calls.clear()
+        self.fuse_calls.clear()
 
     async def __call__(self, connection: AsyncConnection, query: VectorQuery) -> list[SearchHit]:
         hits = await self._search(connection, query)
-        found = await self._lookup(connection, [hit.document_id for hit in hits])
-        self.calls.append(SearchCall(query.business_id, query.k, tuple(hits), dict(found)))
-        check_hit_rows(query.business_id, hits, found)  # raises a HitPolicyViolation: ids only
+        await self._record(connection, query.business_id, query.k, hits, self.calls, "vector leg")
         return hits
+
+    async def text_leg(self, connection: AsyncConnection, query: TextQuery) -> list[SearchHit]:
+        hits = await self._text(connection, query)
+        await self._record(
+            connection, query.business_id, query.k, hits, self.text_calls, "text leg"
+        )
+        return hits
+
+    def fuse(
+        self, ranked_lists: Sequence[Sequence[SearchHit]], *, k: int, limit: int
+    ) -> list[FusedHit]:
+        fused = self._fuse(ranked_lists, k=k, limit=limit)
+        started = self._clock()
+        legs = [*self.calls, *self.text_calls]
+        rows: dict[uuid.UUID, DocumentRow] = {}
+        for call in legs:
+            rows.update(call.documents)
+        # The question's business, from its legs; with no leg recorded, "" matches no row, so
+        # every fused hit fails the check (closed).
+        business = legs[0].business_id if legs else ""
+        try:
+            # The business, status and audience first (a leak is the harder gate, exit 4), then
+            # the chunk-level check (a bug: the run stops, partial).
+            check_hit_rows(business, [item.hit for item in fused], rows, self._where("fused list"))
+            check_fused_from_legs(ranked_lists, fused)
+        finally:
+            self.fuse_calls.append(
+                FuseCall(
+                    lists=tuple(tuple(ranked) for ranked in ranked_lists),
+                    rrf_k=k,
+                    limit=limit,
+                    fused=tuple(fused),
+                    harness_ms=_ms(self._clock() - started),
+                )
+            )
+        return fused
+
+    def _where(self, name: str) -> str:
+        return f" of the {name}" if self._name_lists else ""
+
+    async def _record(
+        self,
+        connection: AsyncConnection,
+        business_id: str,
+        k: int,
+        hits: Sequence[SearchHit],
+        into: list[SearchCall],
+        name: str,
+    ) -> None:
+        """Read the hits' rows on the search's connection, record them, then check them: a
+        `HitPolicyViolation` (ids only) raises inside the search, the call recorded all the same."""
+        started = self._clock()
+        found: Mapping[uuid.UUID, DocumentRow] = {}
+        try:
+            found = await self._lookup(connection, [hit.document_id for hit in hits])
+            check_hit_rows(business_id, hits, found, self._where(name))
+        finally:
+            into.append(
+                SearchCall(business_id, k, tuple(hits), dict(found), _ms(self._clock() - started))
+            )
 
 
 # ── The stored corpus ────────────────────────────────────────────────────────────────────────
@@ -315,7 +493,7 @@ async def run_questions(
         evidence = has_evidence(question)
         unscorable = unscorable_groups(question, stored) if evidence else ()
         unheld = unheld_keys(question, stored) if evidence else ()
-        recorder.calls.clear()
+        recorder.clear()
         trace_id = trace_ids()
         run: AnswerRun | None = None
         error: str | None = None
@@ -332,6 +510,8 @@ async def run_questions(
         except asyncio.CancelledError:
             _uncancel()  # Ctrl-C: stop here and keep what was made (as M1's CLI)
             outcome.stop = f"interrupted during question {question.id}"
+        except FusedListMismatch as broken:  # our own message: ranks and chunk ids, never text
+            outcome.stop = f"question {question.id}: {broken}"
         except Exception as failure:  # the search, an embedding or database error, a bug
             outcome.stop = (
                 f"question {question.id}: {type(failure).__name__} before its answer step finished"
@@ -383,26 +563,20 @@ def _score(
     unscorable groups and the unheld keys at this config."""
     run, error = answered
     unscorable, unheld = keys
-    if len(recorder.calls) != 1:
-        raise RuntimeError(f"question {question.id}: the answer step must search exactly once")
-    call = recorder.calls[0]
-    if call.business_id != eval_id or call.k != config.search_k:
-        raise RuntimeError(f"question {question.id}: the search ran with another business or k")
-    if len(call.hits) > call.k:
-        raise RuntimeError(
-            f"question {question.id}: the search returned {len(call.hits)} hits for k = {call.k}"
-        )
-    if run is not None and run.hits != call.hits:
+    lists = _recorded_lists(question, eval_id, recorder, config)
+    ranked = lists.ranked
+    if run is not None and run.hits != ranked:
         raise RuntimeError(f"question {question.id}: the answer's hits are not the search's")
     try:
-        chunks = retrieved_chunks(question, eval_id, call.hits, call.document_businesses, mapping)
+        chunks = retrieved_chunks(question, eval_id, ranked, lists.businesses, mapping)
+        components = _components(question, eval_id, lists, mapping)
     except CrossBusinessLeak as leak:
         return leak
     evidence: list[RetrievedChunk] | None = None
     if run is not None:
         held = {hit.chunk_id for hit in run.evidence}
         evidence = [
-            chunk for hit, chunk in zip(call.hits, chunks, strict=True) if hit.chunk_id in held
+            chunk for hit, chunk in zip(ranked, chunks, strict=True) if hit.chunk_id in held
         ]
     score = score_retrieval(
         question,
@@ -421,7 +595,7 @@ def _score(
             "retrieval": score.status,
             "unscorable_groups": score.unscorable,
             "unheld_keys": unheld,
-            "hits": hit_refs(call.hits, chunks, question),
+            "hits": hit_refs(ranked, chunks, question),
             "evidence_chunk_ids": (
                 None if run is None else tuple(str(hit.chunk_id) for hit in run.evidence)
             ),
@@ -439,6 +613,7 @@ def _score(
             "confidence": None if run is None else run.response.confidence.value,
             "trace_id": trace_id,
             "prompt_version": None if run is None else run.response.prompt_version,
+            "components": components,
         }
     )
     answer = AnswerLine(
@@ -452,6 +627,94 @@ def _score(
         sources=sources,
     )
     return result, answer
+
+
+@dataclass(frozen=True)
+class _Lists:
+    """One question's recorded lists, checked against the run's config (`_recorded_lists`)."""
+
+    ranked: tuple[SearchHit, ...]
+    """What the answer kept and the run scores: the vector list, or in hybrid mode the fused one."""
+    businesses: dict[uuid.UUID, str]
+    """Every leg's document rows: {document id: business}."""
+    vector: SearchCall
+    text: SearchCall | None = None
+    fuse: FuseCall | None = None
+
+
+def _recorded_lists(
+    question: EvalQuestion, eval_id: str, recorder: RecordingSearch, config: RunConfig
+) -> _Lists:
+    """The question's lists as the recorder saw them, refused (`RuntimeError`: a bug, never an
+    outcome) unless they are exactly what the run's config asks of the answer step: one search
+    of this business at `config.search_call_k`; in vector mode no other list, in hybrid mode one
+    text leg at the same k and one fusion of exactly [vector hits, text hits] at the run's RRF k,
+    limited to that k (review of PR 4, noah N2)."""
+    k = config.search_call_k
+    counts = (len(recorder.calls), len(recorder.text_calls), len(recorder.fuse_calls))
+    if counts != ((1, 1, 1) if config.hybrid else (1, 0, 0)):
+        raise RuntimeError(
+            f"question {question.id}: the answer step must search exactly once"
+            f" ({'both legs and one fusion' if config.hybrid else 'the vector leg only'})"
+        )
+    legs = [recorder.calls[0], *recorder.text_calls]
+    for leg in legs:
+        if leg.business_id != eval_id or leg.k != k:
+            raise RuntimeError(f"question {question.id}: the search ran with another business or k")
+        if len(leg.hits) > leg.k:
+            raise RuntimeError(
+                f"question {question.id}: the search returned {len(leg.hits)} hits for k = {leg.k}"
+            )
+    businesses: dict[uuid.UUID, str] = {}
+    for leg in legs:
+        businesses.update(leg.document_businesses)
+    if not config.hybrid:
+        return _Lists(ranked=legs[0].hits, businesses=businesses, vector=legs[0])
+    fuse = recorder.fuse_calls[0]
+    if (
+        fuse.lists != (legs[0].hits, legs[1].hits)
+        or fuse.rrf_k != config.retrieval.rrf_k
+        or fuse.limit != k
+    ):
+        raise RuntimeError(
+            f"question {question.id}: the fusion did not get [vector hits, text hits] at the"
+            " run's RRF k and candidate k"
+        )
+    if len(fuse.fused) > fuse.limit:
+        raise RuntimeError(
+            f"question {question.id}: the fusion returned {len(fuse.fused)} hits for limit"
+            f" {fuse.limit}"
+        )
+    return _Lists(
+        ranked=tuple(item.hit for item in fuse.fused),
+        businesses=businesses,
+        vector=legs[0],
+        text=legs[1],
+        fuse=fuse,
+    )
+
+
+def _components(
+    question: EvalQuestion, eval_id: str, lists: _Lists, mapping: Mapping[str, str]
+) -> ComponentLists | None:
+    """Hybrid only: each leg's list without text, each checked again by its rows' business
+    (`retrieved_chunks`, the second layer; a leak there is the run's abort), with the recorder's
+    own time per stage."""
+    if lists.text is None or lists.fuse is None:
+        return None
+    legs = {}
+    for name, leg in (("vector", lists.vector), ("text", lists.text)):
+        chunks = retrieved_chunks(question, eval_id, leg.hits, leg.document_businesses, mapping)
+        legs[name] = component_hits(leg.hits, chunks, question)
+    return ComponentLists(
+        vector=legs["vector"],
+        text=legs["text"],
+        harness=HarnessTime(
+            vector_ms=lists.vector.harness_ms,
+            text_ms=lists.text.harness_ms,
+            fuse_ms=lists.fuse.harness_ms,
+        ),
+    )
 
 
 def _progress(
@@ -504,10 +767,13 @@ async def wired(
     records: Callable[[str | None], CallRecord | None],
     search: VectorSearch | None = None,
     lookup: DocumentLookup | None = None,
+    text: TextSearch | None = None,
+    fuse: Fuse | None = None,
 ) -> AsyncIterator[Parts]:
     """`KbService` and `AnswerService` as `create_app` builds them, with the capped embedder and
-    gateway, the run's chunking and `RagConfig`, and `RecordingSearch` around H1. A dry run's
-    answer model is `DryRunAnswerProvider`; a live run's is the one Settings name."""
+    gateway, the run's chunking, `RagConfig` and retrieval mode (`RunConfig.retrieval`, never
+    Settings'), and `RecordingSearch` around every list. A dry run's answer model is
+    `DryRunAnswerProvider`; a live run's is the one Settings name."""
     catalog = load_embedding_catalog()
     spec = catalog.resolve(
         settings.embeddings_provider, settings.embeddings_model, settings.embeddings_dimension
@@ -521,7 +787,7 @@ async def wired(
             policy,
             deadline_s=batch_deadline_s(policy, settings.embeddings_timeout_seconds),
         )
-        recorder = RecordingSearch(search, lookup)
+        recorder = RecordingSearch(search, lookup, text=text, fuse=fuse, name_lists=config.hybrid)
         gateway = CappedGateway(
             DryRunAnswerProvider() if dry_run else build_provider(settings),
             load_catalog(),
@@ -536,7 +802,16 @@ async def wired(
             yield Parts(
                 kb=KbService(PostgresKbStore(database), runner, chunking=config.chunking),
                 answer=AnswerService(
-                    SearchService(database, runner, search=recorder), gateway, config.rag()
+                    SearchService(
+                        database,
+                        runner,
+                        search=recorder,
+                        text=recorder.text_leg,
+                        fuse=recorder.fuse,
+                        retrieval=config.retrieval,
+                    ),
+                    gateway,
+                    config.rag(),
                 ),
                 recorder=recorder,
                 embedding_model=spec.model,
@@ -573,13 +848,11 @@ class Target:
 def check_run(
     target: Target, settings: Settings, cap: CostCap, *, dry_run: bool, fresh: bool
 ) -> None:
-    """Every refusal `execute` makes before it touches the database (`HarnessRefused`): a
-    retrieval mode other than vector (`VECTOR_MODE_ONLY`), a dry run whose Settings name a paid
-    provider, a live run without a cap, a `--fresh` delete of an id that is not its business's
-    derived eval id or in production, a question the API would refuse. The CLI checks the same
-    before it prints the plan; this holds for any caller."""
-    if settings.rag_retrieval_mode != "vector":
-        raise HarnessRefused(VECTOR_MODE_ONLY)
+    """Every refusal `execute` makes before it touches the database (`HarnessRefused`): a dry run
+    whose Settings name a paid provider, a live run without a cap, a `--fresh` delete of an id
+    that is not its business's derived eval id or in production, a question the API would refuse.
+    The CLI checks the same before it prints the plan; this holds for any caller. (A hybrid
+    search k above the candidate k cannot reach here: `RunConfig` refuses it when built.)"""
     if dry_run and (settings.embeddings_provider != "fake" or settings.llm_provider != "fake"):
         raise HarnessRefused(
             "a dry run needs the fake embedder and the fake answer model in Settings"
@@ -701,6 +974,8 @@ async def execute(
     search: VectorSearch | None = None,
     lookup: DocumentLookup | None = None,
     functions: MetricFunctions = H2_METRICS,
+    text: TextSearch | None = None,
+    fuse: Fuse | None = None,
 ) -> RunOutcome:
     """Register the eval businesses if needed, optionally delete their documents (`fresh`),
     ingest, check the stored chunks, then (unless `ingest_only`) answer and score every question.
@@ -723,6 +998,8 @@ async def execute(
             records=records,
             search=search,
             lookup=lookup,
+            text=text,
+            fuse=fuse,
         ) as parts:
             try:
                 prepared = await _before_questions(

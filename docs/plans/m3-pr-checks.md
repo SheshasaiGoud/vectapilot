@@ -596,8 +596,11 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
       (`max(rag_candidate_k, search_k)`) in the block, as `RetrievalRecord.candidate_k` already
       does (noah N3).
     - **[decided 2026-10-25] (shesha)** The language-map version is the sha256 of the canonical
-      `TEXT_SEARCH_CONFIGS` plus `FALLBACK_CONFIG` (`ingestion/language_map.py`), not a
-      hand-bumped constant. PR 5 builds it and fixes the canonical form; no code in PR 4.
+      `TEXT_SEARCH_CONFIGS` plus `FALLBACK_CONFIG`, not a hand-bumped constant. PR 5 builds it
+      and fixes the canonical form; no code in PR 4. **[decided 2026-10-27] (shesha)** The two
+      constants stay in `ingestion/language_map.py`; the hash is computed in
+      `evalrun/report.py` (`language_map_sha256`), because `ingestion/`'s import allowlist has
+      no `json`.
   - The harness takes `--retrieval-mode`, like `--min-score`. It replaces PR 4's refusal of a
     hybrid `rag_retrieval_mode` (`harness.VECTOR_MODE_ONLY`, PR 4's decision 6; ADR 0014, "Not
     built here"): PR 5 removes the refusal and its two tests together.
@@ -649,14 +652,16 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
     sum of `cost.total_usd` over the counted folders' `run.json` as committed in `HEAD`; the
     others are the ceiling and what is left. "Lower bound" is added when any counted folder has
     `llm_cost_complete` false.
-  - Counted [proposal]: every committed live folder whose `run.json` has the `retrieval` block.
-    Every run D15 lists is hybrid. A vector run made for M3 (D3's re-run after a price change) also
-    counts. It has no `retrieval` block, so noah adds a way to name it and says how in the PR.
+  - Counted (decided 2026-10-27, decision 1 below): every committed live folder whose
+    `run.json` has the `retrieval` block. Every run D15 lists is hybrid. A vector run made for M3
+    (D3's re-run after a price change) also counts: it is named with `--m3-spend`. M2's runs
+    never count.
   - `--live` is refused when the typed cap exceeds what is left. The refusal names the ceiling,
     the sum and the folders.
   - Only committed folders count, so each live folder is committed before the next live run. A
-    run that left no `run.json` (a kill, a failed write) is added by hand from its printed spend
-    and record logs. shesha then types a cap within what is left.
+    run that left no `run.json` (a kill, a failed write) counts at the $1.00 per-run ceiling until
+    shesha records its real spend in that folder's `recorded-spend.json` and commits it (decision
+    7 below). shesha then types a cap within what is left.
   - Tests: planted committed folders give the sum and the lower-bound label, and a cap above what
     is left is refused before any call.
   - Like the typed cap, this only catches mistakes. The providers' own limits stay the real cap
@@ -664,6 +669,138 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
 - **[decided 2026-10-27] (shesha)** PR 5 also builds D15 (ii)'s safety half in `compare`: every
   `category == "safety"` question that ran in both runs (whatever its retrieval status), answered
   under one mode but not the other, as counts and ids per business (PR 6 decision 7's reading).
+- **Built (2026-10-27, noah).** In review; nothing merged. No migration, no new dependency,
+  `pyproject.toml` and `uv.lock` unchanged, no paid call. No change to `text_search`, `rrf_fuse`,
+  the search, the answer or any M1/M2 hand-written body: H2's metrics and `latency_summary` are
+  called, not changed. ADR 0013 and ADR 0014 amended (2026-10-27); runbook §6
+  (`docs/learning/m2-eval-run.md`).
+  - Files: `evalrun/harness.py` (`RecordingSearch` over both legs and the fusion,
+    `RunConfig.retrieval`, the hybrid checks in `_score`, `VECTOR_MODE_ONLY` removed with its two
+    tests), `evalrun/report.py` (`RetrievalInfo`, `ConfigInfo.retrieval` left out of every dump
+    when None, `RunInfo.m3_spend`, the language map's version, the new summary sections),
+    `evalrun/scoring.py` (`ComponentLists`, `HarnessTime`; a hybrid leak line names its list),
+    `evalrun/spend.py` (new), `evalrun/cli.py` (`--retrieval-mode`, `--m3-spend`, the plan
+    lines, the spend check), `evalrun/compare.py` (the "Retrieval" row, the summary.md pointer,
+    the safety half), `answer/types.py` (a docstring). Tests: `tests/evalrun/helpers.py`;
+    `test_hybrid_harness.py`, `test_hybrid_summary.py` and `test_spend.py` (new); additions to
+    `test_cli.py`, `test_compare.py`, `test_report.py` and `test_postgres_harness.py`.
+  - The decided items: the language map's version is the sha256 of
+    `{"fallback":"simple","map":{"en":"english","hi":"hindi"}}` (compact sorted JSON), pinned
+    together with its digest `bb1f8ec0…0dd9` computed with `shasum`. It lives in
+    `evalrun/report.py`, not `ingestion/language_map.py`: `ingestion/` has an import allowlist
+    without `json` (`tests/ingestion/test_loaders.py`), and widening it is not this PR's call.
+    The safety half is built as decided, tested with safety questions that have no evidence.
+  - The fingerprint pin reads `catalog_version` (2026-10-14.1) and `PROMPT_VERSION`
+    (rag-answer.1) live; its literal `226ee644…f3f3` was computed on 4140a48, before PR 5, so it
+    also shows a vector fingerprint is unchanged. Changing either version, or `ConfigInfo`'s dump
+    gaining `"retrieval": null`, turns it red (both checked).
+  - The headroom count needs a fused list of at least 10 hits, which Settings guarantee
+    (`rag_candidate_k` ≥ 10); a shorter one says "not computed". With `--fresh`, the plan leaves
+    out its "no document embedding" line (the `--fresh` line says what is embedded again).
+  - Checks: ruff, format check and mypy clean. `make check`: 2852 passed, 210 skipped, 42
+    xfailed, gateway coverage gate passed. Postgres (`tests/evalrun`, `tests/canary`): 510
+    passed, 17 xfailed (the new one: a hybrid run over the real legs, strict until H1 and H2).
+    Canary gate: "54 canary tests passed; 16 xfailed on pending [HAND-WRITE] stubs (rrf_fuse,
+    text_search)", the same as PR 4. `tests/evalrun` without Postgres: 446 passed, 11 skipped
+    (351 and 7 before; the 5 cases of PR 4's two refusal tests removed).
+  - Mutation audit: 26 single changes to the new logic in `harness.py`, `report.py`,
+    `spend.py`, `cli.py` and `compare.py`, each applied alone to the working file and then
+    restored (sha256 of every `evalrun` module the same before and after). All 26 failed a test.
+  - Not a result: no live run was made, and every run folder in the tests is TEST-ONLY in
+    `tmp_path`.
+  - **Review fixes (2026-10-27, noah; ananya A1, A2, A5, zara Z1, Z4, diego D1).**
+    - A1: the plan's "Document embeddings" line is checked against HEAD
+      (`cli.committed_vector_dev_run`, read-only): "same namespaces as <run id>: no document
+      embedding expected" only when a complete live vector dev run committed in HEAD has the same
+      `namespaces`; otherwise a WARNING with the ingest's worst case. Requiring `complete` is
+      stricter than the review asked (a partial run may have stopped during ingest).
+    - A2: `RecordingSearch.fuse` also checks at chunk level (`harness.check_fused_from_legs`):
+      each fused hit must equal (`==`) a hit with its chunk id in a leg's list, with no chunk id
+      twice, else `FusedListMismatch` stops the run before the answer step (partial; the stop
+      names the rank and chunk id). Tests: a sibling chunk, a changed score, a chunk twice; each
+      makes no model call.
+    - A5: `RunInfo` leaves `m3_spend` out of the dump when false, so a vector run.json has
+      exactly M2's 43 keys (test against the field list at 4140a48).
+    - Z1: in `compare`'s safety half an `error` is its own state (error in A only, in B only, in
+      both), in "Ran in both" but in none of the four answered columns, listed by id.
+    - Z4: a live folder without run.json makes the plan say "left $X at most (the live folders
+      without run.json below are not subtracted)", and a refusal names them too.
+    - D1: the spend line names the HEAD it read ("HEAD (branch <name> at <short sha>)",
+      `spend.read_head_ref`, read-only `git rev-parse`); a HEAD it cannot name refuses a run of
+      M3. Runbook §6 and PR 9 now say: every M3 live run on `m3/close-out`.
+    - Checks after the fixes: ruff, format check and mypy clean. `make check`: 2871 passed, 210
+      skipped, 42 xfailed, gateway coverage gate passed. Postgres (`tests/evalrun`,
+      `tests/canary`): 529 passed, 17 xfailed; `tests/canary` alone 54 passed, 16 xfailed (as
+      PR 4). `tests/evalrun` without Postgres: 465 passed, 11 skipped. Mutation audit of the
+      fixes: 19 single changes, each applied alone and restored (sha256 of every `evalrun`
+      module the same before and after); all 19 failed a test.
+- **[decided 2026-10-27] (shesha)** PR 5's proposals and review findings: every recommendation
+  of noah and the reviewers accepted (ADR 0013, "Amended 2026-10-27", and ADR 0014, "Built
+  2026-10-27", both updated):
+  1. **What counts toward the $5.00:** a live folder committed in HEAD whose run.json has the
+     `retrieval` block, plus a vector re-run named with `--m3-spend` (recorded in its own
+     run.json as `m3_spend: true`, outside the fingerprint). M2's runs never count.
+  2. **`--search-k` above `rag_candidate_k` in hybrid mode: refused**, never recorded as
+     `max(rag_candidate_k, search_k)`, so the block's `candidate_k` is always the setting.
+  3. **The recorder's own time: subtracted** from each stage and shown as its own row.
+  4. **A live run of M3 is refused while one of M3's live folders on disk is not committed as it
+     is** (its run.json, or its `recorded-spend.json`, not byte for byte in HEAD).
+  5. **Built: the safety half's n = 0 blocks.** A business with no safety question that ran in
+     both runs blocks adoption under D15 (ii), like the hit half: its n cell reads "n = 0: no
+     evidence (blocks adoption under D15)".
+  6. **Built: an `error` blocks.** A safety question whose outcome is `error` in either run blocks
+     adoption under D15 (ii) (its behaviour there is unknown); `compare` says so and names the
+     business.
+  7. **Built: a live folder without run.json counts at the $1.00 per-run ceiling** until shesha
+     records its real spend; "left" subtracts it, and the refusal works on that. How the spend is
+     recorded (noah's choice, the simplest auditable way): a `recorded-spend.json` in that
+     folder, committed like run.json and read from HEAD only (runbook §6).
+  8. **The spend sum reads only the current branch's HEAD**, and every M3 live run happens, and
+     its folder is committed, on `m3/close-out`: the runbook (§6), PR 9 and the plan the CLI
+     prints all say so.
+  9. **Leak lines name the list** in a hybrid run ("rank 2 of the text leg"); vector lines stay
+     M2's.
+  10. **The language-map hash stays in `evalrun/report.py`** (the map itself stays in
+      `ingestion/language_map.py`); the wording above and in ADR 0013/0014 says so.
+- **Decisions applied (2026-10-27, noah).** In review; nothing merged. No migration, no new
+  dependency, `pyproject.toml` and `uv.lock` unchanged, no paid call; no `[HAND-WRITE]` file
+  touched.
+  - `compare.py`: a safety row with n = 0 shows `NO_EVIDENCE_BLOCKS` as its n, plus
+    `SAFETY_NO_EVIDENCE_BLOCKS` under the table; a business with an `error` is named after
+    `SAFETY_ERROR_BLOCKS`; `SafetyRow.errored` and `.blocks_adoption` for library callers.
+    Answered in one run only never says "blocks": that depends on which run is the vector one.
+  - `spend.py`: `RecordedSpend` (`recorded-spend.json`: `total_usd` a decimal string at most
+    $1.00, `counts_toward_m3`, `recorded_by`, `recorded_on`, `source`; extra fields refused).
+    A live folder without run.json counts at `MAX_USD_CEILING` (in HEAD or on disk only) until a
+    committed note gives its figure; a note with `counts_toward_m3` false leaves the sum; an
+    invalid note, or one next to a committed run.json, refuses a run of M3 (`SpendError`); a
+    note not committed as on disk refuses it too. "Left ... at most" now means a lower-bound
+    cost only. Every spend text ends with `BRANCH_LINE` (`m3/close-out`).
+  - `cli.py`: a failed live run of M3 says to commit its folder on `m3/close-out` and never
+    delete it (`M3_KEEP`, instead of M1's "or delete it"); its "Written to" line names
+    `m3/close-out`.
+  - Tests for the mutation audit's gaps: M15b (`check_run`, and `execute` with the steps before
+    the questions stubbed, no database: settings mode vector/hybrid × run mode vector/hybrid);
+    M7b (run.json's catalog and prompt versions equal models.toml's and `PROMPT_VERSION`, and its
+    fingerprint hashes its own fields, also with either or both live values bumped, TEST-ONLY);
+    M3c (legs' checks bypassed, the fused list's check alone stops a staff-only hit, "rank 2 of
+    the fused list"); a hybrid vector-leg AUDIENCE LEAK ("rank 1 of the vector leg", staff-only
+    and draft). Plus decisions 5–8: n = 0 and `error` blocking (both orders; error in A, B,
+    both), the ceiling, a recorded note (counted, not M3's, uncommitted three ways, nine invalid
+    forms, both files), a run.json deleted on disk counted once, the CLI end to end (refused at
+    the ceiling, runs once the note is committed), and the failure line.
+  - Mutation check: 26 single mutants of `harness.py`, `cli.py`, `compare.py` and `spend.py`,
+    each applied alone to the working file, its tests run, then restored (sha256 of all 16
+    `evalrun` modules the same before and after). All 26 failed a test: M15b in `check_run` and
+    in `execute`; M7b as four literal variants (prompt or catalog in the fingerprint, in
+    run.json, both); M3c; the vector leg named as the text leg; and 18 for decisions 5–8.
+  - Checks: ruff, format check and mypy clean. `make check`: 2912 passed, 210 skipped, 42
+    xfailed, gateway coverage gate passed. Postgres (`tests/evalrun`, `tests/canary`): 570
+    passed, 17 xfailed. `tests/canary` alone: 54 passed, 16 xfailed; canary gate "54 canary
+    tests passed; 16 xfailed on pending [HAND-WRITE] stubs (rrf_fuse, text_search)", as PR 4.
+    `tests/evalrun` without Postgres: 506 passed, 11 skipped (465 before these changes).
+  - Not a result: no live run was made, and every run folder in the tests is TEST-ONLY in
+    `tmp_path`.
 
 ## PR 6 — `m3/eval-compare` (noah; ananya reviews) · S — can start now
 - `uv run python -m vectapilot_api.evalrun compare <run A> <run B>`:
@@ -789,7 +926,8 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
   - **Its range is not the pairs** (review of PR 6, ananya A5). A safety question must be
     handed off but need not have evidence, and a question without evidence is `not_scored`, so
     it never enters the pairs. Its test uses a safety question without evidence.
-  - [open, for shesha] Build it in PR 5 or in a small follow-up.
+  - Built in PR 5 (decided 2026-10-27, shesha), with its n = 0 and `error` rules (PR 5,
+    decisions 5 and 6).
 
 ## PR 7 — `m3/faithfulness-labels` (noah; zara reviews) · S — before M2 step 16 if possible
 - **[proposal] `faithfulness_labels.jsonl` per run folder.** One line per shown answer (outcome
@@ -825,13 +963,20 @@ Agents never pass `--live` and never see a key. The commands follow M2's runbook
 (`docs/learning/m2-eval-run.md`). D3's window and volume rule hold throughout. **Spend:** every
 paid run of M3 counts towards one $5.00 ceiling [D15 (iii)], and each run stays within M1's $1.00
 cap. Before each live run, read "M3 spend so far" in the plan the CLI prints (PR 5), and type a
-cap within what is left. Commit each live folder before the next live run. Each step names its own
-dependency, so steps 2–4 can overlap M2's steps 15–17.
+cap within what is left. Commit each live folder before the next live run. Make every M3 live
+run, and commit its folder, on `m3/close-out`: the sum reads the current branch's HEAD only, and
+the spend line names the branch and commit it read (review of PR 5, diego D1; decided
+2026-10-27). Never delete a live folder of M3: one without run.json (a kill, a failed write)
+counts at the $1.00 per-run ceiling until you record its real spend in its `recorded-spend.json`
+and commit it (runbook §6; decided 2026-10-27). Each step names its own dependency, so steps 2–4
+can overlap M2's steps 15–17.
 1. **Faithfulness labels** on M2's live dev and test folders.
    *Needs:* PR 7, plus M2 step 14 (dev folder) and step 16 (test folder).
 2. **Live hybrid dev runs** on the frozen v0.1: only D15 (i)'s variants, which are hybrid at M2's
    chosen `rag_min_score` with `candidate_k` 20, plus at most one `rag_min_score` variant. Each
-   uses the embedding model, chunk config and prompt of M2's dev folder. Commit every folder,
+   uses the embedding model, chunk config and prompt of M2's dev folder (pass its
+   `--max-chars`/`--overlap`/`--search-k` when not the defaults; the plan's "Document embeddings"
+   line warns when no committed vector dev run used the same namespaces). Commit every folder,
    including the ones that lost. All of them stay within the $5.00 ceiling.
    *Needs:* M2 steps 10, 13 and 14 (a frozen v0.1 and M2's committed vector dev folder), PR 4,
    PR 5, H1 and H2.
@@ -844,7 +989,11 @@ dependency, so steps 2–4 can overlap M2's steps 15–17.
    "n = 0: no evidence (blocks adoption under D15)". Adoption also needs that no safety row that
    vector did not answer is answered under hybrid, counted over every safety question that ran in
    both runs, whatever its retrieval status (review of PR 6, ananya A5: a safety question without
-   evidence is never scorable; this reading decided 2026-10-25, PR 6's decision 7). If hybrid is adopted, a small PR flips `rag_retrieval_mode`'s default and
+   evidence is never scorable; this reading decided 2026-10-25, PR 6's decision 7). **[decided
+   2026-10-27] (shesha)** The safety half also blocks, whichever run is which, for a business with
+   no safety question that ran in both runs ("n = 0: no evidence (blocks adoption under D15)"), and
+   for a safety question whose outcome is `error` in either run (behaviour unknown; `compare`
+   names the business). If hybrid is adopted, a small PR flips `rag_retrieval_mode`'s default and
    carries the `compare` output.
    *Needs:* step 3.
 5. **If hybrid is adopted:** one live test run of the hybrid config (ledger entry before the first

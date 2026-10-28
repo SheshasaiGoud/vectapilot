@@ -47,6 +47,23 @@ unscorable in both, and not run in one or both runs. With the scoring-rule refus
 scorable in one run only was not run in the other, so the report is then already not a result. On
 the test split, the run table carries each run's test-run ledger row and the banner names a RERUN.
 
+**The retrieval mode** (M3 PR 5). The run table's "Retrieval" row shows each run's mode, candidate
+k, RRF k and language map ("vector (no retrieval block)" when run.json has none), and a report
+with a hybrid run points to that folder's summary.md for its FTS-only and headroom counts.
+
+**D15 (ii)'s safety half** (decided 2026-10-25 as ananya's A5 reading; built in PR 5, decided
+2026-10-27, shesha): every `category == "safety"` question that ran in both runs (outcome not
+`not_run`), whatever its retrieval status, answered (outcome `answered`) in one run but not the
+other, as counts and ids per business (every business in either run.json's `namespaces`). Its
+range is not the pairs: a safety question need not have evidence, and one without is never scored.
+An `error` outcome (the answer model failed; the run stays `complete`) shows no behaviour, so it
+is never counted as "not answered": it has its own columns (error in A only, in B only, in both)
+and is listed by id (review of PR 5, zara Z1). Two things block adoption under D15 (ii) whichever
+run is which, like the hit half's n = 0 (decided 2026-10-27, shesha): a business with no safety
+question that ran in both runs (its n cell is `NO_EVIDENCE_BLOCKS`), and a safety question whose
+outcome is `error` in either run (its behaviour there is unknown; `SAFETY_ERROR_BLOCKS` names the
+businesses). Counting is harness counting (D5); like the pairs, it never ranks the runs.
+
 **What it never prints:** a p-value, a hypothesis test, or wording that ranks the two runs. A dry
 run, a run that is not complete, or a dataset that is not frozen makes the whole report "not a
 result". Dev is for choosing; on test, the report is counts only (no percentage, interval or MRR
@@ -65,6 +82,7 @@ from vectapilot_api.evalrun.report import (
     BOOTSTRAP_NOTE,
     RESULTS_FILE,
     RUN_FILE,
+    SUMMARY_MD_FILE,
     TARGET_HIT_K,
     MetricRow,
     RunInfo,
@@ -79,6 +97,7 @@ from vectapilot_api.evalrun.report import (
     fingerprint_digest,
     read_results,
     read_run,
+    retrieval_text,
     run_fingerprint_payload,
 )
 from vectapilot_api.evalrun.scoring import (
@@ -104,7 +123,17 @@ NONE_PAIRED: Final = "none scorable under both"
 some of them alone)."""
 NO_EVIDENCE_BLOCKS: Final = "n = 0: no evidence (blocks adoption under D15)"
 """The n cell of a business's discordant row with nothing paired (decided 2026-10-25, shesha): a
-business without evidence blocks adoption, because the retrieval mode is platform-wide."""
+business without evidence blocks adoption, because the retrieval mode is platform-wide. Also the
+n cell of a business's safety row with no safety question that ran in both runs (decided
+2026-10-27, shesha)."""
+SAFETY_NO_EVIDENCE_BLOCKS: Final = (
+    "A business with n = 0 safety questions run in both gives no evidence and blocks adoption"
+    " under D15 (ii), as in the hit half (decided 2026-10-27, shesha)."
+)
+SAFETY_ERROR_BLOCKS: Final = (
+    "A safety question with outcome `error` in either run blocks adoption under D15 (ii): its"
+    " behaviour under that run is unknown (decided 2026-10-27, shesha)."
+)
 REGROUPED_CAUSE: Final = (
     "a question scored in both runs has a chunk whose matched groups differ between the runs"
 )
@@ -208,6 +237,52 @@ class DiscordantRow:
 
 
 @dataclass(frozen=True)
+class SafetyRow:
+    """One business's safety questions that ran in both runs (D15 (ii)'s safety half): each by
+    whether it was answered in A, in B, in both or in neither, or, when its outcome is `error`
+    in A, in B or in both, in an error column of its own (n = the sum of the seven)."""
+
+    business: str
+    n: int
+    both: int
+    a_only: int
+    b_only: int
+    neither: int
+    error_a: int = 0
+    """`error` in run A only: its behaviour under A is unknown (review of PR 5, zara Z1)."""
+    error_b: int = 0
+    error_both: int = 0
+
+    @property
+    def errored(self) -> int:
+        """Safety questions with outcome `error` in run A, in run B or in both."""
+        return self.error_a + self.error_b + self.error_both
+
+    @property
+    def blocks_adoption(self) -> bool:
+        """n = 0 (no evidence) or an `error` in either run (unknown behaviour): either blocks
+        adoption under D15 (ii), whichever run is which (decided 2026-10-27, shesha)."""
+        return self.n == 0 or self.errored > 0
+
+
+SafetyError = Literal["A", "B", "both"]
+"""Which run's outcome was `error` (the answer model failed): that run's behaviour is unknown."""
+
+
+@dataclass(frozen=True)
+class SafetyHalf:
+    rows: tuple[SafetyRow, ...]
+    a_only: tuple[QuestionResult, ...]
+    """Safety questions answered in run A and not in run B (run A's results)."""
+    b_only: tuple[QuestionResult, ...]
+    not_run: tuple[str, ...]
+    """Safety questions not run in one or both runs: outside the counts, listed."""
+    errors: tuple[tuple[QuestionResult, SafetyError], ...] = ()
+    """Safety questions that ran in both runs with outcome `error` in one or both (run A's
+    results): in "Ran in both", in none of the four answered columns, listed by id."""
+
+
+@dataclass(frozen=True)
 class Comparison:
     a: LoadedRun
     b: LoadedRun
@@ -225,6 +300,7 @@ class Comparison:
     rows_a: tuple[MetricRow, ...]
     rows_b: tuple[MetricRow, ...]
     discordant: tuple[DiscordantRow, ...]
+    safety: SafetyHalf
 
 
 # ── Reading and refusing ─────────────────────────────────────────────────────────────────────
@@ -448,6 +524,72 @@ def _not_a_result(a: LoadedRun, b: LoadedRun) -> tuple[str, ...]:
 # ── The comparison ───────────────────────────────────────────────────────────────────────────
 
 
+def safety_half(a: LoadedRun, b: LoadedRun) -> SafetyHalf:
+    """D15 (ii)'s safety half (module docstring): over every safety question that ran in both
+    runs, whatever its retrieval status, by business; every business either run registered keeps
+    a row, with n = 0 when none of its safety questions ran in both."""
+    by_id_b = {result.question_id: result for result in b.results}
+    cells: dict[str, Counter[str]] = {
+        business: Counter() for business in a.info.namespaces.keys() | b.info.namespaces.keys()
+    }
+    a_only: list[QuestionResult] = []
+    b_only: list[QuestionResult] = []
+    not_run: list[str] = []
+    errors: list[tuple[QuestionResult, SafetyError]] = []
+    for result_a in a.results:
+        if result_a.category != "safety":
+            continue
+        result_b = by_id_b[result_a.question_id]
+        if "not_run" in (result_a.outcome, result_b.outcome):
+            not_run.append(result_a.question_id)
+            continue
+        counts = cells.setdefault(result_a.business_id, Counter())
+        counts["n"] += 1
+        # An `error` is no behaviour, so it is never "not answered" (zara Z1): its own column.
+        error = _safety_error(result_a.outcome == "error", result_b.outcome == "error")
+        if error is not None:
+            counts[f"error_{error.lower()}"] += 1
+            errors.append((result_a, error))
+            continue
+        answered = (result_a.outcome == "answered", result_b.outcome == "answered")
+        counts[_ANSWERED_CELL[answered]] += 1
+        if answered == (True, False):
+            a_only.append(result_a)
+        elif answered == (False, True):
+            b_only.append(result_a)
+    rows = tuple(
+        SafetyRow(
+            business=business,
+            n=counts["n"],
+            both=counts["both"],
+            a_only=counts["a_only"],
+            b_only=counts["b_only"],
+            neither=counts["neither"],
+            error_a=counts["error_a"],
+            error_b=counts["error_b"],
+            error_both=counts["error_both"],
+        )
+        for business, counts in sorted(cells.items())
+    )
+    return SafetyHalf(rows, tuple(a_only), tuple(b_only), tuple(not_run), tuple(errors))
+
+
+_ANSWERED_CELL: Final[dict[tuple[bool, bool], str]] = {
+    (True, True): "both",
+    (True, False): "a_only",
+    (False, True): "b_only",
+    (False, False): "neither",
+}
+
+
+def _safety_error(in_a: bool, in_b: bool) -> SafetyError | None:
+    if in_a and in_b:
+        return "both"
+    if in_a:
+        return "A"
+    return "B" if in_b else None
+
+
 def _left_out(a: RetrievalStatus, b: RetrievalStatus) -> LeftOut | None:
     """Why a question with these two statuses is outside the pairs (`LeftOut`); None: paired."""
     scored = (a == "scored", b == "scored")
@@ -598,6 +740,7 @@ def compare(
             )
             for group, ids in groups
         ),
+        safety=safety_half(a, b),
     )
 
 
@@ -619,6 +762,7 @@ def _run_cells(run: LoadedRun) -> list[str]:
         f" {info.prompt_version}",
         f"search k {config.search_k} · metric k {config.metric_k} · rag_min_score"
         f" {config.rag_min_score} · weak evidence → {config.weak_evidence_outcome}",
+        retrieval_text(config.retrieval, config.search_k),
         info.config_fingerprint,
     ]
 
@@ -632,6 +776,7 @@ _RUN_ROWS: Final = (
     "Started",
     "Answer model",
     "Config",
+    "Retrieval",
     "Config fingerprint",
 )
 """The run table's rows, one per `_run_cells` entry ("Live or dry", never "Mode": in M3, mode
@@ -835,5 +980,94 @@ def render_comparison(comparison: Comparison) -> str:
         f"{'Counts only' if comparison.held_out else 'Counts and intervals only'}: no hypothesis"
         " test, and no ranking of the two runs. Left-out questions are outside every count"
         " above; the last two columns count them per group.",
+        "",
+        *_safety_lines(comparison),
+        *_hybrid_pointer(comparison),
     ]
     return "\n".join(lines) + "\n"
+
+
+def _mode(run: LoadedRun) -> str:
+    return "vector" if run.info.config.retrieval is None else "hybrid"
+
+
+def _named(results: Sequence[QuestionResult]) -> str:
+    return ", ".join(f"{r.question_id} ({r.business_id})" for r in results) or "none"
+
+
+def _errored(errors: Sequence[tuple[QuestionResult, SafetyError]]) -> str:
+    named = [f"{r.question_id} ({r.business_id}; error in {run})" for r, run in errors]
+    return ", ".join(named) or "none"
+
+
+def _safety_lines(comparison: Comparison) -> list[str]:
+    """D15 (ii)'s safety half (module docstring): counts and ids, never a ranking."""
+    half = comparison.safety
+    a, b = comparison.a, comparison.b
+    lines = [
+        "## Safety questions answered in one run only (D15 (ii))",
+        "",
+        f"Every safety question that ran in both runs (run A {_mode(a)}, run B {_mode(b)}),"
+        " whatever its retrieval status: a safety question without evidence is never scored,"
+        " so it is never among the pairs above. Answered means the outcome `answered`. An"
+        " `error` (the answer model failed) shows no behaviour, so it is in none of the four"
+        " answered columns: it has its own.",
+        "",
+        *_table(
+            [
+                "Business",
+                "Ran in both",
+                "Answered in both",
+                "A answered, B not",
+                "B answered, A not",
+                "Answered in neither",
+                "Error in A only",
+                "Error in B only",
+                "Error in both",
+            ],
+            [
+                (
+                    row.business,
+                    NO_EVIDENCE_BLOCKS if row.n == 0 else str(row.n),
+                    str(row.both),
+                    str(row.a_only),
+                    str(row.b_only),
+                    str(row.neither),
+                    str(row.error_a),
+                    str(row.error_b),
+                    str(row.error_both),
+                )
+                for row in half.rows
+            ],
+        ),
+        "",
+        f"- A answered, B not ({len(half.a_only)}): {_named(half.a_only)}",
+        f"- B answered, A not ({len(half.b_only)}): {_named(half.b_only)}",
+        f"- Error in one or both runs, behaviour unknown ({len(half.errors)}):"
+        f" {_errored(half.errors)}",
+        f"- Not run in one or both runs, outside these counts ({len(half.not_run)}):"
+        f" {_ids(half.not_run)}",
+    ]
+    errored = [row.business for row in half.rows if row.errored]
+    if errored:
+        lines.append(f"- {SAFETY_ERROR_BLOCKS} Blocked by an error: {', '.join(errored)}.")
+    empty = [row.business for row in half.rows if row.n == 0]
+    if empty:
+        lines.append(
+            f"- n = 0, no safety question ran in both runs: {', '.join(empty)}."
+            f" {SAFETY_NO_EVIDENCE_BLOCKS}"
+        )
+    return [*lines, "", "Counts and ids only: no ranking of the two runs."]
+
+
+def _hybrid_pointer(comparison: Comparison) -> list[str]:
+    """Where a hybrid run's FTS-only and headroom counts are: its own summary.md."""
+    hybrid = [run for run in (comparison.a, comparison.b) if run.info.config.retrieval is not None]
+    if not hybrid:
+        return []
+    return [
+        "",
+        "FTS-only and headroom counts (hybrid only): "
+        + "; ".join(f"run {run.label}, {run.directory / SUMMARY_MD_FILE}" for run in hybrid)
+        + ".",
+    ]
