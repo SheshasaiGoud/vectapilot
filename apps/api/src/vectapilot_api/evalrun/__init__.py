@@ -12,10 +12,12 @@ defines the data; this package runs the product against it. Pure modules plus I/
 - `ingest` — the corpus through `KbService`, then the stored chunks checked against the corpus
 - `dryrun` — the dry run's canned answer model
 - `harness` — the run: ingest, check, answer and score each question through `AnswerService`
-- `report` — run.json, the labels file, and the summary recomputed from the run folder
+- `report` — run.json, the labels files, and the summary recomputed from the run folder
+- `cited` — the label sheet's cited chunk text, rebuilt from the run's frozen corpus (M3 PR 7)
 - `ledger` — the test-run ledger, `evals/reports/<dataset>/test-runs.jsonl`
 - `compare` — two runs of one chunk config, paired by question; prints only (M3 PR 6)
-- `cli` — `uv run python -m vectapilot_api.evalrun run|ingest|summarize|label-sheet|compare`
+- `cli` — `uv run python -m vectapilot_api.evalrun run|ingest|summarize|label-sheet|`
+  `faithfulness-template|compare`
 
 The retrieval metrics are shesha's H2 (`evalset/metrics.py`); the search is shesha's H1
 (`retrieval/vector.py`). Both are called, never re-implemented here. Runbook for the live run:

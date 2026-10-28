@@ -18,6 +18,10 @@ dry: the same under the git-ignored `evals/reports/tmp/`, `-fake-` instead of `-
   freeze.json.
 - `labels.jsonl`: one template line per question that ran, `label: null`, for shesha to fill in
   (`correct` | `incorrect`, `labelled_by`, `labelled_on`); `evalset.questions.CorrectnessLabel`.
+- `faithfulness_labels.jsonl` (M3 PR 7): one line per shown answer (outcome `answered`),
+  `faithful` | `unfaithful`, `labelled_by`, `labelled_on`; `evalset.questions.FaithfulnessLabel`.
+  Written as a template by `evalrun faithfulness-template`, never by `run`, so a run folder holds
+  M2's files; labelled by shesha alone, from the label sheet (`cited.py`).
 - `embedding_call_log.jsonl`, `llm_call_log.jsonl`, `rag_answer_log.jsonl`: the product's own
   metadata-only records of every call (ADR 0007, 0008, 0011), joined to results by `trace_id`.
 - `summary.md`, `summary.json`: written by `summarize`, which reads only the files above.
@@ -59,12 +63,24 @@ minus the harness's own time, through M1's `latency_summary` (p95 only from n = 
 "local Docker on an 8 GB Mac, synthetic" and never compared with §6's target. Every run, vector
 too, gets its safety questions by outcome per business (zara S7). It refuses component lists that
 disagree with run.json or with each other.
+
+**Faithfulness (M3 PR 7; ADR 0013, amended 2026-10-28).** The summary ends with a section of its
+own, after the Targets table, so every section above it reads as before: the shown answers, how
+many carry a human faithfulness label, `x of n` faithful with its Wilson interval for "all" and
+each business, language and category (safety as counts only), and §6's ≥ 95 % target under
+decision 10's rules (no verdict below `RATE_MIN_N`, for a dry, partial or failed run, or while a
+shown answer is unlabelled; per business too, and a business with no shown answer reads "no shown
+answer" first). Faithfulness never enters the status line or "Not for the note": correctness
+alone decides those, as in M2 (decided 2026-10-28, shesha). A missing
+`faithfulness_labels.jsonl` leaves every shown answer unlabelled.
 """
 
 import hashlib
 import json
+import unicodedata
 from collections import Counter, defaultdict
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from fractions import Fraction
 from pathlib import Path
 from typing import Final, Literal
@@ -94,11 +110,17 @@ from vectapilot_api.evalrun.scoring import (
     AnswerLine,
     MetricFunctions,
     QuestionResult,
+    SourceRef,
     check_metric_k,
     first_relevant_rank,
 )
 from vectapilot_api.evalset.corpus import describe_validation_error
-from vectapilot_api.evalset.questions import CATEGORIES, CorrectnessLabel, EvalQuestion
+from vectapilot_api.evalset.questions import (
+    CATEGORIES,
+    CorrectnessLabel,
+    EvalQuestion,
+    FaithfulnessLabel,
+)
 from vectapilot_api.evalset.ranking import RankedRelevance
 from vectapilot_api.gateway.types import Usd
 from vectapilot_api.ingestion.language_map import FALLBACK_CONFIG, TEXT_SEARCH_CONFIGS
@@ -109,6 +131,9 @@ RUN_FILE: Final = "run.json"
 RESULTS_FILE: Final = "results.jsonl"
 ANSWERS_FILE: Final = "answers.jsonl"
 LABELS_FILE: Final = "labels.jsonl"
+FAITHFULNESS_LABELS_FILE: Final = "faithfulness_labels.jsonl"
+"""M3 PR 7's human faithfulness labels, one line per shown answer (the file format decided
+2026-10-28, shesha; ADR 0013 amended 2026-10-28)."""
 SUMMARY_MD_FILE: Final = "summary.md"
 SUMMARY_JSON_FILE: Final = "summary.json"
 EMBEDDING_LOG_FILE: Final = "embedding_call_log.jsonl"
@@ -124,8 +149,14 @@ distinct sets to say much, and a percentile bootstrap covers less than 95 % at s
 first-relevant-rank counts are always shown."""
 BOOTSTRAP_NOTE: Final = "approximate at small n (percentile bootstrap undercovers)"
 """Printed with every MRR interval's explanation in summary.md (decided 2026-10-22)."""
-TARGETS: Final = {"hit@5": Fraction(9, 10), "correctness": Fraction(9, 10)}
-"""Business-context §6's starting targets that M2 measures (hit@5, correctness): ≥ 90 %."""
+TARGETS: Final = {
+    "hit@5": Fraction(9, 10),
+    "correctness": Fraction(9, 10),
+    "faithfulness": Fraction(19, 20),
+}
+"""Business-context §6's starting targets the harness measures: hit@5 and correctness ≥ 90 %
+(M2; the Targets table), faithfulness ≥ 95 % (M3 PR 7; its own section, after the Targets
+table)."""
 TARGET_HIT_K: Final = 5
 """The k of §6's retrieval target: a run with another metric k gets no hit@5 verdict."""
 DEFAULT_BOOTSTRAP_SEED: Final = 20261022
@@ -465,6 +496,82 @@ def _label(payload: dict[str, object], number: int) -> CorrectnessLabel:
     raise SummaryError(f"{LABELS_FILE} line {number} is not a valid label: {detail}")
 
 
+def shown_answers(results: Iterable[QuestionResult]) -> list[QuestionResult]:
+    """The questions whose answer was shown (outcome `answered`), in results.jsonl's order: the
+    only ones a faithfulness label belongs to."""
+    return [result for result in results if result.outcome == "answered"]
+
+
+def faithfulness_template(run_id: str, results: Iterable[QuestionResult]) -> str:
+    """faithfulness_labels.jsonl as `evalrun faithfulness-template` writes it: one line per shown
+    answer, nothing filled in (ids only, never text)."""
+    lines = [
+        json.dumps(
+            {
+                "question_id": result.question_id,
+                "run_id": run_id,
+                "label": None,
+                "labelled_by": None,
+                "labelled_on": None,
+                "note": None,
+            }
+        )
+        for result in shown_answers(results)
+    ]
+    return "".join(f"{line}\n" for line in lines)
+
+
+def parse_faithfulness(
+    text: str, selected: Collection[str], shown: Collection[str], run_id: str
+) -> tuple[dict[str, FaithfulnessLabel], frozenset[str]]:
+    """The filled faithfulness labels by question id, and the shown answers that have none yet (a
+    `label: null` line or no line). `selected` is every question of the run (results.jsonl,
+    `not_run` included), `shown` those answered.
+    Raises `SummaryError` naming the line: not JSON, an id that is not a question of this run, a
+    question whose answer was not shown, a second line for one question, another run's id, or a
+    filled line that is not a valid `FaithfulnessLabel`. Never echoes a value."""
+    labels: dict[str, FaithfulnessLabel] = {}
+    seen: set[str] = set()
+    where = FAITHFULNESS_LABELS_FILE
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            payload = None
+        if not isinstance(payload, dict):
+            raise SummaryError(f"{where} line {number} is not a JSON object")
+        question_id = payload.get("question_id")
+        if not isinstance(question_id, str) or question_id not in selected:
+            raise SummaryError(f"{where} line {number}: not a question of this run")
+        if question_id not in shown:
+            raise SummaryError(
+                f"{where} line {number}: this question's answer was not shown (outcome not"
+                " answered); only a shown answer gets a faithfulness label"
+            )
+        if question_id in seen:
+            raise SummaryError(f"{where} line {number}: one faithfulness label per shown answer")
+        seen.add(question_id)
+        if payload.get("label") is None:
+            continue
+        label = _faithfulness_label(payload, number)
+        if label.run_id != run_id:
+            raise SummaryError(f"{where} line {number}: run_id is not this run's")
+        labels[question_id] = label
+    return labels, frozenset(set(shown) - labels.keys())
+
+
+def _faithfulness_label(payload: dict[str, object], number: int) -> FaithfulnessLabel:
+    try:
+        return FaithfulnessLabel.model_validate(payload)
+    except ValidationError as error:
+        detail = describe_validation_error(error, "(row)")
+    raise SummaryError(
+        f"{FAITHFULNESS_LABELS_FILE} line {number} is not a valid faithfulness label: {detail}"
+    )
+
+
 # ── The summary ──────────────────────────────────────────────────────────────────────────────
 
 
@@ -507,6 +614,14 @@ class CorrectnessRow(_Closed):
     correct: CountStat
 
 
+class FaithfulnessRow(_Closed):
+    """Human faithfulness for one group of labelled shown answers: `x` faithful of `n`."""
+
+    group: str
+    counts_only: bool
+    faithful: CountStat
+
+
 class TargetRow(_Closed):
     """One §6 target for one group ("all" or a business): the measured `x of n` and its verdict."""
 
@@ -519,6 +634,26 @@ class TargetRow(_Closed):
     """"met", "not met", or "no verdict: <why>" (module docstring)."""
     shown_at_95: bool | None
     """Whether the Wilson interval's lower end reaches the target; None without a verdict."""
+
+
+class FaithfulnessSummary(_Closed):
+    """The summary's faithfulness section (M3 PR 7): human labels on the shown answers only."""
+
+    file_present: bool
+    """Whether the folder has `faithfulness_labels.jsonl` (without it, nothing is labelled)."""
+    shown: int
+    """Questions whose answer was shown (outcome `answered`): the most that can be labelled."""
+    labelled: int
+    unlabelled: tuple[str, ...]
+    """Shown answers without a faithfulness label, by id (results.jsonl's order)."""
+    unfaithful: tuple[str, ...]
+    """Shown answers labelled `unfaithful`, by id."""
+    rows: tuple[FaithfulnessRow, ...]
+    targets: tuple[TargetRow, ...]
+    """§6's ≥ 95 % for "all" and each business of the run, under decision 10's rules."""
+    shown_by_group: dict[str, int]
+    """Shown answers per target group ("all" and each business of the run), so a target's
+    Measured cell tells "no shown answer" from "none labelled (k shown)"."""
 
 
 RankedListName = Literal["vector", "text", "fused"]
@@ -615,6 +750,8 @@ class Summary(_Closed):
     latency: tuple[StageLatency, ...] = ()
     latency_note: str | None = None
     """Hybrid only: why some or all per-stage latency is not shown."""
+    faithfulness: FaithfulnessSummary
+    """Human faithfulness labels on the shown answers (M3 PR 7), every run."""
 
 
 def read_results(run_dir: Path) -> list[QuestionResult]:
@@ -795,8 +932,20 @@ def _count(flags: Sequence[bool], *, counts_only: bool = False) -> CountStat:
     return _stat(sum(flags), len(flags), counts_only=counts_only)
 
 
+_NONE_MEASURED: Final = {
+    "hit@5": "no verdict: none scored",
+    "correctness": "no verdict: none labelled",
+    "faithfulness": "no verdict: no shown answer",
+}
+"""A group's verdict when its n is 0 and nothing else stands against a verdict. For faithfulness
+that means a group with no shown answer: it reads so ahead of the run-wide "not labelled yet"
+reason, which is about other groups' answers (`_faithfulness`; decided 2026-10-28, shesha)."""
+
+
 def _no_verdict(run: RunInfo, unlabelled: int, metric: str) -> str | None:
-    """Why a §6 target gets no verdict in this run at all, or None."""
+    """Why a §6 target gets no verdict in this run at all, or None. `unlabelled` counts the
+    metric's own unlabelled answers: correctness labels for correctness (and hit@5, which ignores
+    it), faithfulness labels on shown answers for faithfulness."""
     if run.dry_run:
         return "no verdict: dry run"
     if run.status != "complete":
@@ -805,6 +954,8 @@ def _no_verdict(run: RunInfo, unlabelled: int, metric: str) -> str | None:
         return f"no verdict: this run's metric k is {run.config.metric_k}, the target is hit@5"
     if metric == "correctness" and unlabelled:
         return f"no verdict: {unlabelled} answer(s) not labelled yet"
+    if metric == "faithfulness" and unlabelled:
+        return f"no verdict: {unlabelled} shown answer(s) not labelled for faithfulness yet"
     return None
 
 
@@ -815,7 +966,7 @@ def _target_row(
     target = TARGETS[metric]
     why = _no_verdict(run, unlabelled, metric)
     if why is None and stat.n == 0:
-        why = "no verdict: none scored" if metric == "hit@5" else "no verdict: none labelled"
+        why = _NONE_MEASURED[metric]
     if why is None and stat.n < run.rate_min_n:
         why = f"no verdict: n < {run.rate_min_n} (counts only)"
     if why is not None:
@@ -850,6 +1001,65 @@ def _targets(
     rows = [_target_row("hit@5", g, hits.get(g, empty), run, unlabelled) for g in groups]
     rows += [_target_row("correctness", g, correct.get(g, empty), run, unlabelled) for g in groups]
     return tuple(rows)
+
+
+def _faithfulness(
+    run: RunInfo, results: Sequence[QuestionResult], text: str | None
+) -> FaithfulnessSummary:
+    """The faithfulness section from the shown answers and faithfulness_labels.jsonl's `text`
+    (None: no file). Groups and the counts-only rule as correctness; the verdicts as decision 10,
+    for "all" and each business of the run, a business with no shown answer reading "no shown
+    answer" even while another business's answers wait for a label."""
+    shown = shown_answers(results)
+    labels, missing = parse_faithfulness(
+        text or "", {r.question_id for r in results}, {r.question_id for r in shown}, run.run_id
+    )
+    rows = tuple(
+        FaithfulnessRow(
+            group=group,
+            counts_only=group.removeprefix("category ") in COUNTS_ONLY_CATEGORIES,
+            faithful=_count(
+                [labels[r.question_id].label == "faithful" for r in members],
+                counts_only=group.removeprefix("category ") in COUNTS_ONLY_CATEGORIES,
+            ),
+        )
+        for group, members in _groups([r for r in shown if r.question_id in labels])
+        if members
+    )
+    by_group = {row.group: row.faithful for row in rows}
+    empty = CountStat(x=0, n=0)
+    target_groups = ["all", *(f"business {business}" for business in sorted(run.namespaces))]
+    shown_by_business = Counter(f"business {r.business_id}" for r in shown)
+    shown_by_group = {
+        group: len(shown) if group == "all" else shown_by_business[group] for group in target_groups
+    }
+    # A group with no shown answer reads "no verdict: no shown answer" ahead of the run-wide
+    # "not labelled yet", which is about other groups' answers; a dry or incomplete run still
+    # says so first (PR 7, decision 10, decided 2026-10-28, shesha).
+    targets = tuple(
+        _target_row(
+            "faithfulness",
+            group,
+            by_group.get(group, empty),
+            run,
+            len(missing) if shown_by_group[group] else 0,
+        )
+        for group in target_groups
+    )
+    return FaithfulnessSummary(
+        file_present=text is not None,
+        shown=len(shown),
+        labelled=len(labels),
+        unlabelled=tuple(r.question_id for r in shown if r.question_id in missing),
+        unfaithful=tuple(
+            r.question_id
+            for r in shown
+            if r.question_id in labels and labels[r.question_id].label == "unfaithful"
+        ),
+        rows=rows,
+        targets=targets,
+        shown_by_group=shown_by_group,
+    )
 
 
 def status_of(run: RunInfo, unlabelled: int) -> tuple[str, tuple[str, ...]]:
@@ -928,6 +1138,12 @@ def summarize(run_dir: Path, functions: MetricFunctions = H2_METRICS) -> Summary
     labels_path = run_dir / LABELS_FILE
     labels_text = labels_path.read_text("utf-8") if labels_path.is_file() else ""
     labels, unlabelled = parse_labels(labels_text, {r.question_id for r in ran}, run.run_id)
+    faithfulness_path = run_dir / FAITHFULNESS_LABELS_FILE
+    faithfulness = _faithfulness(
+        run,
+        results,
+        faithfulness_path.read_text("utf-8") if faithfulness_path.is_file() else None,
+    )
     scored = [r for r in results if r.retrieval == "scored"]
     for result in scored:
         _check_stored(result, run.config.metric_k, run.config.search_k, functions)
@@ -1019,6 +1235,7 @@ def summarize(run_dir: Path, functions: MetricFunctions = H2_METRICS) -> Summary
         correctness=correctness,
         targets=_targets(retrieval, correctness, run, len(unlabelled)),
         safety_outcomes=dict(sorted(safety_outcomes.items())),
+        faithfulness=faithfulness,
         **hybrid,
     )
 
@@ -1548,6 +1765,7 @@ def render_markdown(summary: Summary) -> str:
             [(row.group, _count_text(row.correct, run.rate_min_n)) for row in summary.correctness],
         )
     lines += ["", *_targets_markdown(summary.targets, run.rate_min_n)]
+    lines += ["", *_faithfulness_markdown(summary.faithfulness, run)]
     return "\n".join(lines) + "\n"
 
 
@@ -1756,13 +1974,177 @@ def _targets_markdown(targets: Sequence[TargetRow], rate_min_n: int) -> list[str
     return lines
 
 
+FAITHFULNESS_DEFINITION: Final = (
+    "Faithful: every claim in the answer is supported by the text of the chunks it cites."
+    " Correct (above): the reply does what the expected outcome says, and every claim matches an"
+    " approved source. Neither stands in for the other."
+)
+"""The two labels' definitions, as the guide (`docs/learning/m2-eval-questions.md` §5),
+`CorrectnessLabel`, the label sheet and summary.md give them (M3 plan, PR 7)."""
+
+
+def _labelled_text(stat: CountStat, shown: int, min_n: int) -> str:
+    """A faithfulness target's Measured cell: `x of n` labelled, or why there is none: no shown
+    answer to label, or `shown` answers and none labelled yet."""
+    if shown == 0:
+        return "no shown answer"
+    if stat.n == 0:
+        return f"none labelled ({shown} shown)"
+    return _count_text(stat, min_n)
+
+
+def _faithfulness_markdown(faithfulness: FaithfulnessSummary, run: RunInfo) -> list[str]:
+    """The faithfulness section (M3 PR 7): last in summary.md, so every section above it reads
+    exactly as before."""
+    file_note = (
+        ""
+        if faithfulness.file_present
+        else f" ({FAITHFULNESS_LABELS_FILE} is missing: `evalrun faithfulness-template` writes it)"
+    )
+    lines = [
+        "## Faithfulness (human labels)",
+        "",
+        f"{FAITHFULNESS_DEFINITION} One label per shown answer (outcome answered), not per claim;"
+        f" written by a person, never by a model (no LLM judge in M3). Labels:"
+        f" {FAITHFULNESS_LABELS_FILE}.",
+        "",
+        f"- Shown answers: {faithfulness.shown} · labelled: {faithfulness.labelled} · not labelled"
+        f" yet: {len(faithfulness.unlabelled)}{file_note}",
+        f"- Not labelled yet: {_ids(faithfulness.unlabelled)}",
+        f"- Labelled unfaithful: {_ids(faithfulness.unfaithful)}",
+        "",
+    ]
+    if faithfulness.rows:
+        if faithfulness.unlabelled:
+            lines += ["Incomplete: not every shown answer is labelled, so not a result.", ""]
+        lines += _table(
+            ["Group", "Faithful"],
+            [(row.group, _count_text(row.faithful, run.rate_min_n)) for row in faithfulness.rows],
+        )
+    elif faithfulness.shown:
+        lines.append(f"Not labelled yet: 0 of {faithfulness.shown} shown answers labelled.")
+    else:
+        lines.append("No answer was shown: nothing to label for faithfulness.")
+    lines += [
+        "",
+        "Business-context §6's faithfulness target, ≥ 95 %, under the Targets table's rules (ADR"
+        " 0013 decision 10): met when the point estimate reaches it, always read with its 95 %"
+        ' Wilson interval, "not shown at 95 % confidence" when the lower end is below it; no'
+        f" verdict below n = {run.rate_min_n}, for a dry, partial or failed run, or while a shown"
+        " answer is unlabelled. A release needs every business to meet it.",
+    ]
+    if run.split != "test":
+        lines.append(f"Split {run.split}: tuning information only, not the held-out result.")
+    lines.append("")
+    lines += _table(
+        ["Metric", "Group", "Target", "Measured", "Verdict"],
+        [
+            (
+                row.metric,
+                row.group,
+                f"≥ {_pct(float(Fraction(row.target)))}",
+                _labelled_text(row.stat, faithfulness.shown_by_group[row.group], run.rate_min_n),
+                _verdict_text(row),
+            )
+            for row in faithfulness.targets
+        ],
+    )
+    return lines
+
+
 def render_json(summary: Summary) -> str:
     return summary.model_dump_json(indent=2) + "\n"
 
 
-def render_label_sheet(answers: Sequence[AnswerLine], questions: Mapping[str, EvalQuestion]) -> str:
+@dataclass(frozen=True)
+class CitedText:
+    """One cited chunk of a shown answer, for the label sheet (`cited.py` builds it): which chunk,
+    and its text rebuilt from the corpus, or why the text is not shown. Printed to the terminal
+    only: never written to a file or a log."""
+
+    source: SourceRef
+    text: str | None = field(repr=False)
+    why_not_shown: str | None = None
+
+
+_BIDI_CONTROLS: Final = frozenset({*range(0x202A, 0x202F), *range(0x2066, 0x206A)})
+"""Unicode's embedding, override and isolate controls: they reorder how a line is displayed."""
+
+
+def terminal_text(text: str, *, multiline: bool = True) -> str:
+    """`text` with every control character but newline and tab, and every bidi embedding,
+    override or isolate control, shown as an escape (`\\x1b`, `\\u202e`): untrusted text (a
+    question, an answer, a chunk) cannot move the cursor, recolour the terminal or reorder a line
+    when the label sheet prints it. Every other character, ZWJ and ZWNJ (Hindi) included, stays.
+
+    `multiline=False` escapes newline and tab too (`\\x0a`, `\\x09`): for a value that belongs on
+    one line (an id, a reason, an error), so it cannot start a line of its own."""
+    kept = "\n\t" if multiline else ""
+    out: list[str] = []
+    for char in text:
+        code = ord(char)
+        if unicodedata.category(char) == "Cc" and char not in kept:
+            out.append(f"\\x{code:02x}")
+        elif code in _BIDI_CONTROLS:
+            out.append(f"\\u{code:04x}")
+        else:
+            out.append(char)
+    return "".join(out)
+
+
+def _one_line(text: str) -> str:
+    return terminal_text(text, multiline=False)
+
+
+def _cited_lines(cited: Sequence[CitedText]) -> list[str]:
+    """A shown answer's cited chunks, each line of a text behind a `|` gutter, so no chunk can
+    pass for a heading or another question's block."""
+    if not cited:
+        return ["Cited chunks: none"]
+    lines = ["Cited chunks (faithful: is every claim of the answer supported by this text?):"]
+    for number, item in enumerate(cited, start=1):
+        source = item.source
+        name = (
+            f"  [{number}] {_one_line(source.source_id)} {_one_line(source.version)} chunk"
+            f" {source.chunk_index} · page {source.page if source.page is not None else 'none'}"
+        )
+        if item.text is None:
+            lines.append(f"{name}: {item.why_not_shown or 'not shown'}")
+            continue
+        lines.append(name)
+        lines += [f"      | {line}" for line in terminal_text(item.text).split("\n")]
+    return lines
+
+
+def label_sheet_header(run_id: str, provenance: str) -> str:
+    """What the label sheet says first: the two labels, kept apart, and where the cited text
+    comes from (`cited.py`)."""
+    return "\n".join(
+        [
+            f"Label sheet for run {run_id}: printed to this terminal only, never written to a file"
+            " or a log.",
+            f"Correctness ({LABELS_FILE}, every answer that ran): the reply does what the expected"
+            " outcome says, and every claim matches an approved source"
+            " (docs/learning/m2-eval-questions.md §5).",
+            f"Faithfulness ({FAITHFULNESS_LABELS_FILE}, shown answers only): every claim in the"
+            " answer is supported by the text of the chunks it cites, printed under each shown"
+            " answer. Neither label stands in for the other.",
+            provenance,
+        ]
+    )
+
+
+def render_label_sheet(
+    answers: Sequence[AnswerLine],
+    questions: Mapping[str, EvalQuestion],
+    cited: Mapping[str, Sequence[CitedText]] | None = None,
+) -> str:
     """For shesha's labelling, printed to the terminal only (never written or logged): each
-    question as asked, what a correct reply does, and what the system replied."""
+    question as asked, what a correct reply does, and what the system replied; with `cited`
+    (M3 PR 7), each shown answer's cited chunks and their text. Every value from a run or dataset
+    file goes through `terminal_text` (one-line values with `multiline=False`), and the reply's
+    lines sit behind a `>` gutter, as a chunk's behind `|`: a reply, the text an injected chunk
+    would steer, cannot start a line the sheet's own structure uses."""
     blocks: list[str] = []
     for answer in answers:
         question = questions.get(answer.question_id)
@@ -1771,20 +2153,28 @@ def render_label_sheet(answers: Sequence[AnswerLine], questions: Mapping[str, Ev
         sources = ", ".join(
             f"{s.source_id} {s.version} chunk {s.chunk_index}" for s in answer.sources
         )
-        blocks.append(
-            "\n".join(
-                [
-                    f"── {answer.question_id} ──",
-                    f"Question: {asked}",
-                    f"Expected outcome: {answer.expected_outcome} · reference answer: {reference}",
-                    f"Got: {answer.outcome}"
-                    + (f" ({answer.reason})" if answer.reason else "")
-                    + (f" [{answer.error}]" if answer.error else ""),
-                    f"Answer: {answer.answer if answer.answer is not None else '(no text)'}",
-                    f"Sources: {sources or 'none'}",
-                ]
-            )
+        reply = (
+            ["Answer: (no text)"]
+            if answer.answer is None
+            else [
+                "Answer:",
+                *(f"      > {line}" for line in terminal_text(answer.answer).split("\n")),
+            ]
         )
+        lines = [
+            f"── {_one_line(answer.question_id)} ──",
+            f"Question: {terminal_text(asked)}",
+            f"Expected outcome: {_one_line(answer.expected_outcome)} · reference answer:"
+            f" {terminal_text(reference)}",
+            f"Got: {answer.outcome}"
+            + (f" ({_one_line(answer.reason)})" if answer.reason else "")
+            + (f" [{_one_line(answer.error)}]" if answer.error else ""),
+            *reply,
+            f"Sources: {_one_line(sources) or 'none'}",
+        ]
+        if cited is not None and answer.outcome == "answered":
+            lines += _cited_lines(cited.get(answer.question_id, ()))
+        blocks.append("\n".join(lines))
     return "\n\n".join(blocks) + ("\n" if blocks else "")
 
 

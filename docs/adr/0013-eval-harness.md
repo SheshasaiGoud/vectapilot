@@ -112,7 +112,8 @@ of one chunk config are compared by `evalrun compare <run A> <run B>`, paired by
 (amended 2026-10-25, below); it refuses two chunk configs.
 
 **Amended 2026-10-23 (shesha, M3 plan D3, D4, D14, D15; `docs/plans/m3-pr-checks.md`).** Built in
-M3 PR 5–7; only `compare` is built so far (PR 6, 2026-10-25, below).
+M3 PR 5–7: `compare` (PR 6, 2026-10-25), the retrieval block, the list checks and the spend ceiling
+(PR 5, 2026-10-27), and the faithfulness labels (PR 7, 2026-10-28), each in its amendment below.
 - **The measurement window** (D3 (a)), from M2's first live dev run to M3's last live answer run:
   - No change to `gateway/models.toml`, `PROMPT_VERSION` or the gateway's output path. A catalog
     or prompt bump changes every fingerprint and refuses the test run, and the output mode is not
@@ -259,3 +260,80 @@ PR 5, "Built (2026-10-27, noah)". The items once marked [proposal] were decided 
   is refused when its cap exceeds what is left (the refusal names the ceiling, the sum and the
   folders), and while one of M3's live folders on disk is not committed as it is (its run.json
   or its recorded-spend.json). Like the typed cap, this only catches mistakes (ADR 0007).
+
+**Amended 2026-10-28 (M3 PR 7, noah; in review, zara reviews).** The 2026-10-23 amendment's
+faithfulness labels are built (plan: `docs/plans/m3-pr-checks.md`, PR 7, "Built (2026-10-28,
+noah)"). The items once marked [proposal] were decided 2026-10-28 by shesha, every recommendation
+accepted (plan, PR 7, "[decided 2026-10-28] (shesha)"), and two changes were built with them.
+- **The file** (decided 2026-10-28, shesha): `faithfulness_labels.jsonl` in the run folder, one
+  line per shown answer (outcome `answered`): `question_id`, `run_id`, `label` (`faithful` |
+  `unfaithful`), `labelled_by`, `labelled_on`, optional `note`
+  (`evalset.questions.FaithfulnessLabel`, closed).
+  `summarize` refuses, by line number and never echoing a value: a line that is not JSON, an id
+  that is not a question of the run, a question whose answer was not shown (`dont_know`,
+  `handoff`, `error`, `not_run`), a second line for one answer, another run's id, or an invalid
+  filled line. A `label: null` line or a missing line or file leaves that answer unlabelled.
+  `labels.jsonl`, its parser and `CorrectnessLabel` are unchanged, and neither file is read as the
+  other.
+- **Who writes it:** `evalrun faithfulness-template <run>` writes the template (ids and nulls,
+  one line per shown answer) and refuses when the file exists; `run` does not write it, so a run
+  folder holds the files of decision 6 (decided 2026-10-28, shesha). The labels are shesha's
+  alone; no agent and no model writes or suggests one (D4 (b)), and an answer gets one label, not
+  one per claim (D11).
+- **The two labels:** faithful means every claim in the answer is supported by the text of the
+  chunks it cites; correct means the reply does what `expected_outcome` says, and every claim
+  matches an approved source (`CorrectnessLabel`). Neither stands in for the other
+  (`docs/learning/m2-eval-questions.md` §5 gives an example of each without the other).
+- **`label-sheet`** prints, under each shown answer, the text of every chunk it cites, rebuilt
+  with the real loader and chunker at run.json's chunk config (`evalrun/cited.py`). Before the
+  first line it refuses, naming ids and hashes only: a dataset folder of another dataset or
+  version; freeze.json missing or not the run's (sha256 against run.json's `freeze_sha256`); a
+  question, corpus file or corpus manifest that differs from that freeze.json; and, per cited
+  chunk, a citation of a chunk the prompt did not hold (results.jsonl's `evidence_chunk_ids`, ADR
+  0011), a citation that is not one of its question's hits in results.jsonl with the same
+  source, version, chunk index and page, a citation of a document no customer may see (draft,
+  retired or staff-only: not `answers_customers`), or a rebuilt chunk with another page or other
+  evidence groups than the run recorded. The audience refusal repeats the run's own check (a run
+  stops on such a hit, `AudienceLeak`), so it means an edited folder or a harness bug: a leak
+  signal under the hard gate, refused rather than shown as evidence to label (decided 2026-10-28,
+  shesha: the whole sheet is refused, not only flagged). The page and groups check is a tripwire
+  for a loader or chunker changed since the run, not a proof: a change that keeps every anchor in
+  its chunk passes it (a test pins this limit). The stronger guard is upstream: a run's
+  `verify_stored` refuses stored chunks the current chunker would not make, so a chunker change
+  during M3 already stops the next run on M2's namespaces (decided 2026-10-28, shesha: the
+  tripwire stays, with no extra refusal on a git diff of the loader or chunker). A run without a
+  freeze (only a dry run) shows "text not shown" and why; the check that each citation is a chunk
+  the prompt held needs no corpus and runs for it too (both decided 2026-10-28, shesha; the
+  second built then).
+  Terminal only: nothing is written or logged. Every printed value from a run or dataset file
+  (question, reference, answer, chunk, ids, reason, error, and the values a refusal names) shows
+  control characters and bidi controls as escapes; one-line values (ids, reason, error) escape
+  newline and tab too. The reply's lines sit behind a `>` gutter and a chunk's behind `|`, so
+  neither can start a line the sheet's own structure uses (a question header, a Sources line, a
+  cited-chunks block). Escapes and both gutters kept (decided 2026-10-28, shesha).
+- **`summarize`** ends summary.md with a Faithfulness section, after the Targets table, so every
+  section above it renders as before (checked byte for byte against PR 5's merged `report.py` on
+  four TEST-ONLY folders; summary.json only gains the `faithfulness` key). It gives the shown
+  answers, the labelled ones, the unlabelled and unfaithful ones by id, `x of n` faithful with
+  decision 7's Wilson interval for "all" and each business, language and category (safety as
+  counts only), and §6's ≥ 95 % target (exactly 19/20) for "all" and each business under decision
+  10: met when the point estimate reaches it, always with its interval, "not shown at 95 %
+  confidence" when the lower end is below it; no verdict for a dry, partial, failed or aborted
+  run, below `RATE_MIN_N`, while any shown answer is unlabelled, or for a business with no shown
+  answer, which reads "no verdict: no shown answer" ahead of the run-wide unlabelled reason
+  (decided and built 2026-10-28, shesha; a dry or incomplete run still reads so first). A target
+  row's Measured cell reads "no shown answer" for a group with none, and "none
+  labelled (k shown)" while k shown answers wait for a label. Faithfulness never enters the status
+  line or "Not for the note": correctness alone decides those, as in M2 (decided 2026-10-28,
+  shesha).
+- **M2's folders** get their faithfulness labels in M3 PR 9 step 1, on `m3/close-out`: `summarize`
+  re-summarizes them there, changing only the Faithfulness section and summary.json's
+  `faithfulness` key, and each folder is committed there (decided 2026-10-28, shesha).
+- **Expected outcome on v0.1, an estimate from the manifest minimums, not a count.** At 40
+  questions the test split holds 12. At least 17 of the 40 expect no shown answer (6 `safety` and
+  3 `handoff_request` expect a hand-off; 8 expect `dont_know` with no evidence), so at most 23
+  expect an answer, about 7 of them on test. The test split likely has fewer than 10 shown
+  answers, so "no verdict: n < 10" is the expected faithfulness result there, for "all" and for
+  each business. Dev's `x of n` is tuning information only.
+- **Limits.** One labeller, so no agreement figure; per-answer labels cannot say which claim
+  failed; the judges that would scale this wait for D4's 30 labelled answers.

@@ -5,7 +5,8 @@
     run --split dev --live --max-usd X # shesha only, in a terminal without an agent; never an agent
     ingest [--fresh]                   # dry only: ingest the corpus with the fake embedder
     summarize RUN_DIR                  # recompute summary.md/json from a run folder (labels too)
-    label-sheet RUN_DIR                # print questions and answers for labelling (stdout only)
+    label-sheet RUN_DIR                # print questions, answers and cited text (stdout only)
+    faithfulness-template RUN_DIR      # write faithfulness_labels.jsonl (null labels, no text)
     compare RUN_A RUN_B                # two runs of one chunk config, paired by question (stdout)
 
 **`run` is the one command** of PR 9's live run: it registers the eval businesses if needed
@@ -62,6 +63,15 @@ that every M3 live run is made, and its folder committed, on `m3/close-out` (dec
 **`compare`** (M3 PR 6, `compare.py`) reads two run folders and prints, never writes: redirect
 stdout to keep the report. It reads git only on the test split (the ledger as committed in HEAD).
 
+**Labelling** (M3 PR 7). `label-sheet` prints, to stdout only, each question, its reply and, under
+each shown answer, the text of every chunk it cites, rebuilt from the corpus at run.json's chunk
+config once freeze.json, the questions and the corpus are shown to be the run's (`cited.py`; a
+mismatch refuses the whole sheet, nothing printed, and so does a citation of a chunk the prompt did
+not hold or of a document no customer may see, a leak signal). It writes no file and logs nothing.
+`faithfulness-template` writes the folder's `faithfulness_labels.jsonl` (ids and nulls, one line per
+shown answer) and refuses when it exists; `run` does not write it, so a run folder holds M2's
+files. The labels themselves are shesha's.
+
 Everything the run writes after its calls (run.json, labels, the summary) can still fail; it then
 prints "the run FAILED, no summary written", where the folder is and what was spent, never
 "nothing was sent".
@@ -95,6 +105,7 @@ from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.runner import EMBEDDING_CALL
 from vectapilot_api.evalrun.budget import CostCap, record_for, usd
+from vectapilot_api.evalrun.cited import check_corpus, cited_texts
 from vectapilot_api.evalrun.compare import CompareRefused, compare, load_run, render_comparison
 from vectapilot_api.evalrun.harness import (
     HarnessRefused,
@@ -122,6 +133,7 @@ from vectapilot_api.evalrun.report import (
     DEFAULT_BOOTSTRAP_SEED,
     DEFAULT_RESAMPLES,
     EMBEDDING_LOG_FILE,
+    FAITHFULNESS_LABELS_FILE,
     LABELS_FILE,
     LLM_LOG_FILE,
     RATE_MIN_N,
@@ -136,10 +148,14 @@ from vectapilot_api.evalrun.report import (
     SplitName,
     SummaryError,
     config_fingerprint,
+    faithfulness_template,
+    label_sheet_header,
     label_template,
     language_map_sha256,
     m3_spend_reason,
     read_answers,
+    read_results,
+    read_run,
     render_label_sheet,
     retrieval_text,
     summarize,
@@ -344,6 +360,11 @@ def _parser() -> argparse.ArgumentParser:
     for name in ("summarize", "label-sheet"):
         command = commands.add_parser(name)
         command.add_argument("run_dir", type=Path)
+    template = commands.add_parser(
+        "faithfulness-template",
+        help="write the run folder's faithfulness_labels.jsonl: one null line per shown answer",
+    )
+    template.add_argument("run_dir", type=Path)
     compare = commands.add_parser(
         "compare",
         help="two runs of one chunk config, paired by question; prints, never writes",
@@ -1132,12 +1153,53 @@ def summarize_command(args: argparse.Namespace, io: Io) -> int:
 
 
 def label_sheet_command(args: argparse.Namespace, io: Io) -> int:
+    """Print the label sheet (module docstring, "Labelling"). Every check runs before the first
+    line is printed, so a refusal shows no question, answer or chunk text."""
     run_dir: Path = args.run_dir
+    run = read_run(run_dir)
+    results = read_results(run_dir)
+    answers = read_answers(run_dir)
     git = io.git()
     dataset_dir: Path = args.dataset or git.root / DEFAULT_DATASET
     dataset = read_dataset(dataset_dir, args.corpus)
-    print(render_label_sheet(read_answers(run_dir), {q.id: q for q in dataset.questions}), end="")
-    print(f"Label each answer in {run_dir / LABELS_FILE} (docs/learning/m2-eval-questions.md §5).")
+    freeze = dataset.directory / FREEZE_FILE
+    provenance = check_corpus(run, dataset, freeze.read_bytes() if freeze.is_file() else None)
+    cited = cited_texts(run, results, answers, dataset)
+    questions = {q.id: q for q in dataset.questions}
+    print(label_sheet_header(run.run_id, provenance), end="\n\n")
+    print(render_label_sheet(answers, questions, cited), end="")
+    print(
+        f"Label each answer in {run_dir / LABELS_FILE} (correctness) and each shown answer in"
+        f" {run_dir / FAITHFULNESS_LABELS_FILE} (faithfulness; `{PROG} faithfulness-template"
+        f" {run_dir}` writes it if it is missing). Rules: docs/learning/m2-eval-questions.md §5;"
+        f" steps: {RUNBOOK} step 12."
+    )
+    return EXIT_OK
+
+
+def faithfulness_template_command(args: argparse.Namespace, io: Io) -> int:
+    """Write the folder's faithfulness_labels.jsonl: one `label: null` line per shown answer
+    (ids only). Refused when the file exists: labels are never overwritten."""
+    run_dir: Path = args.run_dir
+    run = read_run(run_dir)
+    results = read_results(run_dir)
+    if len(results) != run.questions_selected:
+        raise Refused(
+            f"{RESULTS_FILE} has {len(results)} line(s), run.json says {run.questions_selected}"
+            " question(s) were selected"
+        )
+    path = run_dir / FAITHFULNESS_LABELS_FILE
+    text = faithfulness_template(run.run_id, results)
+    try:
+        with path.open("x", encoding="utf-8") as handle:
+            handle.write(text)
+    except FileExistsError:
+        raise Refused(f"{path} exists: labels are never overwritten") from None
+    print(
+        f"Wrote {path}: {len(text.splitlines())} line(s), one per shown answer (outcome answered),"
+        " each with label null. From the label sheet, set label (faithful | unfaithful),"
+        f" labelled_by and labelled_on, then run `{PROG} summarize {run_dir}` ({RUNBOOK} step 12)."
+    )
     return EXIT_OK
 
 
@@ -1180,6 +1242,8 @@ def run(argv: Sequence[str] | None, io: Io) -> int:
             return summarize_command(args, io)
         if args.command == "compare":
             return compare_command(args, io)
+        if args.command == "faithfulness-template":
+            return faithfulness_template_command(args, io)
         return label_sheet_command(args, io)
     except (
         Refused,

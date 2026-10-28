@@ -93,16 +93,35 @@ in `summary.md` decides what a run is, never the exit code.**
     and the status line names ("held-out test RERUN"). The note cites **every** ledger entry for
     the frozen version, not only the run it reports: run.json and summary.md record how many came
     before each run (this config, and this frozen version in any config).
-12. **Label** every answer of the run you report:
+12. **Label** every answer of the run you report, with two separate labels (M3 PR 7 added the
+    second):
     ```
+    uv run python -m vectapilot_api.evalrun faithfulness-template ../../evals/reports/support_qa/v0.1/<run>
     uv run python -m vectapilot_api.evalrun label-sheet ../../evals/reports/support_qa/v0.1/<run>
     ```
-    prints each question, its expected outcome and reference answer, and the reply (to the
-    terminal only). In that folder's `labels.jsonl`, set each line's `label` (`correct` |
-    `incorrect`, rules in `docs/learning/m2-eval-questions.md` §5), `labelled_by` (`shesha`) and
-    `labelled_on` (`YYYY-MM-DD`); then `... evalrun summarize <run folder>`. Commit the folder with
-    its labels and new summary, and for a test run `evals/reports/support_qa/test-runs.jsonl` in
-    the same commit.
+    - `faithfulness-template` writes the folder's `faithfulness_labels.jsonl`: one line per shown
+      answer (outcome `answered`), `label: null`, ids only. It refuses when the file exists, so a
+      labelled file is never overwritten. `run` does not write it.
+    - `label-sheet` prints, to the terminal only (no file, no log), each question, its expected
+      outcome and reference answer, the reply (each line behind a `>` gutter) and, under each
+      shown answer, the text of every chunk it cites (each line behind a `|` gutter). That text
+      is rebuilt from the corpus at run.json's chunk config, after checking that freeze.json is
+      the run's (its sha256) and that the questions, corpus files and corpus manifests match it.
+      Any mismatch refuses the whole sheet and prints nothing: restore the files of the run's
+      commit. A citation of a chunk the prompt did not hold, or of a document no customer may see
+      (draft, retired or staff-only), refuses it too: that is a leak signal under the hard gate,
+      not a labelling problem, so stop and report it. Control characters in every printed value,
+      refusals included, show as escapes (`\x1b`).
+    - In `labels.jsonl`, set each line's `label` (`correct` | `incorrect`), `labelled_by`
+      (`shesha`) and `labelled_on` (`YYYY-MM-DD`).
+    - In `faithfulness_labels.jsonl`, set each line's `label` (`faithful` | `unfaithful`),
+      `labelled_by` and `labelled_on`. **Faithful:** every claim in the answer is supported by the
+      text of the chunks it cites. **Correct:** the reply does what `expected_outcome` says, and
+      every claim matches an approved source. Neither stands in for the other (rules and
+      examples: `docs/learning/m2-eval-questions.md` §5).
+
+    Then `... evalrun summarize <run folder>`. Commit the folder with both label files and the new
+    summary, and for a test run `evals/reports/support_qa/test-runs.jsonl` in the same commit.
 
 ## 3. Cost: a formula, not a measurement
 
@@ -166,6 +185,16 @@ allowance is never counted. M1's formula and its $1.00 ceiling per run stay (dec
 - **Answers:** expected outcome against actual outcome, abstain reasons, safety hand-offs (counts;
   M2 has no safety check, ADR 0011).
 - **Correctness:** only from your labels, `x of n` with its interval.
+- **Faithfulness** (M3 PR 7; the last section, so every section above it reads as before): the
+  shown answers, how many carry your faithfulness label (unlabelled and unfaithful ones by id),
+  `x of n` faithful with its Wilson interval for "all" and each business, language and category
+  (safety as counts only), and §6's ≥ 95 % target under the Targets table's rules: no verdict
+  below n = 10, for a dry, partial or failed run, or while any shown answer is unlabelled; per
+  business too, where a business with no shown answer reads "no verdict: no shown answer" first.
+  It never changes the status line or "Not for the note" (correctness decides those, as in M2).
+  At v0.1's size the test split likely has fewer than 10 shown answers, so
+  expect "no verdict: n < 10" there (an estimate from the manifest minimums, not a count); dev's
+  `x of n` is tuning information only.
 
 ## 5. When something stops
 
@@ -181,6 +210,11 @@ allowance is never counted. M1's formula and its $1.00 ceiling per run stay (dec
   documents of this config's eval businesses only, then ingests again (a paid re-embedding in a
   live run, under the cap).
 - `NotImplementedError`: H1 or H2 is not merged on this commit.
+- `label-sheet` refuses (`freeze.json has sha256 ...`, `the corpus files of ... differ`, `question
+  ... is not as frozen`, `has the loader or chunker changed since the run's commit ...`): the
+  dataset or corpus on disk is not the one the run used, so the cited text would not be what the
+  model saw. Nothing was printed. Check out the files of the run's commit, or pass `--dataset`
+  with the run's version folder.
 - The cap, an account error (`spend_limit`, `billing`, `auth_failed`), `invalid_request`, a `us`
   geo or a call beyond its bound: `PARTIAL`; the folder shows every call made in its record logs.
   When the last question tripped the stop rule, no question is left: `complete`, exit 0, with
@@ -258,6 +292,13 @@ this section is what changes. Agents never pass `--live`.
   business. **Per-stage latency** is labelled "local Docker on an 8 GB Mac, synthetic", has the
   harness's own leak-check time subtracted (its own row), a p95 only from n = 20, and is never
   compared with §6's p95 < 6 s.
+- **Faithfulness labels on M2's live folders** (PR 9 step 1, once M2's dev and test folders are
+  committed), on `m3/close-out` like every M3 step (decided 2026-10-28): step 12's two commands on
+  each folder, your faithfulness labels, then `summarize`. It rewrites summary.md and
+  summary.json, but only the Faithfulness section at the end (and summary.json's `faithfulness`
+  key) changes: everything above it is recomputed from the same files, so M2's figures stay as
+  they were. Commit each re-summarized folder, with its `faithfulness_labels.jsonl`, on
+  `m3/close-out`. The same goes for every hybrid folder you report.
 - **`compare`** M2's vector dev folder with each hybrid dev folder (PR 9 step 3): the run table's
   "Retrieval" row names each mode; the discordant pairs per business are D15 (ii)'s hit half, and
   "Safety questions answered in one run only" its safety half (every safety question that ran in
