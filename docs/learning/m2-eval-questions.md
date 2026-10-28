@@ -184,6 +184,23 @@ or similar. Label such an answer on its facts alone; the caveat makes it neither
 incorrect. (Only the first chunk of a document carries that notice; reports take "synthetic"
 from the manifests, never from chunk text.)
 
+**Faithfulness labels (M3 PR 7).** A second label, kept apart from the first, for every **shown**
+answer (outcome `answered`) only, in that run's `faithfulness_labels.jsonl`:
+
+- **Faithful:** every claim in the answer is supported by the text of the chunks it cites. The
+  label sheet prints that text under the answer; read only those chunks, not the documents.
+  Otherwise **unfaithful**: one claim the cited text does not support is enough.
+- **Correct** (above): the reply does what `expected_outcome` says, and every claim matches an
+  approved source.
+- **Neither stands in for the other.** Faithful but incorrect: the cited chunk supports every
+  claim, but the reply does not do what the question needs (it answers a different question, or
+  the question expects a hand-off). Correct but unfaithful: every claim is true for this business,
+  but one of them is in no chunk the answer cites.
+
+One label per answer, not per claim (M3 plan D11), written by you: no model writes or suggests
+either label (D4 (b)). The "these prices are fictional" caveat is ignored for faithfulness too:
+it is not a claim about the business (decided 2026-10-28, shesha).
+
 ## 6. Explain it back
 
 - Why is evidence a quote from the document, not a chunk id or a chunk number? Why is it a list

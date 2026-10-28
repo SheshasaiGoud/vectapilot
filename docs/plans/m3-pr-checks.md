@@ -930,12 +930,12 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
     decisions 5 and 6).
 
 ## PR 7 — `m3/faithfulness-labels` (noah; zara reviews) · S — before M2 step 16 if possible
-- **[proposal] `faithfulness_labels.jsonl` per run folder.** One line per shown answer (outcome
-  `answered`): `faithful | unfaithful`, `labelled_by`, `labelled_on`. M2's `labels.jsonl` and
-  summaries stay untouched.
+- **`faithfulness_labels.jsonl` per run folder** (decided 2026-10-28, decision 1 below). One line
+  per shown answer (outcome `answered`): `faithful | unfaithful`, `labelled_by`, `labelled_on`.
+  M2's `labels.jsonl` and summaries stay untouched.
   - The guide defines both labels. Faithful means every claim in the answer is supported by the
-    text of the chunks it cites. Correct means the answer matches an approved source. Neither
-    stands in for the other.
+    text of the chunks it cites. Correct means the reply does what `expected_outcome` says, and
+    every claim matches an approved source. Neither stands in for the other.
 - **`label-sheet`** prints each cited chunk's text, rebuilt from the corpus at `run.json`'s chunk
   config after checking `freeze.json`'s corpus hashes. Terminal only, as today.
 - **`summarize`** adds human faithfulness `x of n` with Wilson (harness counting like Wilson
@@ -944,6 +944,168 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
 - **Expected outcome, stated now.** This is an estimate from v0.1's manifest minimums, not a count:
   v0.1 likely has fewer than 10 shown answers on the test split, so "no verdict" is the expected
   result there. Dev's `x of n` is tuning information only.
+- **Built (2026-10-28, noah).** In review; nothing merged. No migration, no new dependency,
+  `pyproject.toml` and `uv.lock` unchanged, no paid call, no database. No `[HAND-WRITE]` file
+  touched: H2 is never called for faithfulness (harness counting, D5). ADR 0013 amended
+  (2026-10-28); runbook step 12, §4, §5 and §6 (`docs/learning/m2-eval-run.md`); guide §5
+  (`docs/learning/m2-eval-questions.md`) defines both labels.
+  - Files: `evalset/questions.py` (`FaithfulnessLabel`, next to `CorrectnessLabel`);
+    `evalrun/report.py` (`FAITHFULNESS_LABELS_FILE`, `shown_answers`, `faithfulness_template`,
+    `parse_faithfulness`, `FaithfulnessRow`, `FaithfulnessSummary`, `Summary.faithfulness`, the
+    faithfulness rows and targets, the section, `TARGETS["faithfulness"]` = 19/20, `CitedText`,
+    `terminal_text`, `label_sheet_header`, `render_label_sheet` with cited text);
+    `evalrun/cited.py` (new: `check_corpus`, `freeze_differences`, `cited_texts`);
+    `evalrun/cli.py` (`label-sheet` rebuilt on both, `faithfulness-template`);
+    `evalrun/__init__.py` (docstring). Tests: `tests/evalrun/test_faithfulness.py` (new, 76),
+    and one pinned line of `tests/evalrun/test_report.py` (the reply's `>` gutter).
+  - **The file** (decision 1 below): `faithfulness_labels.jsonl`, one line per shown answer:
+    `question_id`, `run_id`, `label` (`faithful` | `unfaithful`), `labelled_by`, `labelled_on`,
+    optional `note`. Refused by line number, never echoing a value: not JSON, an id not in the run,
+    an answer that was not shown (`dont_know`, `handoff`, `error`, `not_run`), a second line for
+    one answer, another run's id, an invalid filled line. A `null` line, a missing line or no file
+    means unlabelled. `labels.jsonl` and its parser are unchanged; a faithfulness line in
+    `labels.jsonl` is refused, and the other way round.
+  - **Who writes it** (decision 2 below): `evalrun faithfulness-template <run>` writes the
+    template (ids and nulls) and refuses when the file exists; `run` does not write it, so a run
+    folder keeps decision 6's files and M2's folders need no special path.
+  - **`label-sheet`** prints the cited chunks' text under each shown answer, rebuilt at run.json's
+    chunk config. Before printing anything it refuses: another dataset or version; freeze.json
+    missing or not the run's (sha256); a question, corpus file or corpus manifest that differs
+    from it; a citation that is not one of its question's hits with the same source, version,
+    chunk index and page; a rebuilt chunk missing, or with another page or other evidence groups.
+    The last check is a tripwire, not a proof: a test pins that a chunker change keeping each
+    anchor in its chunk passes it (`verify_stored` is the guard upstream; no git-diff refusal on
+    top, decision 5 below). An unfrozen (dry) run shows "text not shown" and why (decision 4), and
+    still refuses a citation of a chunk the prompt did not hold (decision 11). Terminal only
+    (tested: no file under tmp_path changes, no log record holds the text); control and bidi
+    characters in every printed text are escaped, and chunk lines sit behind a `|` gutter, the
+    reply's behind `>` (both additions for untrusted text, CLAUDE.md rule 5; kept, decision 6
+    below).
+  - **`summarize`** ends summary.md with the Faithfulness section, after the Targets table. Checked
+    byte for byte against `report.py` at 4fb2e07 (PR 5 merged), on four TEST-ONLY folders (dry
+    unlabelled, live test labelled, live dev template, hybrid): every line above the new section
+    is identical, and summary.json only gains `faithfulness`. Rows: "all", business, language,
+    category, safety counts only. Verdict as ADR 0013 decision 10, for "all" and each business:
+    none for a dry, partial, failed or aborted run, below n = 10, while any shown answer is
+    unlabelled, or for a business with no shown answer, which reads "no verdict: no shown answer"
+    ahead of the run-wide unlabelled reason (PR 7 decision 10, below). Tested at the edges: 19 of
+    20 (exactly 95 %) is "met, not shown at 95 %"; 73 of 73 is shown (Wilson lower end
+    95.0008 %), 72 of 72 is not (94.93 %).
+    A target's Measured cell reads "no shown answer" or "none labelled (k shown)" when it has no
+    `x of n` (`FaithfulnessSummary.shown_by_group`).
+  - **Faithfulness never enters the status line or "Not for the note"** (decision 3 below):
+    correctness alone decides them, as in M2, so M2's step 16 "Done when" is unchanged. The
+    section carries its own "Incomplete: ... not a result" and "no verdict" lines.
+  - **The estimate** (from the manifest minimums, not a count): at 40 questions the test split
+    holds 12; at least 17 of 40 expect no shown answer (6 `safety` and 3 `handoff_request`
+    expect a hand-off, 8 expect `dont_know` with no evidence), so at most 23 expect an answer,
+    about 7 on test. "No verdict: n < 10" is the expected test result, for "all" and each business.
+  - **Review fixes (2026-10-28; zara Z1–Z4, kenji K2 and K4), each reproduced first.**
+    - Z1: `label-sheet` refuses a citation of a document no customer may see (draft, retired or
+      staff-only; `answers_customers`), naming ids and manifest values only: a leak signal under
+      the hard gate. A real run cannot write one (`AudienceLeak` stops it), so this is a second
+      check on an edited folder or a harness bug. Tested with the sample's staff-handbook
+      2026-10, fees 2025-10 and paws holiday-hours 2026-12: exit 1, nothing on stdout.
+    - Z2: a citation must be a chunk the prompt held (`evidence_chunk_ids`, ADR 0011), not only
+      one of the hits (the list before the threshold).
+    - Z3: the reply's lines sit behind a `>` gutter, so a multi-line reply cannot forge a Sources
+      line, a cited-chunks block or a question header.
+    - Z4: every value from a run file is escaped on the sheet and in refusals (ids, reason,
+      error, source ids, run.json's dataset version and businesses); one-line values escape
+      newline and tab too (`terminal_text(..., multiline=False)`).
+    - K2: summary.md's definition, runbook step 12, the ADR amendment and `FaithfulnessLabel`'s
+      docstring give correctness in full ("does what `expected_outcome` says, and every claim
+      matches an approved source"). This plan's definition line at the top of PR 7 now does too
+      (aligned 2026-10-28, below).
+    - K4: the Measured cell, above.
+  - Checks: ruff, format check and mypy clean. `make check`: 2988 passed, 210 skipped, 42
+    xfailed, gateway coverage gate passed (2912 passed before PR 7; 2974 before the review
+    fixes; 76 tests in `test_faithfulness.py`). `tests/evalrun` and `tests/evalset` without
+    Postgres: 1059 passed, 11 skipped (983 before PR 7). `cited.py` 100 % line and branch
+    coverage. Not run: `make test-integration` (disk 96 % full; this PR needs no database).
+  - Mutation audit: 38 single changes to the new logic in `report.py`, `cited.py` and `cli.py`,
+    each applied alone to the working file, its tests run, then restored (sha256 of all three the
+    same before and after). The first pass of 36 left 3 survivors, all real gaps: a question text
+    printed without escaping, a hit whose chunk id matches but whose chunk index, page or source
+    differs, and a question removed after the freeze. Each got a test, then all 38 failed a test.
+    The review fixes got a second audit of 25 changes (each of Z1–Z4, K2 and K4 switched off or
+    weakened, one at a time, `cited.py` and `report.py` restored by sha256): one survivor, the
+    business id unescaped in the "not in the corpus" refusal; it got a test, then all 25 failed a
+    test.
+  - Not a result: no live run was made, no label was written outside tmp_path, and every run
+    folder, label and question in the tests is TEST-ONLY.
+- **[decided 2026-10-28] (shesha)** PR 7's proposals and review findings: every recommendation
+  accepted (ADR 0013, "Amended 2026-10-28", updated):
+  1. **The labels file format as built:** `faithfulness_labels.jsonl`, one line per shown answer,
+     with the fields and refusals above.
+  2. **`faithfulness-template` creates the file; `run` does not**, so a run folder keeps ADR 0013
+     decision 6's files.
+  3. **Faithfulness never changes the status line or note eligibility** ("Not for the note"):
+     correctness alone decides them, as in M2.
+  4. **A dry run on an unfrozen dataset shows "text not shown"** and why, for each cited chunk.
+  5. **Chunker drift: keep the per-citation tripwire**, with no extra refusal on a git diff of the
+     loader or chunker since the run's commit (`verify_stored` stays the guard upstream).
+  6. **The terminal safety stays:** control and bidi escapes in every printed value, the `|`
+     gutter for chunk text and the `>` gutter for the reply.
+  7. **The "these prices are fictional" caveat is ignored for faithfulness too**, as for
+     correctness: it is not a claim about the business (guide §5).
+  8. **Re-summarizing M2's folders in PR 9 happens on `m3/close-out`** (step 1), and each folder
+     is committed there with its faithfulness labels; PR 9 and runbook §6 say so.
+  9. **A citation of a document no customer may see refuses the whole sheet**, as built (Z1): a
+     leak signal under the hard gate, nothing printed.
+  10. **Built: a business with no shown answer reads "no verdict: no shown answer"** ahead of the
+      run-wide "k shown answer(s) not labelled for faithfulness yet", which is about other
+      businesses' answers. A dry or incomplete run still reads "dry run" or its status first.
+  11. **Built: the "chunk the prompt held" check also runs for a dry run on an unfrozen dataset**:
+      it needs no corpus, so only the text stays unshown.
+
+  And kenji's K2 is carried through: the definition line at the top of PR 7 now gives correctness
+  in full, as everywhere else.
+- **Decisions applied (2026-10-28, noah).** In review; nothing merged. No migration, no new
+  dependency, `pyproject.toml` and `uv.lock` unchanged, no paid call, no database; no
+  `[HAND-WRITE]` file touched.
+  - `report.py`: `_faithfulness` passes a group's unlabelled count to `_target_row` only when that
+    group has a shown answer, so a business without one reaches "no verdict: no shown answer"
+    (decision 10); its docstrings no longer say [proposal]. `cited.py`: the held check runs before
+    the unfrozen branch (decision 11). Docs: this plan (the definition line, the [proposal]
+    markers, PR 9 step 1), ADR 0013's amendment, runbook §4 and §6, guide §5.
+  - One test changed: `test_measured_tells_no_shown_answer_from_none_labelled_yet` now pins Paws's
+    "no verdict: no shown answer" while Sunrise's answers wait for a label.
+  - New tests for the 9 survivors of the review's mutation audit, plus decision 11
+    (`test_faithfulness.py`, 6 functions, 7 cases; 83 tests now):
+    - B2: a null line then a filled line for one answer, a filled line then a null one, and two
+      null lines are each refused as a second line.
+    - I6: `faithfulness-template` in a folder holding a TEST-ONLY filled `labels.jsonl` and a
+      `summary.md`: only `faithfulness_labels.jsonl` is added, and every other file and folder
+      under tmp_path is byte-identical.
+    - K2: `label-sheet` with `builtins.open`, `io.open` and `os.open` recording and refusing every
+      write mode, on any path: none attempted, and the sheet printed.
+    - L1–L3: run.json at 800/100, citing the sample's `faq-hi` 2026-10 chunks 5 and 6. Chunk 5's
+      text differs at 1200/150 with the same index, page and groups (no refusal, only other text);
+      chunk 6's differs at 800/0 and does not exist at 1200/150. The sheet must print the 800/100
+      texts. (The sample's other markdown sections are short enough that their chunks read the
+      same at every config, which is why these mutants survived.)
+    - N2–N4: six TEST-ONLY live test runs that differ only in the faithfulness file (none, empty,
+      template, part labelled, not met, met), at two correctness states (all labelled: "may feed
+      the note"; 2 unlabelled). summary.md above the Faithfulness heading is byte-identical
+      (status line, run table with "Not for the note", Targets table), and so is summary.json
+      once the `faithfulness` value is set equal.
+    - Decision 11: an unfrozen run whose answer cites a chunk the prompt did not hold: exit 1,
+      nothing on stdout.
+  - Mutation check of the new tests. The review named the survivors without their code, so noah
+    rebuilt 20 mutants from the descriptions: B2; I6 ×3 (labels.jsonl overwritten, appended, a
+    stray file); K2 ×2 (pathlib and tempfile/`os.open`, writing only to a scratch folder outside
+    the repo); L ×4 (defaults, overlap 0, fixed 1200/150, the run's max_chars with the default
+    overlap); N ×8 (status line ×2, Targets table ×3, "Not for the note" ×3); decisions 10 and 11
+    reverted. Each was applied alone to the working file, then restored; the sha256 of all 17
+    `evalrun` modules was the same before and after. 18 of the 20 passed every pre-existing
+    `tests/evalrun` test (581 passed, 11 skipped, the new tests deselected), so they are real
+    survivors; 2 (faithfulness's unlabelled count in the Targets table, a "Not for the note"
+    reason per unfaithful id) were already caught by older tests. All 20 fail a new test.
+  - Checks: ruff, format check and mypy clean. `make check`: 2995 passed, 210 skipped, 42
+    xfailed, gateway coverage gate passed (2988 before). `tests/evalrun` and `tests/evalset`
+    without Postgres: 1066 passed, 11 skipped (1059 before). `cited.py` 100 % line and branch
+    coverage. Not run: `make test-integration` (disk 96 % full; this PR needs no database).
 
 ## PR 8 — `m3/search-latency` (ananya; diego pairs) · S — $0, after H1
 May fold into PR 4 if H1 has merged by then.
@@ -970,7 +1132,10 @@ the spend line names the branch and commit it read (review of PR 5, diego D1; de
 counts at the $1.00 per-run ceiling until you record its real spend in its `recorded-spend.json`
 and commit it (runbook §6; decided 2026-10-27). Each step names its own dependency, so steps 2–4
 can overlap M2's steps 15–17.
-1. **Faithfulness labels** on M2's live dev and test folders.
+1. **Faithfulness labels** on M2's live dev and test folders, on `m3/close-out` (decided
+   2026-10-28, PR 7 decision 8): `faithfulness-template`, the labels from `label-sheet`, then
+   `summarize`, which re-summarizes M2's folders (only the Faithfulness section and summary.json's
+   `faithfulness` key change). Commit each folder there.
    *Needs:* PR 7, plus M2 step 14 (dev folder) and step 16 (test folder).
 2. **Live hybrid dev runs** on the frozen v0.1: only D15 (i)'s variants, which are hybrid at M2's
    chosen `rag_min_score` with `candidate_k` 20, plus at most one `rag_min_score` variant. Each

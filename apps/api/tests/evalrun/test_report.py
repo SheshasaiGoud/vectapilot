@@ -1225,7 +1225,7 @@ def test_the_label_sheet_shows_question_and_answer_for_the_terminal_only() -> No
     sheet = render_label_sheet([answer], {"q-01": q})
 
     assert "Question: TEST-ONLY what are your Sunday hours zq7" in sheet
-    assert "Answer: TEST-ONLY closed on Sundays" in sheet
+    assert "Answer:\n      > TEST-ONLY closed on Sundays" in sheet
     assert "Sources: faq 2026-10 chunk 1" in sheet
 
 

@@ -657,7 +657,7 @@ def render_coverage(manifest: EvalManifest, report: Coverage) -> str:
     return "\n".join(lines) + "\n"
 
 
-# ── Correctness labels: the human slot, one file per run ──────────────────────────────────────
+# ── Correctness and faithfulness labels: the human slots, one file each per run ───────────────
 
 
 class CorrectnessLabel(EvalModel):
@@ -673,6 +673,28 @@ class CorrectnessLabel(EvalModel):
     prices are fictional" is ignored: label on the facts (decided 2026-10-22, item 7)."""
     labelled_by: Slug
     """Who labelled it (a person's slug, e.g. `shesha`; a pilot's staff later)."""
+    labelled_on: date
+    note: str | None = Field(default=None, min_length=1, max_length=500, repr=False)
+
+
+class FaithfulnessLabel(EvalModel):
+    """One human faithfulness judgement of one shown answer from one run (M3 PR 7; ADR 0013,
+    amended 2026-10-28). It lives in that run's `faithfulness_labels.jsonl`, never in the dataset
+    and never in `labels.jsonl`, whose format and summaries stay M2's.
+
+    Only a shown answer (outcome `answered`) gets one, and the label is per answer, not per claim
+    (M3 plan D11). No LLM judge writes it (D4 (b))."""
+
+    question_id: Slug
+    run_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
+    label: Literal["faithful", "unfaithful"]
+    """Faithful: every claim in the answer is supported by the text of the chunks it cites (the
+    label sheet prints that text). Unfaithful: at least one claim is not. This is not
+    correctness (`CorrectnessLabel`: the reply does what `expected_outcome` says, and every claim
+    matches an approved source): an answer can be faithful to a cited chunk that does not answer
+    the question, or correct with a claim no cited chunk states. Neither label stands in for the
+    other."""
+    labelled_by: Slug
     labelled_on: date
     note: str | None = Field(default=None, min_length=1, max_length=500, repr=False)
 
