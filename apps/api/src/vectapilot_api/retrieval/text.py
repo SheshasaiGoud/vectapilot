@@ -1,14 +1,44 @@
-"""H1 (M3) — top-k full-text search for one business. [HAND-WRITE], written by shesha (D5,
-decided 2026-10-24); time-box 3 h. The explain-back is part of acceptance.
+"""H1 (M3) — top-k full-text search for one business. [HAND-WRITE], written by Claude at
+shesha's request (2026-10-28, for the deadline); shesha's explain-back is part of acceptance.
 
 Guide: docs/learning/m3-hybrid.md · Tests: tests/retrieval/test_text_search.py (real Postgres,
 CI and `make test-integration`) and tests/retrieval/test_text_search_binding.py (no database),
 strict xfails until the body is written. ADR 0014 decision 3 (D6 (a)).
 """
 
+from typing import Final
+
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from vectapilot_api.kb.store import vector_literal
 from vectapilot_api.retrieval.types import SearchHit, TextQuery
+
+# One statement, every value bound. The question is parsed in SQL with each chunk's own config by
+# `plainto_tsquery`, which with the platform's configs only emits quoted lexemes joined by `&`;
+# turning those `&` into `|` gives the OR of the question's lexemes without ever reading the
+# question as tsquery syntax.
+# The select list is exactly SearchHit's fields; the score is the cosine, as in `vector_search`.
+_SEARCH: Final = text(
+    """
+    SELECT c.id AS chunk_id, c.document_id, d.source_id, d.version, d.title, d.language,
+           d.content_kind, c.page, c.chunk_index, c.content, c.embedding_model,
+           1 - (c.embedding <=> CAST(:embedding AS vector)) AS score
+    FROM chunks AS c
+    JOIN documents AS d ON d.business_id = c.business_id AND d.id = c.document_id
+    CROSS JOIN LATERAL (
+        SELECT replace(plainto_tsquery(c.ts_config, :question)::text, ' & ', ' | ')::tsquery AS q
+    ) AS question
+    WHERE c.business_id = :business_id
+      AND c.embedding_model = :embedding_model
+      AND d.status = 'approved'
+      AND d.audience = ANY(:audiences)
+      AND c.tsv @@ question.q
+    ORDER BY ts_rank(c.tsv, question.q) DESC,
+             d.source_id COLLATE "C", d.version COLLATE "C", c.chunk_index
+    LIMIT :k
+    """
+)
 
 
 async def text_search(connection: AsyncConnection, query: TextQuery) -> list[SearchHit]:
@@ -83,4 +113,15 @@ async def text_search(connection: AsyncConnection, query: TextQuery) -> list[Sea
     and filtering by language: there is none (D1), and the question is parsed with every
     candidate chunk's config, so a question in one script finds no chunk written in another.
     """
-    raise NotImplementedError("H1 (M3): write text_search (guide: docs/learning/m3-hybrid.md)")
+    result = await connection.execute(
+        _SEARCH,
+        {
+            "embedding": vector_literal(query.embedding),
+            "question": query.question,
+            "business_id": query.business_id,
+            "embedding_model": query.embedding_model,
+            "audiences": list(query.audiences),
+            "k": query.k,
+        },
+    )
+    return [SearchHit.model_validate(dict(row)) for row in result.mappings()]

@@ -333,17 +333,13 @@ NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {}
 switch: stub → who waits. Empty since M3 PR 4: M3 H2's `rrf_fuse` left when the hybrid read paths
 came, which run it."""
 
-PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"text_search", "rrf_fuse"})
+PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset()
 """[HAND-WRITE] stubs still raising NotImplementedError, one switch each. Remove a name once
 every test that runs it shows XPASS(strict) (guide: docs/learning/m3-hybrid.md §1):
 
-- "text_search": M3 H1 (shesha, D5, decided 2026-10-24). Its tests
-  (`tests/retrieval/test_text_search.py`, `test_text_search_binding.py`), the `text_search` read
-  path and its owner-connection check wait for it, and so do the hybrid paths below.
-- "rrf_fuse": M3 H2 (shesha, D5). Its tests (`tests/retrieval/test_fusion.py`) wait for it, and
-  so do M3 PR 4's three hybrid read paths (`hybrid_search`, also on the owner's connection, and
-  both routes in hybrid mode) and its Postgres hybrid tests
-  (`tests/retrieval/test_hybrid_snapshot.py`, the cases that run the real legs).
+- None pending today. M3 H1 "text_search" and M3 H2 "rrf_fuse" were removed on 2026-10-28 (both
+  written by Claude at shesha's request, for the deadline), so their own tests, the `text_search`
+  and hybrid read paths, the owner-connection checks and PR 4/5's real-leg tests are plain tests.
 
 For the record: M2 H1 "vector_search" and M2 H2 "retrieval_metrics" were removed on 2026-10-22
 (both written by Claude at shesha's request), so every check that runs them is a plain test."""

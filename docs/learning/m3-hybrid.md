@@ -16,6 +16,11 @@ D15's paired comparison says otherwise. The decisions behind every rule here are
 > keeps the other business out (§2.6), as each business with `MAX_K` hits and with one.
 > `scripts/canary_gate.py` allows those xfails, and only those, until the name is removed.
 
+> **Status (2026-10-28).** `text_search` (H1) and `rrf_fuse` (H2) are written, by Claude at
+> shesha's request for the deadline; `PENDING_HAND_WRITE` is empty and every test that ran them
+> as a strict xfail is a plain test. This guide stays as the reference for the explain-backs,
+> which are still part of acceptance.
+
 ## Your task
 
 | | Write the body of | So that these pass | Size | Time-box | Branch | Who |

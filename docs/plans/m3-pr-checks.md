@@ -583,6 +583,10 @@ follow D6 and ADR 0014; the time-boxes are in H1 and H2.
      ingest) and `test_execute_refuses_a_hybrid_retrieval_mode_for_any_caller` (harness), each
      also showing that the same Settings in vector mode get through.
   7. **No upper bound on `rag_rrf_k`** (at least 1).
+- **[decided 2026-10-28] (shesha)** For the deadline, Claude writes H1 `text_search` and H2
+  `rrf_fuse` (one PR, `m3/hybrid-handwrites`); `PENDING_HAND_WRITE` becomes empty. shesha's
+  explain-backs (guide §6) stay part of acceptance. Lean mode from here: one builder plus one
+  combined review and mutation pass per PR.
 
 ## PR 5 — `m3/eval-hybrid` (noah; ananya and zara review) · M
 - **`run.json`:**

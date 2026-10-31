@@ -182,7 +182,8 @@ Planned: `packages/mcp_server/`, `scripts/`.
   full-text column (#40), its `audience_conflict` follow-up (#41), PR 3 hybrid scaffold (#42),
   PR 4 hybrid search (#43; `rag_retrieval_mode`, default vector), PR 6 `evalrun compare` (#44),
   PR 5 eval hybrid (#45; `--retrieval-mode`, every list leak-checked, $5 M3 spend check).
-  PR 7 faithfulness labels in review. Then: shesha's H2 and H1; PR 8 latency (after H1); PR 9.
+  PR 7 faithfulness labels (#46). H1 `text_search` and H2 `rrf_fuse` written by Claude at
+  shesha's request (2026-10-28, deadline) in review; explain-backs due. Next: PR 8 latency, PR 9.
   - shesha writes H1 `text_search` and H2 `rrf_fuse` (D5, decided 2026-10-24).
   - No reranking and no LLM judge in M3.
   - Live spend: $5.00 for all of M3's paid runs, each still ≤ $1.00.

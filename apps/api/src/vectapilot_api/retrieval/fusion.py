@@ -1,11 +1,13 @@
-"""H2 (M3) — Reciprocal Rank Fusion of ranked hit lists. [HAND-WRITE], written by shesha (D5);
-time-box 2 h.
+"""H2 (M3) — Reciprocal Rank Fusion of ranked hit lists. [HAND-WRITE], written by Claude at
+shesha's request (2026-10-28, for the deadline); shesha's explain-back is part of acceptance.
 
-Guide: docs/learning/m3-hybrid.md · Tests: tests/retrieval/test_fusion.py (no database), strict
-xfails until the body is written. ADR 0014 decision 4 (D6 (a)).
+Guide: docs/learning/m3-hybrid.md · Tests: tests/retrieval/test_fusion.py (no database), plain
+tests now. ADR 0014 decision 4 (D6 (a)).
 """
 
+import uuid
 from collections.abc import Sequence
+from fractions import Fraction
 from typing import Final
 
 from vectapilot_api.retrieval.types import FusedHit, SearchHit
@@ -57,4 +59,32 @@ def rrf_fuse(
     (`hit.score` against `rag_min_score`, D7), counting FTS-only hits (PR 4 reads `ranks`), and
     reranking (not in M3, D13).
     """
-    raise NotImplementedError("H2 (M3): write rrf_fuse (guide: docs/learning/m3-hybrid.md)")
+    if k < 1 or limit < 1:
+        raise ValueError("k and limit must be at least 1")
+    hits: dict[uuid.UUID, SearchHit] = {}
+    scores: dict[uuid.UUID, Fraction] = {}
+    ranks: dict[uuid.UUID, list[int | None]] = {}
+    for position, ranked in enumerate(ranked_lists):
+        seen: set[uuid.UUID] = set()
+        for rank, hit in enumerate(ranked, start=1):  # ranks start at 1
+            chunk = hit.chunk_id
+            if chunk in seen:
+                raise ValueError(f"chunk {chunk} is listed twice in list {position + 1}")
+            seen.add(chunk)
+            if chunk not in hits:
+                hits[chunk], scores[chunk] = hit, Fraction(0)
+                ranks[chunk] = [None] * len(ranked_lists)
+            elif hits[chunk] != hit:  # ==, not is: each leg builds its own equal hit
+                raise ValueError(f"chunk {chunk} arrives as two different hits")
+            scores[chunk] += Fraction(1, k + rank)  # exact: never a float
+            ranks[chunk][position] = rank
+
+    def order(chunk: uuid.UUID) -> tuple[Fraction, int, str, str, int]:
+        hit = hits[chunk]
+        best = min(rank for rank in ranks[chunk] if rank is not None)
+        return (-scores[chunk], best, hit.source_id, hit.version, hit.chunk_index)
+
+    return [
+        FusedHit(hit=hits[chunk], rrf_score=scores[chunk], ranks=tuple(ranks[chunk]))
+        for chunk in sorted(hits, key=order)[:limit]  # cut after fusing, never the inputs
+    ]
