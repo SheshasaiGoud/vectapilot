@@ -1123,6 +1123,14 @@ May fold into PR 4 if H1 has merged by then.
 - It records whether the planner uses any index for `@@` or `<=>` under RLS (the GIN and HNSW
   questions).
 - **ADR 0008 amendment:** exact search kept or not, the numbers, and D14's revisit trigger.
+- **Built (2026-11-02, Claude; ananya's partial module finished after two runs ended on network
+  errors).** `python -m vectapilot_api.evalrun latency` (`evalrun/explain.py`): $0, read-only, as
+  `vectapilot_app` in snapshot transactions, fake embedder only (a paid embedder is refused).
+  Sample questions are the corpus's own section headings. It writes
+  `evals/reports/latency/<date>-local.json|md` with commit, PostgreSQL and pgvector versions,
+  row counts, Docker VM memory and the label. Unit tests in `tests/evalrun/test_explain.py`; the
+  committed report is the end-to-end run. Lean mode: no separate review pass (two agent runs
+  failed on network errors).
 
 ## PR 9 — `m3/close-out` (shesha's live runs; noah, ananya and maya help)
 Agents never pass `--live` and never see a key. The commands follow M2's runbook

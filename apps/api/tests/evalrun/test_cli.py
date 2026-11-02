@@ -1375,3 +1375,17 @@ def test_run_json_records_the_live_versions_and_a_fingerprint_of_its_own_fields(
     if bump is not None:  # the bump reached the fingerprint, not only the recorded field
         unbumped = info.model_copy(update={"catalog_version": live[0], "prompt_version": live[1]})
         assert info.config_fingerprint != fingerprint_digest(run_fingerprint_payload(unbumped))
+
+
+# ── latency (M3 PR 8) ─────────────────────────────────────────────────────────────────────────
+
+
+def test_latency_refuses_a_paid_embedder_and_writes_nothing(
+    world: World, capsys: pytest.CaptureFixture[str]
+) -> None:
+    world.settings = world.settings.model_copy(update={"embeddings_provider": "voyage"})
+
+    assert world.run("latency") == 1
+
+    assert not list(world.root.glob("evals/reports/latency/*"))
+    assert "nothing was sent" in capsys.readouterr().err
