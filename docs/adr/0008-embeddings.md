@@ -68,3 +68,21 @@ pending PR 8's measurement.** Nothing is measured yet, so exact search stands.
   a printed free-disk check.
 - Revisit trigger: any business above 10,000 chunks, or the search transaction's measured p95
   above 300 ms (a target, not a measurement).
+
+**Amended 2026-11-02 (M3 PR 8): exact search is kept.** Measured at pilot size by
+`python -m vectapilot_api.evalrun latency` at commit `54a60c9`, labelled "local Docker on an 8 GB
+Mac, synthetic sample corpus, fake embeddings". The report is
+`evals/reports/latency/2026-11-02-local.md` (PostgreSQL 18.6, pgvector 0.8.7, Docker VM 3.83 GiB;
+129 chunks, 47 and 64 customer-visible candidates per business; 71 questions × 5 passes, n = 355
+per statement).
+- Server-side execution (`EXPLAIN ANALYZE`, as `vectapilot_app` under RLS):
+  - `vector_search`: median 0.248 ms, p95 0.321 ms.
+  - `text_search`: median 0.209 ms, p95 0.413 ms.
+- The product's hybrid search transaction, client-side (snapshot, `set_config`, model check, both
+  legs, fusion, commit): median 6.883 ms, p95 9.915 ms.
+- No index evaluates `<=>` or `@@`. The vector leg seq-scans `chunks`, and the text leg uses the
+  `business_id` btree, then filters. Both operators are not leakproof, so under RLS an HNSW or GIN
+  index could not be used ahead of the policy anyway.
+- These are pilot-size numbers, never production ones, and never compared with business-context
+  §6 as a pass. The revisit trigger above is unchanged: any business above 10,000 chunks, or the
+  search transaction's measured p95 above 300 ms.
