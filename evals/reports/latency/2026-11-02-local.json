@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "provenance": {
+    "label": "local Docker on an 8 GB Mac, synthetic sample corpus, fake embeddings",
+    "measured_at": "2026-11-02T06:08:28.277337Z",
+    "commit": "54a60c9a8a409f31234d300096043316c646aa64",
+    "uncommitted_changes": false,
+    "statements_at_commit": true,
+    "docker_mem_total_bytes": 4109217792
+  },
+  "database": {
+    "role": "vectapilot_app",
+    "postgres_version": "18.6 (Debian 18.6-1.pgdg12+2)",
+    "pgvector_version": "0.8.7",
+    "isolation": "repeatable read",
+    "read_only": true,
+    "row_security": "on",
+    "tables": [
+      {
+        "name": "chunks",
+        "rls": true,
+        "force_rls": true,
+        "live_rows_estimate": 129
+      },
+      {
+        "name": "documents",
+        "rls": true,
+        "force_rls": true,
+        "live_rows_estimate": 18
+      }
+    ],
+    "indexes": [
+      {
+        "table": "chunks",
+        "name": "chunks_business_id_document_id_chunk_index_key",
+        "definition": "CREATE UNIQUE INDEX chunks_business_id_document_id_chunk_index_key ON public.chunks USING btree (business_id, document_id, chunk_index)"
+      },
+      {
+        "table": "chunks",
+        "name": "chunks_business_model",
+        "definition": "CREATE INDEX chunks_business_model ON public.chunks USING btree (business_id, embedding_model)"
+      },
+      {
+        "table": "chunks",
+        "name": "chunks_pkey",
+        "definition": "CREATE UNIQUE INDEX chunks_pkey ON public.chunks USING btree (id)"
+      },
+      {
+        "table": "documents",
+        "name": "documents_business_id_id_key",
+        "definition": "CREATE UNIQUE INDEX documents_business_id_id_key ON public.documents USING btree (business_id, id)"
+      },
+      {
+        "table": "documents",
+        "name": "documents_business_id_source_id_version_key",
+        "definition": "CREATE UNIQUE INDEX documents_business_id_source_id_version_key ON public.documents USING btree (business_id, source_id, version)"
+      },
+      {
+        "table": "documents",
+        "name": "documents_one_approved_version",
+        "definition": "CREATE UNIQUE INDEX documents_one_approved_version ON public.documents USING btree (business_id, source_id) WHERE (status = 'approved'::text)"
+      },
+      {
+        "table": "documents",
+        "name": "documents_pkey",
+        "definition": "CREATE UNIQUE INDEX documents_pkey ON public.documents USING btree (id)"
+      }
+    ],
+    "operators": [
+      {
+        "operator": "<=>",
+        "left_type": "vector",
+        "right_type": "vector",
+        "function": "cosine_distance",
+        "leakproof": false
+      },
+      {
+        "operator": "@@",
+        "left_type": "tsvector",
+        "right_type": "tsquery",
+        "function": "ts_match_vq",
+        "leakproof": false
+      }
+    ]
+  },
+  "settings": {
+    "embedding_model": "fake-embedding-1024",
+    "max_chars": 1200,
+    "overlap_chars": 150,
+    "k": 20,
+    "rrf_k": 60,
+    "reader": "customer",
+    "warmup_passes": 1,
+    "repeats": 5,
+    "questions": 71,
+    "questions_sha256": "5873935d1b309cbfd4e392cbc37103bc2ddf921f864988c093fea773237246c4"
+  },
+  "rows": [
+    {
+      "business_id": "sunrise-clinic",
+      "eval_business_id": "sunrise-clinic-ev-d7d998b7cc",
+      "chunks": 57,
+      "documents": 9,
+      "candidates": 47,
+      "questions": 35
+    },
+    {
+      "business_id": "paws-and-co",
+      "eval_business_id": "paws-and-co-ev-eaecabcffc",
+      "chunks": 72,
+      "documents": 9,
+      "candidates": 64,
+      "questions": 36
+    }
+  ],
+  "statements": [
+    {
+      "leg": "vector",
+      "function": "retrieval.vector.vector_search (M2 H1)",
+      "sql_sha256": "8b013bd820ec743a5a2c111dc121d6235231e9270c3ed32c8ad03e0456dc06c1",
+      "operator": "<=>",
+      "n": 355,
+      "execution_ms": {
+        "n": 355,
+        "min_ms": 0.187,
+        "median_ms": 0.248,
+        "max_ms": 0.852,
+        "p95_ms": 0.32060000000000005
+      },
+      "planning_ms": {
+        "n": 355,
+        "min_ms": 0.067,
+        "median_ms": 0.098,
+        "max_ms": 0.327,
+        "p95_ms": 0.14299999999999996
+      },
+      "rows_min": 20,
+      "rows_max": 20,
+      "shared_read_blocks": 0,
+      "distinct_plans": 1,
+      "nodes": [
+        {
+          "node_type": "Hash",
+          "relation": null,
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Hash Join",
+          "relation": null,
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Limit",
+          "relation": null,
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Result",
+          "relation": null,
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Seq Scan",
+          "relation": "chunks",
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Seq Scan",
+          "relation": "documents",
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Sort",
+          "relation": null,
+          "index": null,
+          "count": 355
+        }
+      ],
+      "index_for_operator": false
+    },
+    {
+      "leg": "text",
+      "function": "retrieval.text.text_search (M3 H1)",
+      "sql_sha256": "2cf17b92c90d96b3d81c00cae4f9240f7e1640aaaee94239be0946e02f9fdee5",
+      "operator": "@@",
+      "n": 355,
+      "execution_ms": {
+        "n": 355,
+        "min_ms": 0.088,
+        "median_ms": 0.209,
+        "max_ms": 1.234,
+        "p95_ms": 0.4133
+      },
+      "planning_ms": {
+        "n": 355,
+        "min_ms": 0.074,
+        "median_ms": 0.097,
+        "max_ms": 0.638,
+        "p95_ms": 0.13
+      },
+      "rows_min": 1,
+      "rows_max": 20,
+      "shared_read_blocks": 0,
+      "distinct_plans": 1,
+      "nodes": [
+        {
+          "node_type": "Bitmap Heap Scan",
+          "relation": "chunks",
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Bitmap Index Scan",
+          "relation": null,
+          "index": "chunks_business_id_document_id_chunk_index_key",
+          "count": 355
+        },
+        {
+          "node_type": "Limit",
+          "relation": null,
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Nested Loop",
+          "relation": null,
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Result",
+          "relation": null,
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Seq Scan",
+          "relation": "documents",
+          "index": null,
+          "count": 355
+        },
+        {
+          "node_type": "Sort",
+          "relation": null,
+          "index": null,
+          "count": 355
+        }
+      ],
+      "index_for_operator": false
+    }
+  ],
+  "search": {
+    "transaction_ms": {
+      "n": 355,
+      "min_ms": 4.419832956045866,
+      "median_ms": 6.8829997908324,
+      "max_ms": 31.08145808801055,
+      "p95_ms": 9.914670744910836
+    },
+    "vector_ms": {
+      "n": 355,
+      "min_ms": 1.139958156272769,
+      "median_ms": 1.5833328943699598,
+      "max_ms": 4.144292091950774,
+      "p95_ms": 2.8508786112070084
+    },
+    "text_ms": {
+      "n": 355,
+      "min_ms": 0.8815410546958447,
+      "median_ms": 1.549790846183896,
+      "max_ms": 22.213375195860863,
+      "p95_ms": 2.935953764244914
+    }
+  },
+  "read_only_checked": true
+}

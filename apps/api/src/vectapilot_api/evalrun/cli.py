@@ -104,6 +104,7 @@ from vectapilot_api.answer.service import ANSWER_ALIAS
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.runner import EMBEDDING_CALL
+from vectapilot_api.evalrun import explain
 from vectapilot_api.evalrun.budget import CostCap, record_for, usd
 from vectapilot_api.evalrun.cited import check_corpus, cited_texts
 from vectapilot_api.evalrun.compare import CompareRefused, compare, load_run, render_comparison
@@ -371,6 +372,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     compare.add_argument("run_a", type=Path, help="run A's folder")
     compare.add_argument("run_b", type=Path, help="run B's folder")
+    latency = commands.add_parser(
+        "latency",
+        help="$0, read-only: EXPLAIN ANALYZE of both search statements as the app role, at pilot"
+        " size (needs `ingest` first); writes evals/reports/latency/<date>-local.json|md",
+    )
+    defaults = ChunkingConfig()
+    latency.add_argument("--max-chars", type=int, default=defaults.max_chars)
+    latency.add_argument("--overlap", type=int, default=defaults.overlap_chars)
+    latency.add_argument("--k", type=int, help="the legs' k (default rag_candidate_k)")
+    latency.add_argument("--repeats", type=int, default=explain.DEFAULT_REPEATS)
+    latency.add_argument("--warmup", type=int, default=explain.DEFAULT_WARMUP)
     return parser
 
 
@@ -1231,6 +1243,59 @@ def compare_command(args: argparse.Namespace, io: Io) -> int:
     return EXIT_OK
 
 
+def latency_command(args: argparse.Namespace, io: Io) -> int:
+    """Pilot-size search latency (M3 PR 8; `evalrun/explain.py`): fake embedder only, read-only,
+    as the app role; writes the report pair under `evals/reports/latency/`."""
+    git = io.git()
+    dataset_dir: Path = args.dataset or git.root / DEFAULT_DATASET
+    dataset = read_dataset(dataset_dir, args.corpus)
+    settings = io.load_settings(False)
+    _check_settings(settings, live=False)
+    if settings.embeddings_provider != "fake":
+        raise Refused("latency runs with the fake embedder only: set embeddings_provider = fake")
+    chunking = ChunkingConfig(max_chars=args.max_chars, overlap_chars=args.overlap)
+    spec = load_embedding_catalog().resolve(
+        settings.embeddings_provider, settings.embeddings_model, settings.embeddings_dimension
+    )
+    mapping = namespaces(dataset.manifest.businesses, embedding_model=spec.model, chunking=chunking)
+    businesses = list(mapping)
+    request = explain.LatencyRequest(
+        mapping=mapping,
+        questions=explain.sample_questions(dataset.corpus, businesses),
+        expected_chunks={
+            business: sum(
+                len(dataset.corpus.chunks(document, chunking))
+                for document in dataset.corpus.documents(business)
+            )
+            for business in businesses
+        },
+        spec=spec,
+        k=args.k or settings.rag_candidate_k,
+        rrf_k=settings.rag_rrf_k,
+        repeats=args.repeats,
+        warmup=args.warmup,
+    )
+    measured = asyncio.run(explain.run_measurement(settings, request))
+    provenance = explain.Provenance(
+        measured_at=io.now(),
+        commit=git.commit,
+        uncommitted_changes=git.uncommitted_changes,
+        statements_at_commit=dataset_at_commit(git.root, explain.statement_sources(), io.head_file),
+        docker_mem_total_bytes=explain.docker_mem_total(),
+    )
+    report = explain.build_report(
+        measured,
+        provenance,
+        request,
+        max_chars=chunking.max_chars,
+        overlap_chars=chunking.overlap_chars,
+    )
+    paths = explain.report_paths(git.root / explain.LATENCY_DIR, provenance.measured_at)
+    explain.write_report(paths, report)
+    print(f"latency ({explain.LABEL}): wrote {paths[0]} and {paths[1]}")
+    return EXIT_OK
+
+
 def run(argv: Sequence[str] | None, io: Io) -> int:
     args = parse_args(argv)
     try:
@@ -1244,6 +1309,8 @@ def run(argv: Sequence[str] | None, io: Io) -> int:
             return compare_command(args, io)
         if args.command == "faithfulness-template":
             return faithfulness_template_command(args, io)
+        if args.command == "latency":
+            return latency_command(args, io)
         return label_sheet_command(args, io)
     except (
         Refused,
@@ -1252,6 +1319,7 @@ def run(argv: Sequence[str] | None, io: Io) -> int:
         CorpusError,
         NamespaceError,
         SummaryError,
+        explain.LatencyRefused,
         ValueError,
         OSError,
     ) as error:
