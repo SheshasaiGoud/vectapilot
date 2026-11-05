@@ -156,3 +156,7 @@ changes.
   second; an update, a delete and an insert inside are refused (SQLSTATE 25006); an approval that
   commits between the legs never puts the retired and the new version of one source into one
   fused list. Vector mode still runs at READ COMMITTED.
+
+**Amended 2026-11-05 (shesha, M4 plan D6; [ADR 0015](0015-intent-router.md)).** `route` stays
+`rag` through M4: the router is measured offline only, and it is wired into `POST /v1/answer`
+with M5's tool route, behind a setting.

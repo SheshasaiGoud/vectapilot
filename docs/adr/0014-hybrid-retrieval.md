@@ -99,7 +99,11 @@ cosine gate, one snapshot, and no reranking in M3. Each part:
 9. **Not in M3.**
    - No GIN index on `tsv` and no HNSW index unless PR 8's EXPLAIN shows they would be used and
      are needed: `@@` and `<=>` are not leakproof, so under RLS the app role may never use them
-     (to confirm in PR 8).
+     (to confirm in PR 8). *Measured 2026-11-04*
+     (`evals/reports/latency/2026-11-04-rls-index-probe.md`; ADR 0008, corrected 2026-11-05):
+     confirmed for GIN and `@@`, a condition, which is never evaluated inside an index ahead of the
+     policy. Refuted for HNSW: `ORDER BY <=>` is an ordering, so the index is used, and the
+     business filter runs after the scan (fewer than k hits are possible for a small business).
    - No BM25 extension: a new extension, and corpus-wide statistics shared across businesses.
    - No `pg_trgm` until dev misses show a need.
    - No Telugu config: Postgres has none, so `simple` is the fallback.

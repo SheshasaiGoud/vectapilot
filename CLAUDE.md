@@ -141,6 +141,7 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - [ADR 0012](docs/adr/0012-eval-dataset-v0.md) — eval dataset v0: synthetic two-business corpus, human-written JSONL questions, evidence groups of `source_id` + `version` + anchor keys, 30 % test split fixed before any question, freeze pins, labels per run
 - [ADR 0013](docs/adr/0013-eval-harness.md) — eval harness: `evalrun` package, every hit checked for business and audience before the answer step (exit 4), eval businesses per model + chunk config, one cap for embeddings and answers, test runs ledgered once per config, Wilson for counts and a seeded bootstrap for MRR
 - [ADR 0014](docs/adr/0014-hybrid-retrieval.md) — hybrid retrieval: Postgres full-text search with a per-chunk config next to vector search, fused by RRF (k = 60, exact); the evidence gate stays cosine; one snapshot per search; vector stays the default until a paired dev comparison; no reranking in M3
+- [ADR 0015](docs/adr/0015-intent-router.md) — intent router (accepted 2026-11-05): one platform intent set with a route map per closed business type, L2 logistic regression on voyage-4 query embeddings scored without an ML library, temperature scaling, a safety floor before the threshold, a fail-closed `small` LLM fallback that may only tighten, test once per mode, measured offline against LLM-only routing
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
@@ -177,19 +178,30 @@ Planned: `packages/mcp_server/`, `scripts/`.
   the questions (0 yet, stage `collecting`), friends' round-trip, `faq-hi` review and freeze; Voyage
   and Anthropic accounts and keys; the live runs (dev, then test once: `docs/learning/m2-eval-run.md`);
   labels; the note (skeleton: `docs/notes/m2-what-i-measured.md`); H1/H2 explain-backs; quiz.
-- **M3 (RAG v2: hybrid search, abstention) — planned and decided 2026-10-23**
-  (`docs/plans/m3-pr-checks.md`, ADR 0014); merged: PR 0 (#38), PR 1 guards (#39), PR 2
-  full-text column (#40), its `audience_conflict` follow-up (#41), PR 3 hybrid scaffold (#42),
-  PR 4 hybrid search (#43; `rag_retrieval_mode`, default vector), PR 6 `evalrun compare` (#44),
-  PR 5 eval hybrid (#45; `--retrieval-mode`, every list leak-checked, $5 M3 spend check).
-  PR 7 faithfulness labels (#46). H1 `text_search` and H2 `rrf_fuse` written by Claude at
-  shesha's request (2026-10-28, deadline) in review; explain-backs due. Next: PR 8 latency, PR 9.
-  - shesha writes H1 `text_search` and H2 `rrf_fuse` (D5, decided 2026-10-24).
+- **M3 (RAG v2: hybrid search, abstention) — code merged, 2026-11-04**
+  (`docs/plans/m3-pr-checks.md`, ADR 0014): PR 0 (#38), PR 1 guards (#39), PR 2 full-text column
+  (#40), its `audience_conflict` follow-up (#41), PR 3 hybrid scaffold (#42), PR 4 hybrid search
+  (#43; `rag_retrieval_mode`, default vector), PR 6 `evalrun compare` (#44), PR 5 eval hybrid
+  (#45; `--retrieval-mode`, every list leak-checked, $5 M3 spend check), PR 7 faithfulness labels
+  (#46), H1 `text_search` and H2 `rrf_fuse` (#47; written by Claude at shesha's request,
+  2026-10-28), PR 8 latency (#49, 2026-11-04; ADR 0008 amended: exact search kept).
+- **M3 remaining, shesha only:** PR 9 close-out (live hybrid dev runs after M2's, `compare`, the
+  note) and the H1/H2 explain-backs.
   - No reranking and no LLM judge in M3.
   - Live spend: $5.00 for all of M3's paid runs, each still ≤ $1.00.
   - **Measurement window** (D3): from M2's first live dev run to M3's last live answer run, nothing
     merges that changes `gateway/models.toml`, `PROMPT_VERSION` or the gateway's output path, and
     there is no `make reset-db` or Docker volume prune.
+- **M4 (intent router) — planned 2026-11-04, decided 2026-11-05** (`docs/plans/m4-pr-checks.md`,
+  ADR 0015; reviewed 2026-11-04 by kenji-ml, zara-safety and noah-evals, findings applied).
+  D1–D8 (shesha, each as recommended): scikit-learn dev-only for training, the API scores with the
+  standard library; voyage-4 query embeddings; Claude drafts training rows, humans write the eval
+  rows in a blind order; shesha writes H1 (fallback), Claude H2 (metrics); no self-harm rows;
+  $2.00 live ceiling; τ and σ by a written rule on dev. M4 is built and tested at $0 and needs no
+  database: no `models.toml` or `PROMPT_VERSION` change (it uses the `small` alias, with its own
+  router prompt version), and it stays out of `POST /v1/answer` (D6). Its live steps (embeddings,
+  LLM-only routing) and every test run, $0 ones included, are shesha's alone; the live ones wait
+  for M2 step 11's keys.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -211,7 +223,7 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - Docker Desktop must be running for `make up` / `make test-integration`. Its engine died around
   2026-10-16 and works again since 2026-10-23. If `docker info` cannot connect, run
   `docker desktop stop --force`, then `docker desktop start`. The likely trigger is the nearly full
-  disk (data volume 93 % used, 14 GiB free, 2026-10-23). Free space outside Docker's volumes: no
+  disk (data volume 96 % used, 8.4 GiB free, 2026-11-05). Free space outside Docker's volumes: no
   `make reset-db` or volume prune during M3's measurement window.
 - `Secret[...]` masks the DSNs in `Settings` (step A), not the plain string handed to SQLAlchemy and
   redis-py: pytest's default traceback can print it if those libraries fail. Tests only ever use

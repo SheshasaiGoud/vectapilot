@@ -113,3 +113,7 @@ above stands; these lines supersede it where they differ.
   answer run, nothing merges that changes `models.toml` or the gateway's output path. If a price
   changes inside that window, shesha chooses then: keep the old catalog (the note marks those
   costs stale), or bump `catalog_version` and re-run M2's vector dev run (paid).
+
+**Amended 2026-11-05 (shesha, M4 plan; [ADR 0015](0015-intent-router.md)).** Model choice per
+message and cross-model fallback move from M4 to M9. M4's router falls back from a classifier to
+one `small` call (ADR 0015), which is not a cross-model fallback; the catalog does not change.

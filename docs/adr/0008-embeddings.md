@@ -80,9 +80,22 @@ per statement).
   - `text_search`: median 0.209 ms, p95 0.413 ms.
 - The product's hybrid search transaction, client-side (snapshot, `set_config`, model check, both
   legs, fusion, commit): median 6.883 ms, p95 9.915 ms.
-- No index evaluates `<=>` or `@@`. The vector leg seq-scans `chunks`, and the text leg uses the
-  `business_id` btree, then filters. Both operators are not leakproof, so under RLS an HNSW or GIN
-  index could not be used ahead of the policy anyway.
+- No index evaluates `<=>` or `@@`, because neither index exists. The vector leg seq-scans
+  `chunks`, and the text leg uses the `business_id` btree, then filters.
+- **Corrected 2026-11-05.** This bullet first said that, since neither operator is leakproof, an
+  HNSW or GIN index could not be used under RLS anyway. That was a claim, not a measurement, and it
+  is half wrong. A probe as `vectapilot_app`, with RLS forced on a temporary table and rolled back
+  (`evals/reports/latency/2026-11-04-rls-index-probe.md`), found:
+  - **GIN for `WHERE tsv @@ …` is not used.** `@@` is a condition and not leakproof, so it is
+    never evaluated inside an index ahead of the policy. The same query uses GIN with RLS off.
+  - **HNSW for `ORDER BY embedding <=> …` is used.** An ordering is not a condition, so the
+    leakproof rule does not apply. The business filter runs *after* the index scan. With
+    `hnsw.ef_search` 40 and iterative scans off (the defaults), a business holding a small share of
+    the rows can therefore get fewer than k hits.
+
+  When the revisit trigger fires, the design starts from that: pgvector 0.8's iterative scans
+  (`hnsw.iterative_scan`) or per-business partial indexes, measured for recall per business, not
+  only for latency.
 - These are pilot-size numbers, never production ones, and never compared with business-context
   §6 as a pass. The revisit trigger above is unchanged: any business above 10,000 chunks, or the
   search transaction's measured p95 above 300 ms.
