@@ -174,7 +174,9 @@ not rechecked by maya:
   cannot be indexed. `ADD COLUMN ... STORED` rewrites the table.
 - `websearch_to_tsquery` ANDs every term.
 - `@@` (`ts_match_vq`) and `<=>` are not leakproof, so under RLS the app role may never use an index
-  on them (to confirm with EXPLAIN in PR 8).
+  on them (to confirm with EXPLAIN in PR 8). *Measured 2026-11-04*
+  (`evals/reports/latency/2026-11-04-rls-index-probe.md`): true for GIN and `@@`; false for HNSW
+  and `ORDER BY <=>`, whose index is used and post-filtered.
 
 Not verified anywhere: every Voyage rerank fact (only relevant to S2), and Anthropic's minimum
 cacheable prompt length (only relevant to caching, D14).

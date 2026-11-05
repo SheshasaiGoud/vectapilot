@@ -204,7 +204,11 @@ business gets nothing back.
 RLS also has a cost. `@@` and `<=>` are not *leakproof* (Postgres does not trust them to reveal
 nothing about the rows they see, through an error for example). So under RLS the planner applies
 the policy before them, which may keep an index on them from being used for the app role (ADR 0014
-decision 9; PR 8 measures it).
+decision 9; PR 8 measures it). *Measured 2026-11-04*
+(`evals/reports/latency/2026-11-04-rls-index-probe.md`): a GIN index is indeed never used for
+`WHERE tsv @@ …` under RLS, because that is a condition. An HNSW index *is* used for
+`ORDER BY embedding <=> …`, because an ordering is not a condition. The business filter then runs
+after the index scan, so a small business can get fewer than k hits.
 
 ### 2.7 Reciprocal Rank Fusion
 Two lists, two incomparable scores: a cosine in [−1, 1], uncalibrated and model-specific, and a
