@@ -8,7 +8,7 @@ LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapi
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo eval-check eval-dry-run
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo eval-check eval-dry-run intent-check
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -77,3 +77,9 @@ eval-dry-run: ## Dry run of the eval harness on dev: fake embedder, canned answe
 	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_EMBEDDINGS_PROVIDER=fake \
 		VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" VECTAPILOT_MIGRATION_DATABASE_URL="$(LOCAL_OWNER_URL)" \
 		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run python -m vectapilot_api.evalrun run --split dev
+
+# ── Intents dataset (M4 PR 1) ───────────────────────────────────────────────────────────
+# Reads evals/datasets/intents/v0.1 and the business manifests in data/sample; no model, no
+# network, no database, writes nothing.
+intent-check: ## Check the intents dataset for its stage, then print its counts
+	$(API) uv run python -m vectapilot_api.intenteval check && uv run python -m vectapilot_api.intenteval report

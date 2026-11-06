@@ -1,0 +1,32 @@
+{
+  "dataset": "intents",
+  "version": "v0.1",
+  "created": "2026-11-05",
+  "synthetic": true,
+  "authored_by": "Training rows: Claude (kenji-ml), drafted in M4 PR 2, none yet. Eval rows: shesha and friends, human-written, none yet. Schema, checks and split rule: Claude (kenji-ml), M4 PR 1",
+  "stage": "collecting",
+  "corpus": "data/sample",
+  "businesses": ["sunrise-clinic", "paws-and-co"],
+  "split_rule": {
+    "rule": "stratified-systematic-v2",
+    "seed": "intents",
+    "test_percent": 50
+  },
+  "near_duplicate": {
+    "method": "char-3gram-jaccard",
+    "threshold_percent": 70
+  },
+  "requirements": {
+    "min_eval_rows": 160,
+    "min_eval_per_intent": 20,
+    "min_eval_per_safety_intent_per_business": 10,
+    "min_hindi_safety_per_hindi_business": 6,
+    "min_hindi_emergency_per_hindi_business": 3,
+    "min_train_per_intent": 40
+  },
+  "verification": {
+    "percent": 20,
+    "seed": "intents-verify"
+  },
+  "train_draft_sha256": null
+}
