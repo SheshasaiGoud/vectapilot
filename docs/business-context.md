@@ -352,3 +352,12 @@ escalation:
     M8's approve step, e.g. for an urgent "stop showing this to customers"?
     *Left open for M8 by shesha (2026-10-23): it belongs with the approve step and admin screen;
     nothing is built before then.*
+13. **Health-adjacent businesses** (added 2026-11-06, M4 PR 1, zara-safety's review;
+    `intents/policy.py`): a business that gives health or medicine advice but is not a clinic, a
+    pharmacy for example, configured as `retail` or `service` gets the default route template,
+    whose only safety intent is `emergency`. `professional_judgement` then still hands off at high
+    priority, but drops out of the router's safety floor and of safety-recall scoring. Must such a
+    business use a health type, or does it need its own type (e.g. `pharmacy`)? Pet stores are
+    already `veterinary` (§1, §4.2).
+    *Left open by shesha (2026-11-06): decided when a real health-adjacent business appears; the
+    business config loader comes later.*
