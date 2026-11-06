@@ -32,10 +32,13 @@ from vectapilot_api.intenteval.sample import draw_sample, render_sample
 
 @pytest.fixture
 def folder(tmp_path: Path) -> Path:
+    """The real manifest (its rules) with empty row files: the committed rows are never copied,
+    so these tests do not change as rows are added (test_dataset_intents_v0_1 checks those)."""
     copy = tmp_path / "v0.1"
     copy.mkdir()
-    for name in ("manifest.json", "train.jsonl", "eval.jsonl"):
-        shutil.copy(DATASET_DIR / name, copy)
+    shutil.copy(DATASET_DIR / "manifest.json", copy)
+    for name in ("train.jsonl", "eval.jsonl"):
+        (copy / name).write_text("", "utf-8")
     return copy
 
 
