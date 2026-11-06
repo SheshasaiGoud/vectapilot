@@ -1,3 +1,7 @@
 # PDFs are binary: no line-ending conversion or whitespace checks. Their cross-reference table
 # stores byte offsets (and its entries end in a space), so converting line endings would corrupt them.
 *.pdf binary
+
+# The intent router's training rows (M4, ADR 0015 decision 8): eval writers must never read them
+# (the blind order). Marked generated so GitHub collapses their diff in pull requests by default.
+evals/datasets/intents/*/train.jsonl linguist-generated=true

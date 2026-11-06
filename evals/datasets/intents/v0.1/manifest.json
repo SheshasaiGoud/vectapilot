@@ -28,5 +28,5 @@
     "percent": 20,
     "seed": "intents-verify"
   },
-  "train_draft_sha256": null
+  "train_draft_sha256": "7ca53e1c64bfba19acdaad07cd754c2bf6aaba74831f2d260eb8943728b2f6d1"
 }
