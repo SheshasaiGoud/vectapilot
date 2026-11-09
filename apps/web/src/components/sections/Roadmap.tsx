@@ -29,12 +29,15 @@ function MilestoneCard({ milestone }: { milestone: MilestoneView }) {
         <span className={`font-mono text-sm font-bold ${current ? "text-indigo-300" : "text-mist-400"}`}>
           {milestone.id}
         </span>
-        <StateChip state={milestone.state} />
+        <StateChip state={milestone.state} pending={milestone.pending} />
       </div>
       <h3 className={`mt-2 font-display font-semibold ${current ? "text-mist-50" : "text-mist-200"}`}>
         {milestone.title}
       </h3>
       <p className="mt-1 text-sm leading-relaxed text-mist-400">{milestone.summary}</p>
+      {milestone.state === "done" && milestone.pending ? (
+        <p className="mt-2 text-xs font-medium text-amber-300">{milestone.pending}</p>
+      ) : null}
       <div className="mt-auto pt-4">
         <OwnerAvatars owners={milestone.owners} />
       </div>
@@ -52,12 +55,19 @@ function MilestoneCard({ milestone }: { milestone: MilestoneView }) {
   return <div className="h-full rounded-2xl bg-ink-900/50 ring-1 ring-white/10">{body}</div>;
 }
 
-function StateChip({ state }: { state: MilestoneView["state"] }) {
+function StateChip({ state, pending }: { state: MilestoneView["state"]; pending?: string }) {
   if (state === "current") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-400/15 px-2 py-0.5 text-[11px] font-medium text-indigo-200 ring-1 ring-indigo-400/30">
         <span className="size-1.5 animate-pulse rounded-full bg-indigo-300" aria-hidden />
         In progress
+      </span>
+    );
+  }
+  if (state === "done" && pending) {
+    return (
+      <span className="rounded-full bg-amber-400/10 px-2 py-0.5 text-[11px] font-medium text-amber-200 ring-1 ring-amber-400/30">
+        ✓ Code done
       </span>
     );
   }
