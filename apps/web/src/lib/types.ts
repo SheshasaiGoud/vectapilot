@@ -58,5 +58,6 @@ export interface MilestoneView {
   title: string;
   summary: string;
   state: MilestoneState;
+  pending?: string;
   owners: MilestoneOwner[];
 }

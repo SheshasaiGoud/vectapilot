@@ -55,6 +55,9 @@ It is a hands-on learning and portfolio project; the human lead (**shesha**, Git
 Invoke one with `@agent-<name>` or in plain words ("ask ananya-rag to review my retrieval code").
 **The team site reads these files at build time** — adding or renaming a teammate also needs an
 entry in `apps/web/src/data/personas.ts` and `npm run avatars`; the build fails if they drift apart.
+**Milestone status on the site** comes from `currentMilestone` in `apps/web/src/data/roadmap.ts`:
+each milestone's planning PR moves it forward, and a milestone whose code is merged but whose
+live runs are not done keeps a `pending` note (it shows "Code done", never "Done").
 
 ## How changes land
 Feature branch → pull request → CI (`api (lint, types, tests)`, `api image (docker build)` and
