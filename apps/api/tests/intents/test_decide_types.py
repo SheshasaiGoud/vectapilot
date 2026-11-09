@@ -22,6 +22,13 @@ def test_thresholds_take_values_in_0_1() -> None:
     assert RouterThresholds(tau=1.0, sigma=0.01) == RouterThresholds(tau=1, sigma=0.01)
 
 
+def test_tau_none_means_no_confidence_band_but_sigma_is_always_a_number() -> None:
+    # Decided 2026-11-09: tau None is "no confidence band"; sigma (the floor) is never optional.
+    assert RouterThresholds(tau=None, sigma=0.25).tau is None
+    with pytest.raises(ValueError, match="sigma must be a number"):
+        RouterThresholds(tau=0.8, sigma=None)  # type: ignore[arg-type]
+
+
 @pytest.mark.parametrize("value", [0.0, -0.1, 1.5, math.nan, math.inf, True])
 @pytest.mark.parametrize("name", ["tau", "sigma"])
 def test_thresholds_outside_0_1_are_refused(name: str, value: float) -> None:

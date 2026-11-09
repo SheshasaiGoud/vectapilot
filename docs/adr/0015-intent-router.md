@@ -167,6 +167,12 @@ Each part:
     - **Other triggers:** language detection, multi-turn context, and the sentiment, tool-failure
       and amount triggers.
 
+**Amended 2026-11-09 (shesha, M4 PR 4 review; `docs/plans/m4-pr-checks.md`, "Decided 2026-11-09").**
+τ may be "none" (no confidence band): the classifier then never decides by confidence, even at a
+probability of 1.0, and every message below the safety floor goes to the LLM. D8's rule checks a
+larger grid value only where it still keeps at least 20 dev rows. Macro-F1 is shown for a slice
+only when every intent has at least 5 gold rows in at least 5 split units.
+
 **Consequences.**
 - **The router is a platform model.** In M4 it holds no business's data: its training rows are
   platform-authored and synthetic. Training a shared model on real messages later would let one

@@ -8,7 +8,7 @@ LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapi
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo eval-check eval-dry-run intent-check
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo eval-check eval-dry-run intent-check intent-dry-run
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -83,3 +83,14 @@ eval-dry-run: ## Dry run of the eval harness on dev: fake embedder, canned answe
 # network, no database, writes nothing.
 intent-check: ## Check the intents dataset for its stage, then print its counts
 	$(API) uv run python -m vectapilot_api.intenteval check && uv run python -m vectapilot_api.intenteval report
+
+# ── Intent router harness (M4 PR 4) ─────────────────────────────────────────────────────
+# Always a dry run: fake embedder, canned fake routing answers, $0, into the git-ignored
+# evals/reports/tmp/intents/. Needs a frozen dataset (eval rows and `freeze`), and H1 and H2
+# written for the summaries and the hybrid. No database: Settings only needs the two URLs.
+# There is deliberately no make target for `--live` or the test split (shesha runs them by hand:
+# docs/plans/m4-pr-checks.md, PR 5).
+intent-dry-run: ## Dry run of the intent harness on dev: embed, train, calibrate, thresholds, both modes, hybrid
+	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_EMBEDDINGS_PROVIDER=fake \
+		VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" \
+		uv run python -m vectapilot_api.intenteval dry-run

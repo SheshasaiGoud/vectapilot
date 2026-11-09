@@ -205,11 +205,12 @@ Planned: `packages/mcp_server/`, `scripts/`.
   router prompt version), and it stays out of `POST /v1/answer` (D6). Its live steps (embeddings,
   LLM-only routing) and every test run, $0 ones included, are shesha's alone; the live ones wait
   for M2 step 11's keys.
-  - Merged: PR 0 plan (#50), PR 1 (#51: intent list, route policy, `evals/datasets/intents/v0.1`
-    format, `python -m vectapilot_api.intenteval check|report|sample|freeze`,
-    `make intent-check`, writers' brief). PR 2 (400 Claude-drafted training rows, draft hash
-    and 80-id verification sample) in review. Next: shesha writes the eval rows from the
-    writers' brief, never opening `train.jsonl` (the blind order); PR 3 core can start.
+  - Merged: PR 0 plan (#50), PR 1 (#51: intent list, route policy, dataset format, `intenteval`,
+    writers' brief), PR 2 (#52: 400 training rows, draft hash, 80-id sample), PR 3 (#54: classifier
+    scoring, calibration, LLM fallback, H1 scaffold). PR 4 (eval harness, M4 spend at $2.00,
+    scikit-learn dev-only, H2 scaffold) in review. shesha: H1 (`route_message`, guide
+    `docs/learning/m4-router.md`) and the eval rows from the writers' brief, never opening
+    `train.jsonl`. Then H2 (Claude), then PR 5 close-out (live steps, shesha only).
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

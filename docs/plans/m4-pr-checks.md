@@ -62,9 +62,10 @@ is "macro-F1 0.90 not shown at 95 % confidence".
   test marks the run `partial` [carried `evalrun/report.py`: `error` apart from `handoff`].
   `CapReached` stops a run, never a hand-off.
 - **Macro-F1** over the fixed eight intents, the guide's 0/0 rule, exact `Fraction`s. The bootstrap
-  resamples split units (seed and B in run.json; the number of grouped rows shown). A slice with
-  fewer than 5 gold rows for any intent shows counts and the confusion matrix only: "macro-F1 not
-  shown (n too small)" [proposal].
+  resamples split units (seed and B in run.json; the number of grouped rows shown). Macro-F1 and
+  its interval are shown for a slice only when every intent has at least 5 gold rows **and** at
+  least 5 split units in it; otherwise counts and the confusion matrix only: "macro-F1 not shown
+  (n too small)" with the reason (which intents fall short, and by what) [decided 2026-11-09].
 - **Calibration:** 5 equal-width bins of top probability, each with n, mean confidence and
   accuracy; ECE with its n and "biased upward at small n"; raw (T = 1) and calibrated side by side
   on test; per business as counts only [proposal].
@@ -366,16 +367,36 @@ proposal or carried.
   $5.00, $3.00 of the $10/month workspace remains for M2 in one month (Voyage bills separately).
 - **D8 — Threshold protocol** (σ: the safety floor; τ: the confidence threshold), fixed before any
   live result. (a) **Fixed grids and a written rule, on dev** ($0; grids fixed in PR 4, σ's down
-  to 0.01). τ first, before σ exists: the smallest grid value at which the classifier's accuracy
-  on the dev rows whose top probability reaches it is at least 95 %, there and at every larger
-  value, with at least 20 rows kept; if none, τ = 1.00 (everything below the floor goes to the
-  LLM). Then σ, given τ: the largest grid value at which the classifier alone decides no dev
-  safety row as a non-safety intent, one grid step lower as a margin; if none qualifies, 0.01.
+  to 0.01). τ first, before σ exists: the smallest grid value at which the classifier alone is
+  right on at least 95 % of the dev rows whose top probability reaches it, with at least 20 such
+  rows, and at every larger grid value that still keeps at least 20 rows (reading (C), decided
+  2026-11-09); if none, there is no τ: **no confidence band**, everything below the floor goes to
+  the LLM (decided 2026-11-09, replacing "τ = 1.00"). Then σ, given τ: the largest grid value at
+  which the classifier alone decides no dev safety row as a non-safety intent, one grid step lower
+  as a margin; if none qualifies, 0.01.
   Dev safety rows still missed (also an emergency the floor decides as `professional_judgement`,
   which σ cannot change) are listed by id; the dev curve shows false urgent hand-offs at each σ.
   (b) **Fixed constants** (τ 0.80, σ 0.20), no tuning. (c) **Tune τ** until hybrid macro-F1 is
   within a margin of LLM-only on dev (needs the dev LLM run first; the noisiest). **Decided:
   (a):** a plain meaning, $0 tuning, and its forking paths fixed up front, as M3's D15.
+
+**Decided 2026-11-09 (shesha, M4 PR 4 review):**
+- **D8's "at every larger value", reading (C).** τ is the smallest grid value where the classifier
+  alone is right on ≥ 95 % of the dev rows it decides, with ≥ 20 such rows, and at every *larger*
+  grid value that still keeps ≥ 20 rows. Larger values keeping fewer than 20 rows are not checked:
+  their accuracy is noise (18 of 19 at a larger value no longer pushes τ up). Rule version
+  `d8-a.2` (`intenteval/thresholds.py`); `d8-a.1` let a larger value with 1–19 rows block.
+- **"No confidence band" is explicit.** τ is optional: None means the classifier never decides by
+  confidence, and every row below the safety floor goes to the LLM. 1.00 is no longer a fallback
+  value (τ = 1.00 now only means the grid's last value qualified). Threaded through
+  `RouterThresholds.tau: float | None` (H1's interface and docstring; `route_message` stays
+  shesha's stub), `thresholds.json` (`"tau": null`, the key required), the run fingerprint (σ set
+  and τ None), the pin and the summaries ("tau none (no confidence band)").
+- **Macro-F1 per slice** is shown, with its interval, only when every intent has ≥ 5 gold rows
+  **and** ≥ 5 split units in that slice; otherwise counts and the confusion matrix only, with the
+  reason printed.
+- **Dependencies (rule 11):** narwhals (pulled in by scikit-learn) and cloudpickle (pulled in by
+  joblib), not named in D1 (c), are accepted, dev-only (`apps/api/pyproject.toml`).
 
 ## Risks
 - **Small n:** about 80 test rows (an estimate under D3 (a)). Interval arithmetic, not a result:

@@ -23,20 +23,25 @@ DecidedBy = Literal["safety_floor", "classifier", "llm", "classifier_kept", "fai
 
 @dataclass(frozen=True)
 class RouterThresholds:
-    """tau and sigma, chosen on dev by D8's rule (PR 4's `thresholds`), each in (0, 1].
+    """tau and sigma, chosen on dev by D8's rule (PR 4's `thresholds`).
 
-    `tau`: the confidence threshold; a top probability at or above it is decided by the
-    classifier. `sigma`: the safety floor; a safety mass at or above it is a hand-off to the
-    most probable safety intent, checked before tau."""
+    `tau`: the confidence threshold, in (0, 1]; a top probability at or above it is decided by the
+    classifier. **None means no confidence band** (decided 2026-11-09): the classifier never
+    decides by confidence, and every message below the safety floor goes to the LLM. D8 gives
+    None when no grid value qualifies; it never stands in a number such as 1.00 for that.
+    `sigma`: the safety floor, in (0, 1], always set; a safety mass at or above it is a hand-off
+    to the most probable safety intent, checked before tau."""
 
-    tau: float
+    tau: float | None
     sigma: float
 
     def __post_init__(self) -> None:
         for name in ("tau", "sigma"):
             value = getattr(self, name)
+            if value is None and name == "tau":
+                continue
             if isinstance(value, bool) or not isinstance(value, float | int):
-                raise ValueError(f"{name} must be a number")
+                raise ValueError(f"{name} must be a number" + (" or None" if name == "tau" else ""))
             if not (math.isfinite(value) and 0 < value <= 1):
                 raise ValueError(f"{name} must lie in (0, 1]")
 
@@ -120,10 +125,13 @@ async def route_message(
        most probable safety intent (ties: the first in `DECISION_ORDER`) with
        `decided_by="safety_floor"`. No fallback call. Checked before τ, always.
     2. **Threshold.** Otherwise the classifier's top-1 is the most probable intent, ties broken
-       by `DECISION_ORDER` (the earlier wins). If its probability is at least `thresholds.tau`,
-       return it with `decided_by="classifier"`. No fallback call.
-    3. **Fallback.** Otherwise await `fallback(message, business_id=business_id,
-       trace_id=trace_id)` exactly once, with the arguments unchanged. The final intent is
+       by `DECISION_ORDER` (the earlier wins). If `thresholds.tau` is not None and the top-1's
+       probability is at least `thresholds.tau`, return it with `decided_by="classifier"`. No
+       fallback call. If `thresholds.tau` is None (no confidence band), the classifier never
+       decides here, whatever its top probability (even 1.0): go to step 3.
+    3. **Fallback.** Otherwise (below tau, or no tau) await `fallback(message,
+       business_id=business_id, trace_id=trace_id)` exactly once, with the arguments unchanged.
+       The final intent is
        whichever of the LLM's intent and the classifier's top-1 comes first in `DECISION_ORDER`:
        the LLM may add an escalation, never remove one (tighten, never loosen). `decided_by` is
        `"classifier_kept"` when the LLM's intent comes strictly later than the top-1 (the LLM

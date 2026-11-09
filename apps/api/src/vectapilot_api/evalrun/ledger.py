@@ -42,7 +42,9 @@ def read_ledger(path: Path) -> list[LedgerEntry]:
     return parse_ledger(path.read_text("utf-8"))
 
 
-def append_ledger(path: Path, entry: LedgerEntry) -> None:
+def append_ledger(path: Path, entry: BaseModel) -> None:
+    """Append one entry as a JSON line, flushed at once (M4's ledger appends its own entry
+    types the same way: `intenteval/ledger.py`)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as ledger:
         ledger.write(entry.model_dump_json() + "\n")
