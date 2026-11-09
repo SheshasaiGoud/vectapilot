@@ -24,7 +24,9 @@ the plan's "H1" and "Scoring rules" sections ([`m4-pr-checks.md`](../plans/m4-pr
 - **Already there and tested** (passing now):
   - `IntentScores` (`intents/classifier.py`): all eight probabilities, always iterated in
     `DECISION_ORDER`, each in [0, 1], summing to 1. Read them with `scores.probabilities[intent]`.
-  - `RouterThresholds` (`decide.py`): `tau` (τ) and `sigma` (σ), each in (0, 1].
+  - `RouterThresholds` (`decide.py`): `tau` (τ) in (0, 1] **or None**, and `sigma` (σ) in
+    (0, 1], always set. `tau=None` means **no confidence band** (decided 2026-11-09): the
+    classifier never decides by confidence, so every message below the floor goes to the LLM.
   - `RouteDecision` and `DecidedBy` (`decide.py`). A `RouteDecision` checks itself when built
     (`tests/intents/test_decide_types.py`): a fail-closed decision with an intent, a
     `classifier_kept` decision where the LLM did not try to loosen, and so on, cannot be built.
@@ -81,8 +83,13 @@ those). Raising the threshold τ lowers coverage and usually raises selective ac
 keeps almost nothing and the LLM sees every message. The point of M4 is the trade: most messages
 should be obvious ("what time do you open?"), cost a dot product and a softmax, and never reach an
 LLM; only the band below τ pays for a model call. D8 fixes τ on dev by a written rule (the
-smallest grid value whose kept rows are at least 95 % right, with at least 20 kept) before any
-test result exists.
+smallest grid value whose kept rows are at least 95 % right, with at least 20 kept, and so is every
+larger grid value that still keeps at least 20) before any test result exists.
+
+If no grid value qualifies, D8 gives **no τ at all** (`tau=None`, decided 2026-11-09), not
+τ = 1.00: "no confidence band" is said explicitly instead of hidden in a number. Then step 2 of
+the contract never decides, even at a top probability of 1.0; the floor still runs first, and
+everything below it goes to the LLM (coverage 0 for the classifier alone).
 
 The confidence here is the classifier's **top probability**: the largest of the eight. Other
 signals exist (the margin between the top two, the entropy); ADR 0015 chose the top probability
@@ -216,6 +223,16 @@ Open a hint only for the test you are stuck on, and only after §2.
   (3), `test_a_top_probability_just_below_tau_asks_the_llm_once`,
   `test_a_tie_at_the_top_goes_to_the_first_intent_in_decision_order` (4),
   `test_the_route_comes_from_the_policy_never_from_a_table_of_your_own`.
+- **No confidence band (`tau=None`):**
+  `test_with_no_confidence_band_every_row_below_the_floor_asks_the_llm_once` (3),
+  `test_with_no_confidence_band_the_floor_still_decides_first`,
+  `test_with_no_confidence_band_a_gateway_error_still_fails_closed`.
+  <details><summary>Hint</summary>
+
+  `probability >= None` raises `TypeError` in Python: check `tau is None` before comparing. If
+  the certain-question case returns `decided_by="classifier"`, your threshold step ignored None.
+
+  </details>
   <details><summary>Hint</summary>
 
   The tie test gives two intents 1/2 each, listed in reverse; the earlier in `DECISION_ORDER`
@@ -273,7 +290,11 @@ explain-back stays part of acceptance.
 
 **Decided 2026-11-05 (shesha), as they bear on H1:** D4 (b): shesha writes H1, Claude writes H2
 at shesha's request. D8 (a): τ and σ from fixed grids by a written rule on dev, before any live
-result. D6 (a): nothing is wired into `POST /v1/answer` in M4, so `route_message` runs only in
+result.
+
+**Decided 2026-11-09 (shesha, M4 PR 4 review), as they bear on H1:** `RouterThresholds.tau` is
+`float | None`; None is "no confidence band" (step 2 never decides; every message below the floor
+goes to the LLM). D8 no longer uses 1.00 as its "nothing qualified" value. D6 (a): nothing is wired into `POST /v1/answer` in M4, so `route_message` runs only in
 PR 4's harness.
 
 **Proposals in this scaffold** (PR 3; applied unless its review changes them):

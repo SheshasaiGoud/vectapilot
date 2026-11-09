@@ -45,6 +45,16 @@ dev = [
     "opentelemetry-api>=1.45.1",
     "pytest>=9.1.1",
     "ruff>=0.16.10",
+    # Exact pin, rule 11 (shesha, D1 (c), decided 2026-11-05; M4 PR 4): the newest release at
+    # least 7 days old on install day, 2026-11-09 (1.9.1, uploaded 2026-09-10). The scikit-learn
+    # project, BSD-3-Clause. Fits the intent classifier in `intenteval train` only (ADR 0015
+    # decision 4): dev group, so the API image (`uv sync --no-dev`) never installs it, and
+    # tests/intenteval/test_ml_isolation.py checks that the API never imports it. It pulls in
+    # numpy, scipy, joblib (+ cloudpickle), threadpoolctl and narwhals; uv.lock holds
+    # threadpoolctl at 3.7.0 (2026-09-15), since 3.8.0 was 4 days old on install day.
+    # narwhals (2.28.0, pulled in by scikit-learn) and cloudpickle (3.1.2, pulled in by joblib)
+    # were not in D1's list: accepted by shesha on 2026-11-09 (M4 PR 4 review), dev-only.
+    "scikit-learn==1.9.1",
 ]
 
 [tool.ruff]
@@ -73,6 +83,12 @@ select = ["E", "W", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "S", "TID251"]
 strict = true
 plugins = ["pydantic.mypy"]
 files = ["src", "tests", "migrations", "scripts"]
+
+# The one override (M4 PR 4): scikit-learn ships no type information (no py.typed), so its
+# imports are `Any`. Only intenteval/train.py imports it; numpy has its own types.
+[[tool.mypy.overrides]]
+module = ["sklearn.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

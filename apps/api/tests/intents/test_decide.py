@@ -287,6 +287,55 @@ async def test_the_route_comes_from_the_policy_never_from_a_table_of_your_own() 
     assert expected.route == NORMAL
 
 
+# ── 2b. No confidence band: tau None (decided 2026-11-09) ───────────────────────────────────
+
+NO_BAND: Final = RouterThresholds(tau=None, sigma=0.25)
+"""D8 found no grid value that qualifies: the classifier never decides by confidence."""
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("probabilities", "llm", "expected"),
+    [
+        # Question at 1 (certain), no safety mass: without a band the LLM is still asked; it
+        # agrees.
+        ({Q: 1.0}, Q, by_llm(Q)),
+        # Complaint at 3/4 would reach any tau up to 3/4; without a band the LLM is asked. It
+        # says question (later than complaint: it would loosen), so complaint is kept.
+        ({C: 0.75, Q: 0.25}, Q, kept(C, Q)),
+        # Out of scope at 1; the LLM adds an escalation (complaint): tighten is allowed.
+        ({OOS: 1.0}, C, by_llm(C)),
+    ],
+    ids=["certain-question", "complaint-kept", "llm-tightens"],
+)
+async def test_with_no_confidence_band_every_row_below_the_floor_asks_the_llm_once(
+    probabilities: Mapping[Intent, float], llm: Intent, expected: RouteDecision
+) -> None:
+    fallback = ScriptedFallback([llm, OOS])  # a second answer would show a second call
+
+    assert await decide(probabilities, fallback, thresholds=NO_BAND) == expected
+    assert len(fallback.calls) == 1
+
+
+@pytest.mark.anyio
+async def test_with_no_confidence_band_the_floor_still_decides_first() -> None:
+    # Emergency 1/4 = sigma: the floor, no LLM call, whatever tau would have been.
+    fallback = ScriptedFallback()
+    expected = floor(E)
+
+    assert await decide({Q: 0.75, E: 0.25}, fallback, thresholds=NO_BAND) == expected
+    assert fallback.calls == []
+
+
+@pytest.mark.anyio
+async def test_with_no_confidence_band_a_gateway_error_still_fails_closed() -> None:
+    # Question at 1 (rag) without a band: the LLM is asked and raises: a hand-off at high.
+    error = Transient(status_code=529)
+    expected = RouteDecision(intent=None, route=HIGH, decided_by="fail_closed", error="Transient")
+
+    assert await decide({Q: 1.0}, ScriptedFallback([error]), thresholds=NO_BAND) == expected
+
+
 # ── 3. The fallback: once, below tau, tighten only ──────────────────────────────────────────
 
 BAND: Final[Mapping[Intent, float]] = {Q: 0.5, AR: 0.25, OOS: 0.25}
