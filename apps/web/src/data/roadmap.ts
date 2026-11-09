@@ -8,9 +8,11 @@ export interface Milestone {
   title: string;
   summary: string;
   owners: string[];
+  /** What is still open after the code is merged (e.g. live runs); shown on a done card. */
+  pending?: string;
 }
 
-export const currentMilestone = "M1";
+export const currentMilestone = "M4";
 
 /** Teammates who review every milestone; shown as always active. */
 export const reviewers: string[] = ["maya-tech-lead"];
@@ -27,18 +29,21 @@ export const milestones: Milestone[] = [
     title: "LLM gateway",
     summary: "Retries, structured output, cost accounting, fake provider",
     owners: ["diego-backend"],
+    pending: "Live run pending",
   },
   {
     id: "M2",
     title: "Ingestion + baseline RAG",
     summary: "Loaders, chunking, pgvector, cited answers, eval v0",
     owners: ["ananya-rag", "noah-evals"],
+    pending: "Eval questions and live runs pending",
   },
   {
     id: "M3",
     title: "RAG v2",
     summary: "Hybrid search, RRF fusion, reranking, abstention",
     owners: ["ananya-rag", "noah-evals"],
+    pending: "Live runs pending",
   },
   {
     id: "M4",

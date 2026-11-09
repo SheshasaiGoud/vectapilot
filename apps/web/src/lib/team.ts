@@ -115,6 +115,7 @@ export function getTeamData(): {
     title: milestone.title,
     summary: milestone.summary,
     state: index < now ? "done" : index === now ? "current" : "upcoming",
+    pending: milestone.pending,
     owners: milestone.owners.map((owner) => {
       const member = byId.get(owner)!;
       return {
