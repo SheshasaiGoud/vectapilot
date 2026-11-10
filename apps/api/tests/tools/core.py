@@ -88,8 +88,10 @@ class FakeSource:
 
     @asynccontextmanager
     async def business_transaction(
-        self, business_id: str, *, snapshot: bool = False
+        self, business_id: str, *, snapshot: bool = False, read_committed: bool = False
     ) -> AsyncIterator[AsyncConnection]:
+        if snapshot == read_committed:  # W8: a tool transaction is always one of the two
+            raise AssertionError("a tool transaction is the snapshot or read committed")
         self.transactions.append((business_id, snapshot))
         yield cast(AsyncConnection, self.connection)
 

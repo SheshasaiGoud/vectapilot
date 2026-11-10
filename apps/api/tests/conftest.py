@@ -58,6 +58,7 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "rag_candidate_k": 20,
     "rag_rrf_k": 60,
     "tools_config_dir": None,
+    "action_lifetime_seconds": 900,
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 

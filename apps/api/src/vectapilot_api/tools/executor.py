@@ -124,7 +124,7 @@ class TransactionSource(Protocol):
     included); in the canary suite, an owner engine without it."""
 
     def business_transaction(
-        self, business_id: str, *, snapshot: bool = False
+        self, business_id: str, *, snapshot: bool = False, read_committed: bool = False
     ) -> AbstractAsyncContextManager[AsyncConnection]: ...
 
 
@@ -151,8 +151,11 @@ async def tool_transaction(
     source: TransactionSource, business_id: str, budget_s: float, *, read_only: bool
 ) -> AsyncIterator[AsyncConnection]:
     """A business transaction with server timeouts below `budget_s`; `read_only` makes it the
-    `REPEATABLE READ READ ONLY` snapshot (W8)."""
-    async with source.business_transaction(business_id, snapshot=read_only) as connection:
+    `REPEATABLE READ READ ONLY` snapshot, otherwise it is READ COMMITTED, set explicitly so no
+    server, database or role default can change it (W8; `db.READ_COMMITTED`)."""
+    async with source.business_transaction(
+        business_id, snapshot=read_only, read_committed=not read_only
+    ) as connection:
         statement, lock = server_timeouts(budget_s)
         await connection.execute(SET_TIMEOUTS, {"statement": statement, "lock": lock})
         yield connection

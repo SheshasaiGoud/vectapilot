@@ -20,6 +20,7 @@ locally and in CI; it seeds the registry and breaks things on purpose. Everythin
 leaks runs as the app role.
 """
 
+import hashlib
 import secrets
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -47,6 +48,7 @@ from tests.canary.checks import Planted
 from tests.canary.read_paths import (
     BAIT,
     BAIT_BOOKING_ID,
+    BAIT_CONFIRM_TOKEN,
     BAIT_CUSTOMER,
     BAIT_ORDER_ID,
     BAIT_SERVICE,
@@ -54,14 +56,22 @@ from tests.canary.read_paths import (
     BAIT_WORD,
     OWNER_CONNECTION_PATHS,
     READ_PATHS,
+    EngineTransactions,
+    bait_action_id,
     bait_slots,
+    bait_tools,
     read_path_params,
     sql_on_every_business_table,
 )
-from tests.canary.write_paths import WRITE_PATHS
+from tests.canary.write_paths import WRITE_PATHS, served_with_tools
+from tests.canary.write_paths import confirm as confirm_through_the_api
 from tests.conftest import integration
 from tests.retrieval.standins import hit
 from vectapilot_api import db
+from vectapilot_api.actions import confirm as confirm_module
+from vectapilot_api.actions.confirm import ConfirmService
+from vectapilot_api.actions.router import ACTION_NOT_FOUND
+from vectapilot_api.actions.types import ActionNotFound, ActionStatus, ConfirmRequest
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import APP_ROLE, Database, business_transaction, create_api_engine
 from vectapilot_api.embeddings.base import EmbeddingSpec
@@ -172,6 +182,14 @@ OWNER_PLANT: Final = (
         "INSERT INTO sandbox_tickets (business_id, customer_ref, category, summary, origin)"
         " VALUES (:b, :customer, 'canary', :canary, 'seed')"
     ),
+    # M5 PR 3: a confirmable action for the actor (write_paths.confirm_the_planted_action). The
+    # owner plants it, as only the owner may choose a pending action's id (`bait_action_id`).
+    text(
+        "INSERT INTO pending_actions (id, business_id, tool, arguments, customer_ref,"
+        " confirm_token_sha256, status, expires_at)"
+        " VALUES (:action_id, :b, 'book', jsonb_build_object('slot_id', CAST(:free_slot AS text)),"
+        " :customer, :token_sha256, 'pending', now() + interval '15 minutes')"
+    ),
 )
 APP_PLANT: Final = (
     text(
@@ -273,6 +291,8 @@ async def plant(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Planted:
         "booking_id": BAIT_BOOKING_ID,
         "order_id": BAIT_ORDER_ID,
         "customer": BAIT_CUSTOMER,
+        "action_id": bait_action_id(planted.business_id),
+        "token_sha256": hashlib.sha256(BAIT_CONFIRM_TOKEN.encode()).hexdigest(),
     }
     async with business_transaction(owner, planted.business_id) as connection:
         await connection.execute(text("INSERT INTO businesses (business_id) VALUES (:b)"), params)
@@ -942,6 +962,86 @@ async def test_red_proof_a_write_into_another_business_is_caught(
         )
 
     assert await sql_on_every_business_table(fresh_engine, b) != before
+
+
+# ── M5 PR 3: confirming another business's action ──────────────────────────────────────────
+# Both businesses hold a pending action for the same bait customer, slot id and token
+# (`BAIT_CONFIRM_TOKEN`); only the action ids differ. So confirming a's id as b fails only through
+# b's business: RLS on the app role, and on the owner's connection only the confirm statements'
+# own `business_id = :business_id`.
+
+
+async def test_confirming_another_businesss_action_is_the_404_with_nothing_changed(
+    fresh_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    a, b = planted
+    before = [await sql_on_every_business_table(fresh_engine, x) for x in planted]
+
+    with served_with_tools(a.business_id, b.business_id) as client:
+        as_b = confirm_through_the_api(client, bait_action_id(a.business_id), b.business_id)
+        after = [await sql_on_every_business_table(fresh_engine, x) for x in planted]
+        as_a = confirm_through_the_api(client, bait_action_id(a.business_id), a.business_id)
+
+    assert (as_b.status_code, as_b.json()) == (
+        404,
+        {"detail": ACTION_NOT_FOUND, "error": "action_not_found"},
+    )
+    assert after == before  # an unknown id for b is logged, never audited: b is unchanged too
+    assert as_a.status_code == 200, as_a.text  # the positive control: a's own token and id work
+    assert await sql_on_every_business_table(fresh_engine, a) != before[0]
+    assert await sql_on_every_business_table(fresh_engine, b) == before[1]
+
+
+def confirm_request() -> ConfirmRequest:
+    return ConfirmRequest.model_validate(
+        {"customer_ref": BAIT_CUSTOMER, "confirm_token": BAIT_CONFIRM_TOKEN}
+    )
+
+
+def owner_confirms(owner: AsyncEngine, me: Planted) -> ConfirmService:
+    """The confirm service on the owner's connection (a superuser: no RLS at all)."""
+    return ConfirmService(EngineTransactions(owner), {me.business_id: bait_tools(me.business_id)})
+
+
+async def test_a_confirm_never_reaches_another_businesss_action_where_rls_cannot_help(
+    owner_engine: AsyncEngine, fresh_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    a, b = planted
+    a_before = await sql_on_every_business_table(fresh_engine, a)
+
+    with pytest.raises(ActionNotFound):
+        await owner_confirms(owner_engine, b).confirm(
+            b.business_id, bait_action_id(a.business_id), confirm_request(), trace_id="1" * 32
+        )
+    assert await sql_on_every_business_table(fresh_engine, a) == a_before
+
+    # The positive control, on the same connection: a's own confirm finds and executes it.
+    done = await owner_confirms(owner_engine, a).confirm(
+        a.business_id, bait_action_id(a.business_id), confirm_request(), trace_id="2" * 32
+    )
+    assert done.status is ActionStatus.EXECUTED
+
+
+LOCK_CLAUSE: Final = "WHERE business_id = :business_id AND "
+
+
+async def test_red_proof_a_confirm_lock_without_its_business_clause_is_caught_as_the_owner(
+    owner_engine: AsyncEngine, planted: tuple[Planted, Planted], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a, b = planted
+    assert LOCK_CLAUSE in confirm_module.LOCK_ACTION.text
+    monkeypatch.setattr(
+        confirm_module,
+        "LOCK_ACTION",
+        text(confirm_module.LOCK_ACTION.text.replace(LOCK_CLAUSE, "WHERE ")),
+    )
+
+    # As b, the lock now reaches a's action: no longer the refusal the check above expects.
+    with pytest.raises(Exception) as caught:
+        await owner_confirms(owner_engine, b).confirm(
+            b.business_id, bait_action_id(a.business_id), confirm_request(), trace_id="3" * 32
+        )
+    assert not isinstance(caught.value, ActionNotFound)
 
 
 # ── The pool-return reset (M3 PR 1, ADR 0009 amendment): a session-level business ───────────

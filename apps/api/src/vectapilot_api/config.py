@@ -171,6 +171,12 @@ class Settings(BaseSettings):
     unchanged). When set, `create_app` reads and validates the whole folder before it serves
     anything (`tools.files.load_tools_dir`), and any missing or invalid business file stops
     startup. None: no business has tools. PR 4 makes it required when the agent route is on."""
+    action_lifetime_seconds: int = Field(default=900, gt=0, le=3600)
+    """`VECTAPILOT_ACTION_LIFETIME_SECONDS`: how long a proposed write waits for its confirm call
+    (W6) [proposal: 15 minutes, a configured value, not a measurement]. The database sets
+    `expires_at` to `now()` plus this. Bounded to migration 0006's CHECK (more than zero, at most
+    one hour), so a typo stops startup instead of refusing every proposal with SQLSTATE 23514
+    (M5 PR 1 review, diego)."""
 
     @classmethod
     def settings_customise_sources(

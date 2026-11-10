@@ -14,6 +14,9 @@ from fastapi.telemetry import TelemetryConfig
 from redis.asyncio import Redis
 
 from vectapilot_api import __version__
+from vectapilot_api.actions.confirm import ConfirmService
+from vectapilot_api.actions.pending import PendingActionStore
+from vectapilot_api.actions.router import router as actions_router
 from vectapilot_api.answer.router import router as answer_router
 from vectapilot_api.answer.service import ANSWER_ALIAS, AnswerService, RagConfig
 from vectapilot_api.config import Settings
@@ -125,6 +128,13 @@ def create_app(
         # follow `rag_retrieval_mode` (vector by default; hybrid fuses both legs in one snapshot).
         search = SearchService(database, runner, retrieval=RetrievalConfig.from_settings(settings))
         app.state.search_service = search
+        # M5 PR 3: pending actions and their confirm route (ADR 0016 decisions 2-3). Without a
+        # tool configuration no business has tools, so nothing can be stored or confirmed.
+        tool_configs = {business: t.config for business, t in (tools or {}).items()}
+        app.state.pending_actions = PendingActionStore(
+            database, tool_configs, lifetime_s=settings.action_lifetime_seconds
+        )
+        app.state.confirm_service = ConfirmService(database, tool_configs)
         async with build_gateway(settings, provider=llm_provider) as gateway:
             app.state.answer_service = AnswerService(
                 search, gateway, RagConfig.from_settings(settings)
@@ -148,6 +158,7 @@ def create_app(
     app.include_router(kb_router)
     app.include_router(search_router)
     app.include_router(answer_router)
+    app.include_router(actions_router)
     install_error_handlers(app)
     return app
 
