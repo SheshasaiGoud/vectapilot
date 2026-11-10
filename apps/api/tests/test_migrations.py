@@ -18,6 +18,7 @@ from sqlalchemy.pool import NullPool
 from tests.canary.catalog import load_key_indexes
 from tests.conftest import integration
 from vectapilot_api.config import MigrationSettings, Settings
+from vectapilot_api.db import APP_ROLE
 from vectapilot_api.ingestion.language_map import (
     FALLBACK_CONFIG,
     TEXT_SEARCH_CONFIGS,
@@ -488,3 +489,166 @@ async def test_migration_0005_as_a_non_superuser_owner_with_bypassrls_backfills_
     assert {row.business_id for row in rows} == set(businesses.values())
     assert len(rows) == 12
     assert all(row.ts_config == text_search_config(row.language) for row in rows)
+
+
+# ── Migration 0006: the sandbox and the tool tables (ADR 0016, M5 PR 1) ─────────────────────
+
+MIGRATION_0006 = VERSIONS / "0006_sandbox_and_tool_tables.py"
+TABLES_0006: Final = (
+    "sandbox_slots",
+    "sandbox_orders",
+    "pending_actions",
+    "sandbox_bookings",
+    "sandbox_tickets",
+    "tool_audit",
+)
+
+
+def migration_0006() -> ModuleType:
+    return load_migration(MIGRATION_0006)
+
+
+def test_migration_0006_upgrade_and_downgrade_run_their_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = migration_0006()
+    recorder = RecordingOp()
+    monkeypatch.setattr(module, "op", recorder)
+
+    module.upgrade()
+    module.downgrade()
+
+    assert recorder.executed == [*module.UPGRADE, *module.DOWNGRADE]
+    assert (module.revision, module.down_revision) == ("0006", "0005")
+
+
+def test_migration_0006_puts_every_table_under_the_business_policy_and_grants_no_delete() -> None:
+    module = migration_0006()
+
+    assert module.TABLES == TABLES_0006
+    assert module.APP_ROLE == APP_ROLE
+    for table in TABLES_0006:
+        for statement in module.row_security(table):
+            assert statement in module.UPGRADE, statement
+    grants = " ".join(module.GRANTS)
+    assert "DELETE" not in grants and "TRUNCATE" not in grants and " ALL " not in grants
+    assert module.DOWNGRADE == (
+        "DROP TABLE tool_audit, sandbox_tickets, sandbox_bookings, pending_actions,"
+        " sandbox_orders, sandbox_slots",
+    )
+    # `op.execute` wraps each string in `text()`: no ":name" in it may turn into a bind.
+    dialect = postgresql.asyncpg.dialect()  # type: ignore[no-untyped-call]
+    for statement in (*module.UPGRADE, *module.DOWNGRADE):
+        compiled = text(statement).compile(dialect=dialect)
+        assert (compiled.params, str(compiled)) == ({}, statement)
+
+
+SCHEMA_0006: Final = {
+    "tables": text(
+        "SELECT relname::text, relrowsecurity, relforcerowsecurity FROM pg_catalog.pg_class"
+        " WHERE relname = ANY(CAST(:tables AS text[])) AND relkind = 'r' ORDER BY 1"
+    ),
+    "columns": text(
+        "SELECT c.relname::text, a.attname::text, format_type(a.atttypid, a.atttypmod),"
+        " a.attnotnull, pg_get_expr(d.adbin, d.adrelid)"
+        " FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid"
+        " LEFT JOIN pg_catalog.pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum"
+        " WHERE c.relname = ANY(CAST(:tables AS text[])) AND a.attnum > 0"
+        " AND NOT a.attisdropped ORDER BY 1, 2"
+    ),
+    "constraints": text(
+        "SELECT conrelid::regclass::text, conname::text, contype::text,"
+        " pg_get_constraintdef(oid) FROM pg_catalog.pg_constraint"
+        " WHERE conrelid::regclass::text = ANY(CAST(:tables AS text[])) ORDER BY 1, 2"
+    ),
+    "indexes": text(
+        "SELECT tablename::text, indexname::text, indexdef FROM pg_catalog.pg_indexes"
+        " WHERE tablename = ANY(CAST(:tables AS text[])) ORDER BY 1, 2"
+    ),
+    "policies": text(
+        "SELECT tablename::text, policyname::text, permissive, roles::text[], cmd, qual,"
+        " with_check FROM pg_catalog.pg_policies"
+        " WHERE tablename = ANY(CAST(:tables AS text[])) ORDER BY 1, 2"
+    ),
+    "table_grants": text(
+        "SELECT table_name::text, privilege_type::text FROM information_schema.role_table_grants"
+        " WHERE grantee = :role AND table_name = ANY(CAST(:tables AS text[])) ORDER BY 1, 2"
+    ),
+    "column_grants": text(
+        "SELECT table_name::text, column_name::text, privilege_type::text"
+        " FROM information_schema.column_privileges"
+        " WHERE grantee = :role AND privilege_type <> 'SELECT'"
+        " AND table_name = ANY(CAST(:tables AS text[])) ORDER BY 1, 2, 3"
+    ),
+}
+
+
+async def schema_0006(connection: AsyncConnection) -> dict[str, list[tuple[object, ...]]]:
+    """Everything 0006 creates, as catalog rows: tables, columns, constraints, indexes, policies
+    and the app role's grants."""
+    params = {"tables": list(TABLES_0006), "role": APP_ROLE}
+    return {
+        name: [tuple(row) for row in (await connection.execute(query, params)).all()]
+        for name, query in SCHEMA_0006.items()
+    }
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0006_downgrades_and_upgrades_to_the_same_schema() -> None:
+    # CI ran `alembic upgrade head`: the tables are there. Their own downgrade and upgrade SQL, in
+    # one transaction that is rolled back; the catalog afterwards equals the one before, so the
+    # database at head is exactly this file (grants and policies included).
+    module = migration_0006()
+    async with owner_rolled_back() as connection:
+        before = await schema_0006(connection)
+        for statement in module.DOWNGRADE:
+            await connection.execute(text(statement))  # as op.execute does
+        gone = await schema_0006(connection)
+        for statement in module.UPGRADE:
+            await connection.execute(text(statement))  # as op.execute does
+        after = await schema_0006(connection)
+
+    assert before["tables"] == [(table, True, True) for table in sorted(TABLES_0006)]
+    assert all(rows == [] for rows in gone.values()), gone
+    assert after == before
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0006s_app_grants_are_the_decided_ones() -> None:
+    module = migration_0006()
+    async with owner_rolled_back() as connection:
+        schema = await schema_0006(connection)
+
+    assert set(schema["table_grants"]) == {(table, "SELECT") for table in TABLES_0006}
+    expected = {
+        ("pending_actions", "INSERT", module.ACTION_INSERT_COLUMNS),
+        ("pending_actions", "UPDATE", module.ACTION_UPDATE_COLUMNS),
+        ("sandbox_bookings", "INSERT", module.BOOKING_INSERT_COLUMNS),
+        ("sandbox_bookings", "UPDATE", module.BOOKING_UPDATE_COLUMNS),
+        ("sandbox_tickets", "INSERT", module.TICKET_INSERT_COLUMNS),
+        ("tool_audit", "INSERT", module.AUDIT_INSERT_COLUMNS),
+    }
+    assert set(schema["column_grants"]) == {
+        (table, column, privilege) for table, privilege, columns in expected for column in columns
+    }
+    # Never a column the database fills or only a confirm may set; a uuid key is never chosen
+    # by the app (the canary's random-uuid exception relies on it), only a booking's text id.
+    inserted = {(t, c) for t, c, p in schema["column_grants"] if p == "INSERT"}
+    filled = {"created_at", "confirmed_at", "confirm_trace_id", "finished_at", "result"}
+    assert not {c for _, c in inserted} & (filled | {"retired_by_action_id", "failure_reason"})
+    assert {t for t, c in inserted if c == "id"} == {"sandbox_bookings"}
+    restrictive = [p for p in schema["policies"] if p[2] == "RESTRICTIVE"]
+    assert restrictive == [
+        (
+            table,
+            "app_writes_are_actions",
+            "RESTRICTIVE",
+            [APP_ROLE],
+            "INSERT",
+            None,
+            "(origin = 'action'::text)",
+        )
+        for table in ("sandbox_bookings", "sandbox_tickets")
+    ]

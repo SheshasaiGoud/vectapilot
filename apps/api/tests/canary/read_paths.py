@@ -98,6 +98,17 @@ BAIT: Final = (
 """The text of each business's `bait` chunk (`test_leakage.plant`) and the question PR 6's API
 read paths ask. Shared on purpose; it holds no business id and no canary."""
 
+BAIT_SLOT_ID: Final = "S-BAIT"
+BAIT_BOOKING_ID: Final = "B-BAIT"
+BAIT_ORDER_ID: Final = "BAIT-1"
+BAIT_CUSTOMER: Final = "cust-bait"
+"""The sandbox bait (M5 PR 1, ADR 0016 decision 6): `test_leakage.plant` gives both businesses a
+slot, a booking of it and an order under these same ids, for the same customer, so a tool read
+path (PR 2: `check_slots`, `order_status`, the proposal checks) has the other business's row
+under the very id it asks for. Each business's rows carry its own canary: the slot's label (and
+so the booking, through its slot: bookings have no free-text column, Q7) and the order's note. A
+path that leaked would show the other canary."""
+
 _STORED_MODELS: Final = text(
     "SELECT DISTINCT embedding_model FROM chunks WHERE business_id = :b ORDER BY 1"
 )

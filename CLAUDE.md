@@ -94,6 +94,8 @@ API (run inside `apps/api/`, Python 3.12 managed by uv):
   from alembic.ini); the API itself connects as `vectapilot_app` (ADR 0009)
 - `uv run python -m vectapilot_api.evalset check|ready|report|lookup|show|freeze|import-friends` —
   eval v0 tools (ADR 0012), no model or network; `freeze` writes files, once per dataset version
+- `VECTAPILOT_ENVIRONMENT=local uv run python -m vectapilot_api.tools sandbox reset --business <id>` —
+  reseed one business's M5 sandbox (owner role; local, test and ci only; never touches `tool_audit`)
 - `uv run python -m vectapilot_api.evalrun run|ingest|summarize|label-sheet` — the eval harness
   (ADR 0013; runbook `docs/learning/m2-eval-run.md`). `run --split dev|test` is a dry run unless
   `--live --max-usd X` (≤ $1.00, typed again at a terminal): shesha's alone, agents never pass `--live`.
@@ -120,6 +122,7 @@ docs/learning/       guides for [HAND-WRITE] tasks
 docs/plans/          per-PR acceptance checks for the current milestone
 docs/notes/          shesha's own write-ups (e.g. M1's "what I measured")
 data/sample/          synthetic corpus: two fictional businesses, one folder per business_id
+data/sandbox/         M5 sandbox per business: tools.json (enabled tools, emergency guidance), seed.json
 evals/               datasets (synthetic: gateway_smoke, support_qa = eval v0); live runs committed
                      under evals/reports/<dataset>/<version>/<run>/ (support_qa's test-run ledger:
                      evals/reports/support_qa/test-runs.jsonl); dry runs in git-ignored evals/reports/tmp/

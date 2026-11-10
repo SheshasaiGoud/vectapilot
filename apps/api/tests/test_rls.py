@@ -371,10 +371,21 @@ async def test_the_app_role_is_safe_and_owns_nothing(
             text("SELECT has_schema_privilege(current_user, 'public', 'CREATE')")
         )
     write = {"SELECT", "INSERT", "UPDATE", "DELETE"}
+    # Migration 0006's tables: SELECT on the table, INSERT and UPDATE on named columns only
+    # (information_schema.column_privileges; tests/test_migrations.py checks those).
+    sandbox = {
+        "sandbox_slots",
+        "sandbox_orders",
+        "pending_actions",
+        "sandbox_bookings",
+        "sandbox_tickets",
+        "tool_audit",
+    }
     assert {tuple(row) for row in grants} == (
         {("businesses", "SELECT"), ("llm_calls", "SELECT"), ("llm_calls", "INSERT")}
         | {("documents", privilege) for privilege in write}
         | {("chunks", privilege) for privilege in write}
+        | {(table, "SELECT") for table in sandbox}
     )
     assert can_create is False
 

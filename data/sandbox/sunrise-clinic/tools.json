@@ -1,0 +1,37 @@
+{
+  "business_id": "sunrise-clinic",
+  "synthetic": true,
+  "business_type": "human_healthcare",
+  "timezone": "Asia/Kolkata",
+  "sandbox_date": "2026-11-16",
+  "enabled_tools": [
+    "book",
+    "check_slots",
+    "create_ticket",
+    "reschedule"
+  ],
+  "services": [
+    {
+      "id": "general_consultation",
+      "name": "General consultation"
+    },
+    {
+      "id": "childrens_health",
+      "name": "Children's health"
+    },
+    {
+      "id": "physiotherapy",
+      "name": "Physiotherapy"
+    },
+    {
+      "id": "vaccination",
+      "name": "Vaccinations"
+    }
+  ],
+  "emergency_guidance": [
+    "We cannot treat emergencies.",
+    "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+    "You do not have to handle this alone.",
+    "Do not wait for a reply in the chat."
+  ]
+}

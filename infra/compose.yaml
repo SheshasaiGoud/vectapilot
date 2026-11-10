@@ -16,6 +16,9 @@ x-api-environment: &api-environment
   VECTAPILOT_DATABASE_URL: *app-database-url
   VECTAPILOT_REDIS_URL: redis://redis:6379/0
   VECTAPILOT_LOG_LEVEL: ${VECTAPILOT_LOG_LEVEL:-INFO}
+  # M5 (ADR 0016 decision 1): the per-business tool configurations and sandbox seeds, mounted
+  # read-only below. The API validates the whole folder at startup.
+  VECTAPILOT_TOOLS_CONFIG_DIR: /app/data/sandbox
 
 services:
   postgres:
@@ -63,6 +66,14 @@ services:
     build: ../apps/api
     environment: *api-environment
     ports: ["127.0.0.1:8000:8000"]
+    # Read-only: the API can read the synthetic sandbox configuration but never change it. A bind
+    # mount, not a copy into the image. Takes effect at the next `make up` (image rebuild plus
+    # recreate; volumes kept). The image bakes migrations/, so until it is rebuilt with 0006, do
+    # not run `docker compose up` or `make migrate`: the old image's migrate job cannot find
+    # revision 0006 and the API would never start. `docker compose restart api` is safe (it does
+    # not re-run migrate).
+    volumes:
+      - ../data/sandbox:/app/data/sandbox:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
