@@ -25,6 +25,24 @@
       "name": "Grooming"
     }
   ],
+  "ticket_categories": [
+    {
+      "id": "appointment",
+      "name": "Clinic appointments"
+    },
+    {
+      "id": "order",
+      "name": "Shop orders"
+    },
+    {
+      "id": "feedback",
+      "name": "Feedback"
+    },
+    {
+      "id": "other",
+      "name": "Something else"
+    }
+  ],
   "emergency_guidance": [
     "During clinic hours, call our emergency line: +91 00000 20911 (fictional). Do not wait for a reply in the chat.",
     "Outside clinic hours",

@@ -19,9 +19,10 @@ read-only bind mount at `/app/data/sandbox`; the image is unchanged). When the s
 every business's two files must be present and valid, or the API does not start.
 
 - **`tools.json`**: the enabled tools (a subset of `book`, `check_slots`, `create_ticket`,
-  `order_status`, `reschedule`), the closed list of services, the business type (a test checks it
-  equals the corpus manifest's), the timezone, the sandbox date (the sandbox's "today") and the
-  emergency guidance. Each guidance line is copied verbatim from that business's synthetic
+  `order_status`, `reschedule`), the closed list of services, the closed list of ticket categories
+  (`create_ticket`'s `category`, M5 PR 2; a proposal, names synthetic), the business type (a test
+  checks it equals the corpus manifest's), the timezone, the sandbox date (the sandbox's "today")
+  and the emergency guidance. Each guidance line is copied verbatim from that business's synthetic
   `data/sample/<business_id>/emergency.md`: whole sentences or a heading, never a fragment (a
   test checks it, because a cut can drop a "Do not"). No safety text is written here, and the
   lines are shown as separate lines, never joined.

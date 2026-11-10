@@ -72,8 +72,8 @@ written without an explicit confirmation, executed exactly once.
   M8).
 - **W4 · Every write needs confirmation,** `create_ticket` included; there is no exception list.
 - **W5 · Exactly once** [D4]. The action id is the idempotency key. Confirm locks the action,
-  re-runs the full proposal validation inside the write transaction (booking exists, is `active` and
-  is the customer's, locked `FOR UPDATE`; slot free and in the future by the sandbox clock; tool
+  re-runs the full proposal validation inside the write transaction (booking exists, is `active`,
+  is the customer's and has not started by the sandbox clock, locked `FOR UPDATE`; slot free and in the future by the sandbox clock; tool
   still enabled), writes, inserts the `executed` audit row and marks the action `executed` with its
   result, all in one transaction. A second confirm returns the stored result.
 - **W6 · Expiry and ownership.** `expires_at` is set by the database (`now()` plus a configured 15
@@ -251,6 +251,8 @@ Measure:  PR 7 close-out (after H1, H2, the freeze and M2 step 11's Anthropic ke
   - `book(slot_id)`, `reschedule(booking_id, new_slot_id)`, `create_ticket(category, summary ≤ 500
     chars)`; ids have a pattern and a maximum length; `category` is a closed enum.
   - `order_status`, `reschedule` and the proposal checks see only the request's `customer_ref`.
+  - `reschedule` moves only a booking whose slot has not started by the sandbox clock; a started
+    one is `not_found`, byte-identical to a missing booking [decided 2026-11-10, item 3].
 - **The executor:** injects the context (W7), runs reads in snapshot transactions with server
   timeouts (W8, W9), caps observations (W10), audits (W12), and returns typed results
   or typed errors (`invalid_arguments`, `not_found`, `unavailable`, `timeout`, `not_enabled`) in
@@ -310,6 +312,9 @@ Measure:  PR 7 close-out (after H1, H2, the freeze and M2 step 11's Anthropic ke
   treats a business as health if either says so, or startup refuses a mismatch, so a `tools.json`
   typo can never switch W11 off for a clinic [PR 1 review, zara]. Guidance lines are shown as
   separate lines, never joined.
+- **Confirmations are English-only until M8's widget** [decided 2026-11-10, item 2]: the
+  `confirmation_required` summary is PR 2's fixed English template whatever the customer's
+  language. PR 4 documents this as a known gap, not a bug.
 - **`agent_router`** [D7], default `off`. `on`: `route_message` first; safety and other hand-off
   intents hand off before any tool; `action_request` reaches the loop if tools are enabled;
   `rag` calls `AnswerService`. Startup refuses `on` without a committed live-embedding artifact.
@@ -407,7 +412,8 @@ within $1.00 and counts towards D8; commit each folder before the next live run.
    --live`, then `summarize`.
 4. **Labels:** false success claims on the label sheet (cut order 3).
 5. **The note:** every figure with dataset version, commit and config; write counts as `k of n`
-   write rows; misses, hand-offs and safety misses by id ("safety floor not exercised"); spend.
+   write rows; misses, hand-offs and safety misses by id ("safety floor not exercised"); spend;
+   and the known gap that confirmation summaries are English-only until M8 [decided 2026-11-10].
 6. **The H1/H2 explain-backs,** the M5 study PDF and the quiz.
 - **Done when** "How we will know M5 worked" is complete, ADR 0016 has its "Built" section, and
   CLAUDE.md says M5 is complete.
@@ -464,6 +470,17 @@ The options below stay as the record of what was weighed.
   booking), split 50/50 before any is written; one live dev and one test run with `small`; $1.00
   in total. (c) **As (b), $2.00,** plus a `large` comparison. **Recommendation: (b).**
   **Decided: (b).** shesha writes ≥ 40 scenarios; one live dev and one live test run; $1.00 total.
+
+## Decided 2026-11-10 (shesha, M5 PR 2 review)
+1. **Ticket categories stay per business in `tools.json`,** as built (rule 9). No code change.
+2. **Write summaries stay English-only until M8's widget.** A known gap, recorded in
+   `tools/spec.py`'s docstring; PR 4 and the M5 note say confirmations are English-only until then.
+3. **`reschedule` refuses a booking whose slot has already started by the sandbox clock**
+   (`starts_at < sandbox_now`) as `not_found`, byte-identical to a missing booking (no existence
+   oracle). The filter is in `OWN_ACTIVE_BOOKING`'s SQL, so no row is read and even the envelope's
+   row ids match; a booking starting exactly at "now" is not started (as `book`), so it can be
+   moved. PR 3's confirm inherits it through W5's re-validation. Tests: unit (days ago, 1 µs ago,
+   exactly now, future) and integration (days ago, in progress, exactly now, future).
 
 ## Risks
 - **Small n.** About 20 test scenarios (an estimate under D8 (b)): 20 of 20 has a Wilson lower

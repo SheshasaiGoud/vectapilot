@@ -24,6 +24,7 @@ import secrets
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Final, cast
 
 import pytest
@@ -48,10 +49,12 @@ from tests.canary.read_paths import (
     BAIT_BOOKING_ID,
     BAIT_CUSTOMER,
     BAIT_ORDER_ID,
-    BAIT_SLOT_ID,
+    BAIT_SERVICE,
+    BAIT_SLOT_IDS,
     BAIT_WORD,
     OWNER_CONNECTION_PATHS,
     READ_PATHS,
+    bait_slots,
     read_path_params,
     sql_on_every_business_table,
 )
@@ -72,6 +75,10 @@ from vectapilot_api.kb.types import ContentKind, NewChunk, NewDocument
 from vectapilot_api.main import create_app
 from vectapilot_api.retrieval import vector as retrieval_vector
 from vectapilot_api.retrieval.types import MAX_K, SearchHit, TextQuery, VectorQuery
+from vectapilot_api.tools import book as tool_book
+from vectapilot_api.tools import check_slots as tool_check_slots
+from vectapilot_api.tools import order_status as tool_order_status
+from vectapilot_api.tools import reschedule as tool_reschedule
 
 pytestmark = [integration, pytest.mark.anyio]
 
@@ -138,18 +145,24 @@ PLANT: Final = (
         " :canary)"
     ),
 )
-# M5 PR 1: the sandbox bait (read_paths.py, "BAIT_SLOT_ID"). The app role may not write slots,
+# M5 PR 1: the sandbox bait (read_paths.py, "BAIT_SLOT_IDS"). The app role may not write slots,
 # orders or seed-origin rows (migration 0006's grants and restrictive policy), so the owner plants
 # those; the app role plants what it may write itself, a pending action and an audit row, which
-# also proves those grants under RLS.
+# also proves those grants under RLS. M5 PR 2: two slots per business, and each business books
+# the one the other leaves free (`bait_slots`), so a booking check without its own business
+# clause is caught too.
 OWNER_PLANT: Final = (
     text(
         "INSERT INTO sandbox_slots (business_id, id, service, starts_at, duration_minutes, label)"
-        " VALUES (:b, :slot_id, 'canary', now() + interval '1 day', 15, :canary)"
+        " VALUES (:b, :slot_a, :service, now() + interval '1 day', 15, :canary)"
+    ),
+    text(
+        "INSERT INTO sandbox_slots (business_id, id, service, starts_at, duration_minutes, label)"
+        " VALUES (:b, :slot_b, :service, now() + interval '1 day 1 hour', 15, :canary)"
     ),
     text(
         "INSERT INTO sandbox_bookings (business_id, id, slot_id, customer_ref, status, origin)"
-        " VALUES (:b, :booking_id, :slot_id, :customer, 'active', 'seed')"
+        " VALUES (:b, :booking_id, :booked_slot, :customer, 'active', 'seed')"
     ),
     text(
         "INSERT INTO sandbox_orders (business_id, id, customer_ref, status, items, note,"
@@ -164,7 +177,7 @@ APP_PLANT: Final = (
     text(
         "INSERT INTO pending_actions (business_id, tool, arguments, customer_ref,"
         " confirm_token_sha256, status, expires_at)"
-        " VALUES (:b, 'book', jsonb_build_object('slot_id', CAST(:slot_id AS text)), :customer,"
+        " VALUES (:b, 'book', jsonb_build_object('slot_id', CAST(:free_slot AS text)), :customer,"
         " repeat('e', 64), 'pending', now() + interval '15 minutes')"
     ),
     text(
@@ -241,6 +254,7 @@ def configured_embedding() -> EmbeddingSpec:
 async def plant(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Planted:
     planted = Planted(f"canary-{letter}-{secrets.token_hex(4)}", f"canary-{secrets.token_hex(8)}")
     spec = configured_embedding()
+    booked, free = bait_slots(planted.business_id)
     params = {
         "b": planted.business_id,
         "canary": planted.canary,
@@ -251,7 +265,11 @@ async def plant(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Planted:
         "dimension": spec.dimension,
         "language": PLANT_LANGUAGE,
         "ts_config": text_search_config(PLANT_LANGUAGE),
-        "slot_id": BAIT_SLOT_ID,
+        "slot_a": BAIT_SLOT_IDS[0],
+        "slot_b": BAIT_SLOT_IDS[1],
+        "booked_slot": booked,
+        "free_slot": free,
+        "service": BAIT_SERVICE,
         "booking_id": BAIT_BOOKING_ID,
         "order_id": BAIT_ORDER_ID,
         "customer": BAIT_CUSTOMER,
@@ -689,6 +707,89 @@ async def test_red_proof_a_business_filter_after_the_limit_is_caught_as_the_owne
     # nothing back for that model, so the positive control turns red, as a or as b.
     at_1 = await problems(1)
     assert any("shows nothing of" in problem for problem in at_1), at_1
+
+
+# M5 PR 2: every business clause of every tool statement, the correlated booking checks and the
+# reschedule's join included. Under RLS (the app role) a statement that lost one still shows only
+# the business's rows; on the owner's connection it turns red in one of two ways. A lost outer
+# clause reads the other business's bait under the same id: its id shows (LEAK). A lost booking
+# or join clause pairs `me`'s row with the other business's (the bait is asymmetric,
+# `read_paths.bait_slots`): `me`'s free slot looks taken or its booking ambiguous, so the path
+# shows nothing of `me` (BLIND).
+LEAK: Final = "leak"
+BLIND: Final = "blind"
+
+
+@dataclass(frozen=True)
+class ToolClause:
+    path: str
+    module: ModuleType
+    statement: str
+    clause: str
+    turns_red_as: str
+
+
+OUTER: Final = "s.business_id = :business_id AND "
+BOOKING_CHECK: Final = "b.business_id = s.business_id AND "
+TOOL_CLAUSES: Final = {
+    "check_slots": ToolClause("tool check_slots", tool_check_slots, "FREE_SLOTS", OUTER, LEAK),
+    "check_slots booking check": ToolClause(
+        "tool check_slots", tool_check_slots, "FREE_SLOTS", BOOKING_CHECK, BLIND
+    ),
+    "order_status": ToolClause(
+        "tool order_status", tool_order_status, "OWN_ORDER", "business_id = :business_id AND ", LEAK
+    ),
+    "book": ToolClause("tool book (propose)", tool_book, "SLOT_FOR_BOOKING", OUTER, LEAK),
+    "book booking check": ToolClause(
+        "tool book (propose)", tool_book, "SLOT_FOR_BOOKING", BOOKING_CHECK, BLIND
+    ),
+    "reschedule": ToolClause(
+        "tool reschedule (propose)",
+        tool_reschedule,
+        "OWN_ACTIVE_BOOKING",
+        "b.business_id = :business_id AND ",
+        LEAK,
+    ),
+    "reschedule join": ToolClause(
+        "tool reschedule (propose)",
+        tool_reschedule,
+        "OWN_ACTIVE_BOOKING",
+        "s.business_id = b.business_id AND ",
+        BLIND,
+    ),
+    "reschedule new slot": ToolClause(
+        "tool reschedule (propose)", tool_book, "SLOT_FOR_BOOKING", OUTER, LEAK
+    ),
+    "reschedule new slot booking check": ToolClause(
+        "tool reschedule (propose)", tool_book, "SLOT_FOR_BOOKING", BOOKING_CHECK, BLIND
+    ),
+}
+
+
+@pytest.mark.parametrize("proof", sorted(TOOL_CLAUSES))
+async def test_red_proof_a_tool_statement_without_its_business_clause_is_caught_as_the_owner(
+    owner_engine: AsyncEngine,
+    fresh_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    monkeypatch: pytest.MonkeyPatch,
+    proof: str,
+) -> None:
+    a, b = planted
+    target = TOOL_CLAUSES[proof]
+    statement = str(getattr(target.module, target.statement))
+    assert target.clause in statement, f"{proof}'s business clause changed: update this proof"
+    monkeypatch.setattr(
+        target.module, target.statement, text(statement.replace(target.clause, "", 1))
+    )
+
+    under_rls = checks.canary_leaks(await READ_PATHS[target.path](fresh_engine, a), a, b)
+    as_owner = checks.canary_leaks(await OWNER_CONNECTION_PATHS[target.path](owner_engine, a), a, b)
+
+    assert under_rls == []  # RLS hides the missing clause...
+    if target.turns_red_as == LEAK:  # ...the owner does not
+        assert any(b.business_id in problem for problem in as_owner), as_owner
+    else:
+        assert any(f"shows nothing of {a.business_id}" in p for p in as_owner), as_owner
 
 
 class OwnerDatabase:

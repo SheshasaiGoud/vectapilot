@@ -8,8 +8,9 @@ The paths: plain SQL on every business table, M2 H1's top-k vector search (`m2/r
 H1's full-text search (`text_search`, M3 PR 3), M3 PR 4's hybrid search (both legs and M3 H2's
 `rrf_fuse` in one snapshot, `search.fused_search`), and PR 6's two routes that show chunk text
 (`GET /v1/kb/search`, `POST /v1/answer`, through the real app with that business's
-`X-Business-Id`), each in vector mode and in hybrid mode (M3 PR 4). Add yours here, with no other
-change.
+`X-Business-Id`), each in vector mode and in hybrid mode (M3 PR 4), and M5 PR 2's tools
+(`check_slots`, `order_status` and the `book` and `reschedule` proposal checks, through the
+executor, over the sandbox bait). Add yours here, with no other change.
 
 **The business clause itself (M3 PR 3, ADR 0009 amendment).** Every path above runs as the app
 role, under RLS, so it would pass with a search whose SQL forgot `c.business_id = :business_id`:
@@ -48,12 +49,14 @@ No other `xfail` belongs anywhere in tests/canary/: the gate refuses any other r
 """
 
 from collections.abc import Awaitable, Callable, Iterable, Mapping
+from contextlib import AbstractAsyncContextManager
+from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from scripts.canary_gate import pending_reason
 from tests.answer.providers import CitingProvider
@@ -62,12 +65,16 @@ from tests.canary.checks import Planted
 from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import Settings
 from vectapilot_api.db import business_transaction
+from vectapilot_api.intents.policy import BusinessType
 from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.fusion import RRF_K, rrf_fuse
 from vectapilot_api.retrieval.search import fused_search
 from vectapilot_api.retrieval.text import text_search
 from vectapilot_api.retrieval.types import MAX_K, RetrievalMode, TextQuery, VectorQuery
 from vectapilot_api.retrieval.vector import vector_search
+from vectapilot_api.tools.config import Service, TicketCategory, ToolName, ToolsConfig
+from vectapilot_api.tools.executor import ObservationCaps, ToolExecutor
+from vectapilot_api.tools.types import ToolContext, ToolKind
 
 ReadPath = Callable[[AsyncEngine, Planted], Awaitable[Mapping[str, str]]]
 """(the app role's engine, the business to act as) -> {label: everything the path returned}."""
@@ -98,16 +105,34 @@ BAIT: Final = (
 """The text of each business's `bait` chunk (`test_leakage.plant`) and the question PR 6's API
 read paths ask. Shared on purpose; it holds no business id and no canary."""
 
-BAIT_SLOT_ID: Final = "S-BAIT"
+BAIT_SLOT_IDS: Final = ("S-BAIT-A", "S-BAIT-B")
 BAIT_BOOKING_ID: Final = "B-BAIT"
 BAIT_ORDER_ID: Final = "BAIT-1"
 BAIT_CUSTOMER: Final = "cust-bait"
-"""The sandbox bait (M5 PR 1, ADR 0016 decision 6): `test_leakage.plant` gives both businesses a
-slot, a booking of it and an order under these same ids, for the same customer, so a tool read
-path (PR 2: `check_slots`, `order_status`, the proposal checks) has the other business's row
-under the very id it asks for. Each business's rows carry its own canary: the slot's label (and
+BAIT_SERVICE: Final = "canary"
+"""The sandbox bait (M5 PR 1, ADR 0016 decision 6): `test_leakage.plant` gives both businesses
+the same two slots, a booking and an order under these same ids, for the same customer, so a tool
+read path (PR 2: `check_slots`, `order_status`, the proposal checks) has the other business's row
+under the very id it asks for. Each business's rows carry its own canary: the slots' labels (and
 so the booking, through its slot: bookings have no free-text column, Q7) and the order's note. A
-path that leaked would show the other canary."""
+path that leaked would show the other canary.
+
+**The booking is asymmetric** (M5 PR 2, zara's review): business `a` books `S-BAIT-A` and `b`
+books `S-BAIT-B` (`bait_slots`), so each business's free slot is the one the other business has
+booked. A correlated booking check that lost its own business clause (`b.business_id =
+s.business_id` in `check_slots`' NOT EXISTS or `book`'s EXISTS) then sees the other business's
+booking of `me`'s free slot: `check_slots` lists nothing and the proposals are refused, so the
+positive control turns red. With symmetric bait (both book the same id) that clause was
+invisible: the other business's booking only ever hid a slot `me` had booked anyway."""
+
+
+def bait_slots(business_id: str) -> tuple[str, str]:
+    """`(booked, free)`: the bait slot `test_leakage.plant` books for a planted business, and its
+    other, free one. A planted business id is `canary-<letter>-<hex>`; `a` books the first."""
+    letter = business_id.split("-")[1]
+    booked = {"a": 0, "b": 1}[letter]
+    return BAIT_SLOT_IDS[booked], BAIT_SLOT_IDS[1 - booked]
+
 
 _STORED_MODELS: Final = text(
     "SELECT DISTINCT embedding_model FROM chunks WHERE business_id = :b ORDER BY 1"
@@ -294,6 +319,128 @@ async def answer_through_the_api_hybrid(engine: AsyncEngine, me: Planted) -> Map
     return await _answer_through_the_api(me, "hybrid", "POST /v1/answer (hybrid)")
 
 
+class EngineTransactions:
+    """`Database.business_transaction` on a bare engine, without the app's role check: the app
+    role's engine (under RLS) or the owner's (a superuser, where RLS never applies and only each
+    tool statement's own `business_id = :business_id` keeps the other business out)."""
+
+    def __init__(self, engine: AsyncEngine) -> None:
+        self.engine = engine
+
+    def business_transaction(
+        self, business_id: str, *, snapshot: bool = False
+    ) -> AbstractAsyncContextManager[AsyncConnection]:
+        return business_transaction(self.engine, business_id, snapshot=snapshot)
+
+
+def bait_tools(business_id: str) -> ToolsConfig:
+    """A planted business's tool configuration: every tool, the bait's one service, UTC, and
+    today (UTC) as the sandbox date, so the bait slots (`now() + 1 day`) are in the future and in
+    `check_slots`' range. Built here: a planted business has no `tools.json`."""
+    return ToolsConfig(
+        business_id=business_id,
+        synthetic=True,
+        business_type=BusinessType.VETERINARY,
+        timezone="UTC",
+        sandbox_date=datetime.now(UTC).date(),
+        enabled_tools=tuple(ToolName),
+        services=(Service(id=BAIT_SERVICE, name="Canary service"),),
+        ticket_categories=(TicketCategory(id="other", name="Something else"),),
+        emergency_guidance=("Call the canary line.",),
+    )
+
+
+async def _through_the_executor(
+    engine: AsyncEngine, me: Planted, label: str, tool: ToolName, arguments: dict[str, str], k: int
+) -> dict[str, str]:
+    """`tool` as `me`'s bait customer through `ToolExecutor`: its observation, then the business
+    ids of every row it read (the envelope, ADR 0016 decision 1). The observation shows `me`'s
+    canary where the tool shows free text (a slot label, an order note); a proposal's summary
+    never does (W3), so for those the rows' ids are the positive control, and a statement that
+    lost its business clause would add the other business's id. `k` caps the rows shown
+    (`ObservationCaps.max_rows`): at 1, a filter applied after the limit shows nothing of `me`.
+
+    Every bait proposal should succeed. A refused one keeps the other businesses' ids (a leak
+    still shows) but drops `me`'s, so the positive control turns red instead of the path
+    raising: that is how a lost booking clause (`bait_slots`) is caught."""
+    tools = ToolExecutor(
+        EngineTransactions(engine),
+        bait_tools(me.business_id),
+        caps=ObservationCaps(max_rows=min(k, 20)),
+    )
+    context = ToolContext(business_id=me.business_id, customer_ref=BAIT_CUSTOMER)
+    if tools.kind(tool) is ToolKind.READ:
+        envelope = await tools.run(tool, arguments, context)
+        rows = ",".join(sorted(envelope.business_ids))
+        return {label: f"{envelope.observation}\nrows: {rows}"}
+    envelope = await tools.propose(tool, arguments, context)
+    if envelope.proposal is not None:
+        rows = ",".join(sorted(envelope.business_ids))
+        return {label: f"{envelope.observation}\nrows: {rows}"}
+    foreign = ",".join(sorted(envelope.business_ids - {me.business_id}))
+    return {label: f"{envelope.observation}\nno proposal; rows of other businesses: {foreign}"}
+
+
+async def check_slots_as_the_bait_customer(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """`check_slots` over today and the next 13 days: `me`'s free bait slot, labelled with `me`'s
+    canary (the booked one is not free). The other business's free bait slot is in the same time
+    window, so a statement without its outer business clause would list it too; one without its
+    booking check's business clause would hide `me`'s (the other business booked that id)."""
+    today = datetime.now(UTC).date()
+    arguments = {
+        "date_from": today.isoformat(),
+        "date_to": (today + timedelta(days=13)).isoformat(),
+    }
+    return await _through_the_executor(
+        engine, me, "tool check_slots", ToolName.CHECK_SLOTS, arguments, k
+    )
+
+
+async def order_status_as_the_bait_customer(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """`order_status` for the shared bait order id: `me`'s order, its note `me`'s canary."""
+    arguments = {"order_id": BAIT_ORDER_ID}
+    return await _through_the_executor(
+        engine, me, "tool order_status", ToolName.ORDER_STATUS, arguments, k
+    )
+
+
+async def book_proposal_as_the_bait_customer(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """`propose(book)` onto `me`'s free bait slot: the proposal checks read the slot and its
+    bookings by id, so a missing business clause would read the other business's slot (a leak)
+    or its booking of that id (a refusal: the positive control turns red)."""
+    arguments = {"slot_id": bait_slots(me.business_id)[1]}
+    return await _through_the_executor(
+        engine, me, "tool book (propose)", ToolName.BOOK, arguments, k
+    )
+
+
+async def reschedule_proposal_as_the_bait_customer(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """`propose(reschedule)` of the shared bait booking onto `me`'s free bait slot: the booking
+    (by business, customer and id, joined to its slot) and the slot are both read by shared ids."""
+    arguments = {"booking_id": BAIT_BOOKING_ID, "new_slot_id": bait_slots(me.business_id)[1]}
+    return await _through_the_executor(
+        engine, me, "tool reschedule (propose)", ToolName.RESCHEDULE, arguments, k
+    )
+
+
+TOOL_PATHS: Final[Mapping[str, SearchLegPath]] = {
+    "tool check_slots": check_slots_as_the_bait_customer,
+    "tool order_status": order_status_as_the_bait_customer,
+    "tool book (propose)": book_proposal_as_the_bait_customer,
+    "tool reschedule (propose)": reschedule_proposal_as_the_bait_customer,
+}
+"""M5 PR 2's tool read paths: both reads and the proposal checks that read rows. Not
+`create_ticket`: its proposal reads no row, so there is nothing of either business to show."""
+
+
 READ_PATHS: Final[dict[str, ReadPath]] = {
     "sql": sql_on_every_business_table,
     "vector_search": vector_search_as_staff,
@@ -303,12 +450,14 @@ READ_PATHS: Final[dict[str, ReadPath]] = {
     "POST /v1/answer": answer_through_the_api,
     "GET /v1/kb/search (hybrid)": search_through_the_api_hybrid,
     "POST /v1/answer (hybrid)": answer_through_the_api_hybrid,
+    **TOOL_PATHS,
 }
 
 OWNER_CONNECTION_PATHS: Final[Mapping[str, SearchLegPath]] = {
     "vector_search": vector_search_as_staff,
     "text_search": text_search_as_staff,
     "hybrid_search": hybrid_search_as_staff,
+    **TOOL_PATHS,
 }
 """Read paths that also run on the owner's connection, where RLS never applies: each search leg's
 own `WHERE c.business_id = :business_id` is then the only thing between `me` and the other
@@ -321,7 +470,9 @@ take the only place before the filter, and `me` gets nothing: the positive contr
 
 Not "sql" (it reads whole tables on purpose, so it leaks there by design:
 `test_red_proof_a_role_that_skips_rls_leaks_the_canary`), and not the API routes (the app refuses
-such a role). `hybrid_search` (M3 PR 4) runs both legs' clauses through the fusion here."""
+such a role). `hybrid_search` (M3 PR 4) runs both legs' clauses through the fusion here. M5 PR 2's
+tool paths (`TOOL_PATHS`) run every tool statement's business clause here, through the executor;
+for them `k` caps the rows shown."""
 
 HYBRID: Final = frozenset({"vector_search", "text_search", "rrf_fuse"})
 """What every hybrid read path runs (M3 PR 4): both legs and the fusion."""
