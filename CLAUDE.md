@@ -147,6 +147,8 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - [ADR 0015](docs/adr/0015-intent-router.md) — intent router (accepted 2026-11-05): one platform intent set with a route map per closed business type, L2 logistic regression on voyage-4 query embeddings scored without an ML library, temperature scaling, a safety floor before the threshold, a fail-closed `small` LLM fallback that may only tighten, test once per mode, measured offline against LLM-only routing
 
 ## Current status
+- **Next steps for shesha, M1–M4 in one ordered checklist** (commands, caps, rules, what runs in
+  parallel): `docs/plans/next-steps-shesha.md` (2026-11-10).
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
   #3 Docker stack · #4 `/readyz` (`check_redis` hand-written by shesha; the rest completed by Claude
   at shesha's request, explained line by line) · #5 metrics sign-off. End-of-milestone quiz passed.
@@ -208,8 +210,8 @@ Planned: `packages/mcp_server/`, `scripts/`.
   - Merged: PR 0 plan (#50), PR 1 (#51: intent list, route policy, dataset format, `intenteval`,
     writers' brief), PR 2 (#52: 400 training rows, draft hash, 80-id sample), PR 3 (#54: classifier
     scoring, calibration, LLM fallback, H1 scaffold), PR 4 (#55: eval harness, M4 spend at $2.00,
-    scikit-learn dev-only, H2 scaffold). H2 (metrics, `m4/metrics`) written by Claude at shesha's
-    request (D4), 2026-11-10, in review; explain-back due. shesha: H1 (`route_message`, guide
+    scikit-learn dev-only, H2 scaffold), H2 (#56: metrics, written by Claude at shesha's request,
+    D4, 2026-11-10; explain-back due). shesha: H1 (`route_message`, guide
     `docs/learning/m4-router.md`) and the eval rows from the writers' brief, never opening
     `train.jsonl`. Then PR 5 close-out (live steps, shesha only).
 
