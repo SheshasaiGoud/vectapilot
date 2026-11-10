@@ -1,0 +1,35 @@
+{
+  "business_id": "paws-and-co",
+  "synthetic": true,
+  "business_type": "veterinary",
+  "timezone": "Asia/Kolkata",
+  "sandbox_date": "2026-11-16",
+  "enabled_tools": [
+    "book",
+    "check_slots",
+    "create_ticket",
+    "order_status",
+    "reschedule"
+  ],
+  "services": [
+    {
+      "id": "vet_consultation",
+      "name": "Vet consultation"
+    },
+    {
+      "id": "vaccination",
+      "name": "Vaccinations"
+    },
+    {
+      "id": "grooming",
+      "name": "Grooming"
+    }
+  ],
+  "emergency_guidance": [
+    "During clinic hours, call our emergency line: +91 00000 20911 (fictional). Do not wait for a reply in the chat.",
+    "Outside clinic hours",
+    "Go to Example 24-Hour Animal Hospital (fictional), 12 Sample Ring Road, open day and night, phone +91 00000 20999 (fictional). Call them while you are on the way.",
+    "If you know what your pet ate, bring the packaging or a photo of it.",
+    "Do not give your pet any medicine or home remedy unless a vet tells you to."
+  ]
+}

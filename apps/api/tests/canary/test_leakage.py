@@ -45,6 +45,10 @@ from tests.canary.catalog import (
 from tests.canary.checks import Planted
 from tests.canary.read_paths import (
     BAIT,
+    BAIT_BOOKING_ID,
+    BAIT_CUSTOMER,
+    BAIT_ORDER_ID,
+    BAIT_SLOT_ID,
     BAIT_WORD,
     OWNER_CONNECTION_PATHS,
     READ_PATHS,
@@ -73,6 +77,15 @@ pytestmark = [integration, pytest.mark.anyio]
 
 KNOWN_TABLES: Final = {"businesses", "documents", "chunks", "llm_calls"}
 """A floor, not the list: the catalog must find at least these (proves the query works)."""
+SANDBOX_TABLES: Final = {
+    "sandbox_slots",
+    "sandbox_orders",
+    "pending_actions",
+    "sandbox_bookings",
+    "sandbox_tickets",
+    "tool_audit",
+}
+"""Migration 0006's tables (M5 PR 1, ADR 0016 decision 6): the catalog must find them too."""
 
 VECTOR: Final = "[" + ",".join(["0"] * 1023 + ["1"]) + "]"
 PLANT_LANGUAGE: Final = "en"
@@ -125,7 +138,48 @@ PLANT: Final = (
         " :canary)"
     ),
 )
+# M5 PR 1: the sandbox bait (read_paths.py, "BAIT_SLOT_ID"). The app role may not write slots,
+# orders or seed-origin rows (migration 0006's grants and restrictive policy), so the owner plants
+# those; the app role plants what it may write itself, a pending action and an audit row, which
+# also proves those grants under RLS.
+OWNER_PLANT: Final = (
+    text(
+        "INSERT INTO sandbox_slots (business_id, id, service, starts_at, duration_minutes, label)"
+        " VALUES (:b, :slot_id, 'canary', now() + interval '1 day', 15, :canary)"
+    ),
+    text(
+        "INSERT INTO sandbox_bookings (business_id, id, slot_id, customer_ref, status, origin)"
+        " VALUES (:b, :booking_id, :slot_id, :customer, 'active', 'seed')"
+    ),
+    text(
+        "INSERT INTO sandbox_orders (business_id, id, customer_ref, status, items, note,"
+        " placed_at) VALUES (:b, :order_id, :customer, 'placed', 'Canary kibble', :canary, now())"
+    ),
+    text(
+        "INSERT INTO sandbox_tickets (business_id, customer_ref, category, summary, origin)"
+        " VALUES (:b, :customer, 'canary', :canary, 'seed')"
+    ),
+)
+APP_PLANT: Final = (
+    text(
+        "INSERT INTO pending_actions (business_id, tool, arguments, customer_ref,"
+        " confirm_token_sha256, status, expires_at)"
+        " VALUES (:b, 'book', jsonb_build_object('slot_id', CAST(:slot_id AS text)), :customer,"
+        " repeat('e', 64), 'pending', now() + interval '15 minutes')"
+    ),
+    text(
+        "INSERT INTO tool_audit (business_id, tool, kind, phase, outcome, duration_ms, action_id)"
+        " SELECT :b, 'book', 'write', 'propose', 'proposed', 1, id FROM pending_actions"
+        " WHERE business_id = :b"
+    ),
+)
 UPROOT: Final = (
+    text("DELETE FROM tool_audit WHERE business_id = :b"),
+    text("DELETE FROM sandbox_tickets WHERE business_id = :b"),
+    text("DELETE FROM sandbox_bookings WHERE business_id = :b"),
+    text("DELETE FROM sandbox_orders WHERE business_id = :b"),
+    text("DELETE FROM pending_actions WHERE business_id = :b"),
+    text("DELETE FROM sandbox_slots WHERE business_id = :b"),
     text("DELETE FROM llm_calls WHERE business_id = :b"),
     text("DELETE FROM documents WHERE business_id = :b"),  # chunks go with their document
     text("DELETE FROM businesses WHERE business_id = :b"),
@@ -197,11 +251,17 @@ async def plant(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Planted:
         "dimension": spec.dimension,
         "language": PLANT_LANGUAGE,
         "ts_config": text_search_config(PLANT_LANGUAGE),
+        "slot_id": BAIT_SLOT_ID,
+        "booking_id": BAIT_BOOKING_ID,
+        "order_id": BAIT_ORDER_ID,
+        "customer": BAIT_CUSTOMER,
     }
     async with business_transaction(owner, planted.business_id) as connection:
         await connection.execute(text("INSERT INTO businesses (business_id) VALUES (:b)"), params)
+        for statement in OWNER_PLANT:
+            await connection.execute(statement, params)
     async with business_transaction(app, planted.business_id) as connection:  # the app role writes
-        for statement in PLANT:
+        for statement in (*PLANT, *APP_PLANT):
             await connection.execute(statement, params)
     return planted
 
@@ -271,6 +331,84 @@ async def test_the_catalog_finds_the_business_tables(owner_engine: AsyncEngine) 
         tables = await business_tables(connection)
 
     assert set(tables) >= KNOWN_TABLES, tables
+
+
+async def test_the_catalog_finds_the_sandbox_and_tool_tables_with_forced_rls(
+    owner_engine: AsyncEngine,
+) -> None:
+    # M5 PR 1 (migration 0006): all six are business tables, so every check below covers them.
+    async with owner_engine.connect() as connection:
+        relations = {r.name: r for r in await load_relations(connection)}
+
+    assert set(relations) >= SANDBOX_TABLES, sorted(relations)
+    for table in SANDBOX_TABLES:
+        assert (relations[table].kind, relations[table].rls_enabled) == ("r", True), table
+        assert relations[table].rls_forced, table
+
+
+async def test_the_sandboxs_composite_foreign_keys_are_read_and_pair_the_business(
+    owner_engine: AsyncEngine,
+) -> None:
+    # The positive control for the foreign-key check: it must see 0006's composite keys, or the
+    # check would pass by not looking at them.
+    async with owner_engine.connect() as connection:
+        keys = [k for k in await load_foreign_keys(connection) if k.table in SANDBOX_TABLES]
+        indexes = [k for k in await load_key_indexes(connection) if k.table in SANDBOX_TABLES]
+        tables = await business_tables(connection)
+
+    composite = {
+        (k.table, k.columns, k.referenced_table, k.referenced_columns)
+        for k in keys
+        if k.referenced_table != "businesses"
+    }
+    # The action keys also pair the customer and require an executed action (PR 1 review).
+    executed_action = ("business_id", "id", "customer_ref", "status")
+    assert composite == {
+        ("sandbox_bookings", ("business_id", "slot_id"), "sandbox_slots", ("business_id", "id")),
+        (
+            "sandbox_bookings",
+            ("business_id", "action_id", "customer_ref", "action_status"),
+            "pending_actions",
+            executed_action,
+        ),
+        (
+            "sandbox_bookings",
+            ("business_id", "retired_by_action_id", "customer_ref", "retired_by_action_status"),
+            "pending_actions",
+            executed_action,
+        ),
+        (
+            "sandbox_tickets",
+            ("business_id", "action_id", "customer_ref", "action_status"),
+            "pending_actions",
+            executed_action,
+        ),
+    }
+    assert checks.foreign_key_problems(keys, tables) == []
+    assert checks.key_problems(indexes) == []
+    partial = {k.name: k.predicate for k in indexes if k.predicate is not None}
+    assert partial == {
+        "sandbox_bookings_one_active_per_slot": "(status = 'active'::text)",
+        "sandbox_bookings_retired_once": "(retired_by_action_id IS NOT NULL)",
+    }
+
+
+async def test_red_proof_a_foreign_key_on_the_action_id_alone_is_caught(
+    owner_engine: AsyncEngine,
+) -> None:
+    async with rolled_back(owner_engine) as connection:
+        await connection.exec_driver_sql(
+            "CREATE UNIQUE INDEX canary_probe_action_id ON pending_actions (id)"
+        )
+        await connection.exec_driver_sql(
+            "ALTER TABLE sandbox_tickets ADD CONSTRAINT canary_probe_fk"
+            " FOREIGN KEY (action_id) REFERENCES pending_actions (id)"
+        )
+        problems = checks.foreign_key_problems(
+            await load_foreign_keys(connection), await business_tables(connection)
+        )
+
+    assert len(problems) == 1 and "canary_probe_fk" in problems[0], problems
 
 
 async def test_every_business_table_has_rls_enabled_and_forced(owner_engine: AsyncEngine) -> None:

@@ -32,6 +32,7 @@ from vectapilot_api.kb.store import PostgresKbStore
 from vectapilot_api.log import configure_logging
 from vectapilot_api.retrieval.router import router as search_router
 from vectapilot_api.retrieval.search import RetrievalConfig, SearchService
+from vectapilot_api.tools.files import load_tools_dir
 
 logger = logging.getLogger("vectapilot_api")
 
@@ -84,6 +85,9 @@ def create_app(
     embedding_spec = load_embedding_catalog().resolve(
         settings.embeddings_provider, settings.embeddings_model, settings.embeddings_dimension
     )
+    # Fail fast (ADR 0016 decision 1, M5 PR 1): with a tool configuration folder, every business's
+    # tools.json and seed.json must be there and valid, or the app stops here (ToolsConfigError).
+    tools = None if settings.tools_config_dir is None else load_tools_dir(settings.tools_config_dir)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -139,6 +143,7 @@ def create_app(
     )
     app.state.settings = settings
     app.state.catalog = catalog
+    app.state.tools = tools
     app.include_router(health_router)
     app.include_router(kb_router)
     app.include_router(search_router)

@@ -2,6 +2,7 @@
 
 import logging
 import os
+from pathlib import Path
 from typing import Final, Literal, Self
 
 from pydantic import Field, PostgresDsn, RedisDsn, Secret, SecretStr, model_validator
@@ -12,6 +13,10 @@ from vectapilot_api.embeddings.catalog import EmbeddingsProvider
 from vectapilot_api.gateway.types import OpaqueId, RetryPolicy, Seconds
 from vectapilot_api.retrieval.fusion import RRF_K
 from vectapilot_api.retrieval.types import CANDIDATE_K, MAX_K, RetrievalMode
+
+Environment = Literal["local", "test", "ci", "production"]
+"""Where the process runs. `production`, and any environment added later, is refused by every
+local-only path (`business.HEADER_ENVIRONMENTS`, `tools.sandbox.SANDBOX_ENVIRONMENTS`)."""
 
 MIN_CANDIDATE_K: Final = 10
 """`rag_candidate_k`'s floor (M3 plan PR 4): PR 5's headroom count reads hit@10 on the fused list,
@@ -84,7 +89,7 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    environment: Literal["local", "test", "ci", "production"] = "local"
+    environment: Environment = "local"
     # A DSN can hold a password. Secret[...] still validates the URL but prints as '**********'
     # (repr, str, JSON, log extras); call `.get_secret_value()` only where a client is built.
     database_url: Secret[PostgresDsn]
@@ -158,6 +163,14 @@ class Settings(BaseSettings):
     rag_rrf_k: int = Field(default=RRF_K, ge=1)
     """RRF's k (`rrf_fuse`'s `k`): 60, fixed, not tuned (ADR 0014 decision 4). At least 1, no upper
     bound (decided 2026-10-25)."""
+
+    # ── Tools (M5, ADR 0016 decision 1) ──
+    tools_config_dir: Path | None = None
+    """`VECTAPILOT_TOOLS_CONFIG_DIR`: the folder of per-business tool configurations and sandbox
+    seeds (`data/sandbox/` in the repository; a read-only bind mount under compose, so the image is
+    unchanged). When set, `create_app` reads and validates the whole folder before it serves
+    anything (`tools.files.load_tools_dir`), and any missing or invalid business file stops
+    startup. None: no business has tools. PR 4 makes it required when the agent route is on."""
 
     @classmethod
     def settings_customise_sources(
