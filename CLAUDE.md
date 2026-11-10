@@ -148,6 +148,8 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - [ADR 0016](docs/adr/0016-tools-and-agent-loop.md) — tools and the agent loop (accepted 2026-11-10, D1–D8 decided as recommended): a typed tool core per business, a loop that can read and propose but never write, writes as pending actions executed once by a confirm call with a token no model sees, idempotency in Postgres, a sandbox under RLS, structured output instead of native tool use (M3's window), no tools before a safety step for health businesses (fail closed while M4's router is off), an MCP adapter in its own project that cannot confirm
 
 ## Current status
+- **Next steps for shesha, M1–M4 in one ordered checklist** (commands, caps, rules, what runs in
+  parallel): `docs/plans/next-steps-shesha.md` (2026-11-10).
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
   #3 Docker stack · #4 `/readyz` (`check_redis` hand-written by shesha; the rest completed by Claude
   at shesha's request, explained line by line) · #5 metrics sign-off. End-of-milestone quiz passed.
@@ -216,8 +218,8 @@ Planned: `packages/mcp_server/`, `scripts/`.
   steps).
 - **M5 (MCP tools + agent loop with confirmations) — planned and decided 2026-11-10**
   (`docs/plans/m5-pr-checks.md`, ADR 0016 accepted; reviewed 2026-11-10 by leo-agents,
-  zara-safety and diego-backend, findings applied; D1–D8 decided by shesha as recommended). Built and tested at $0
-  (fake provider, sandbox backend); no change to `models.toml`, `PROMPT_VERSION`,
+  zara-safety and diego-backend, findings applied; D1–D8 decided by shesha as recommended).
+  Built and tested at $0 (fake provider, sandbox backend); no change to `models.toml`, `PROMPT_VERSION`,
   `answer/prompt.py`, the gateway's code or output path, or `POST /v1/answer` (M3's window);
   `intents/policy.py` unchanged (M4). Health businesses fail closed on `/v1/agent` until M4's
   router is live, so the loop is measured through the harness. shesha writes H1, the loop
