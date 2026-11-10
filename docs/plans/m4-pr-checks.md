@@ -300,6 +300,12 @@ The route comes from the policy. The explain-back is part of acceptance.
 ## H2 — `m4/metrics` (`[HAND-WRITE]`, written by Claude at shesha's request [D4]; time-box 2 h) · S
 The four functions from PR 4's scaffold. Counts are exact `Fraction`s; probabilities stay floats.
 The explain-back is part of acceptance.
+- **Built 2026-11-10** (written by Claude at shesha's request, D4): the four bodies in
+  `intenteval/metrics.py`; the module's strict xfail removed, so its 21 hand-computed cases pass;
+  the summary test that asserted "no summary with the real stubs" now renders with the real H2
+  (the float 0.6 in [0.4, 0.6), ECE 0.400 raw and 0.100 calibrated, by hand). Bin placement uses
+  `Fraction(p)`; ECE is summed exactly and rounded once. H1's xfails unchanged. In review; the
+  explain-back (guide §6) is still shesha's.
 
 ## PR 5 — `m4/close-out` (shesha's live steps; kenji, noah and maya help)
 Agents never pass `--live`, never run test and never see a key [carried ADR 0007]. Each run stays

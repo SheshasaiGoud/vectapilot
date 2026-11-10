@@ -1,5 +1,5 @@
 """summary.md (M4 PR 4): the order, the labels and the wording the plan fixes. H2 is a stand-in
-(deliberately not H2); with the real H2 stubs, no summary is rendered."""
+(deliberately not H2), except in the one test that renders with the real H2, by hand."""
 
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -142,11 +142,27 @@ def test_calibration_shows_raw_and_calibrated_side_by_side_with_n() -> None:
     assert "ECE at n = 1: raw (T = 1) 0.125, calibrated 0.125. ECE is biased upward" in text
 
 
-def test_with_h2_unwritten_nothing_is_rendered() -> None:
+def test_with_the_real_h2_the_float_0_6_sits_below_3_5_and_ece_is_the_gap() -> None:
+    # One right row, raw 0.6 and calibrated 0.9. By hand: the float 0.6 is just below 3/5, so the
+    # exact rule puts it in [0.4, 0.6) (a float product, int(0.6 * 5), would say [0.6, 0.8)).
+    # ECE with one row is its own gap: raw |1 - 0.6| = 0.4, calibrated |1 - 0.9| = 0.1.
     real = Context(policies=POLICIES, businesses=("sunrise-clinic",), metrics=H2_INTENT_METRICS)
+    lines = [
+        line(
+            "q1",
+            Intent.QUESTION,
+            Intent.QUESTION,
+            top_probability=0.9,
+            top_probability_raw=0.6,
+            classifier_intent=Intent.QUESTION,
+        )
+    ]
 
-    with pytest.raises(NotImplementedError):
-        render(info(), LINES, real)
+    text = render(info(rows=1), lines, real)
+
+    assert "| [0.4, 0.6) | 1 | 0.600 | 1 of 1 | 0 | — | — |" in text
+    assert "| [0.8, 1.0] | 0 | — | — | 1 | 0.900 | 1 of 1 |" in text
+    assert "ECE at n = 1: raw (T = 1) 0.400, calibrated 0.100." in text
 
 
 def five_of_each(prefix: str = "r") -> list[ResultLine]:

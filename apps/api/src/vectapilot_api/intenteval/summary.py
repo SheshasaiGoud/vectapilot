@@ -10,8 +10,8 @@ the paired comparison. Counts come with Wilson intervals, never as a bare percen
 slice (each business, and each business x language group with scored rows) gets macro-F1 or "not
 shown (n too small)" with the reason (every intent needs 5 gold rows and 5 split units in the
 slice: `scoring.macro_f1_withheld`) and its confusion matrix; the comparison lists discordant
-rows by id per slice. H2's functions come in as an `IntentMetrics` bundle: while H2 is unwritten
-they raise `NotImplementedError`, and no summary is written.
+rows by id per slice. H2's functions come in as an `IntentMetrics` bundle (written 2026-11-10);
+a bundle that raises `NotImplementedError` (H2 unwritten) means no summary is written.
 """
 
 from collections.abc import Mapping, Sequence
@@ -475,8 +475,8 @@ def render(
     *,
     modes: Mapping[str, Sequence[ResultLine]] | None = None,
 ) -> str:
-    """The whole summary.md (module docstring). Raises `NotImplementedError` while H2 is
-    unwritten; nothing is then written."""
+    """The whole summary.md (module docstring). Raises `NotImplementedError` when the metrics
+    bundle does (H2 unwritten); nothing is then written."""
     out = header(info, lines)
     out += fail_closed_lines(lines, context.businesses)
     out += safety_section(lines, context)

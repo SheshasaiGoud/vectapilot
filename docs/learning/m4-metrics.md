@@ -8,11 +8,11 @@ probability. These four functions turn those lines into the numbers the router i
 **expected calibration error (ECE)**. They are pure Python over small tuples: no model, no
 network, no files.
 
-> **Status (2026-11-09).** Scaffold only (PR 4): the four bodies raise `NotImplementedError`, their
-> tests are strict xfails, and the harness is tested with stand-ins that are deliberately not H2.
-> Under D4 (b) (decided 2026-11-05) Claude writes the bodies at shesha's request on `m4/metrics`;
-> the explain-back (§6) is shesha's and part of acceptance. Rule 2's reminder, once: writing them
-> yourself is the faster way to own the explain-back.
+> **Status (2026-11-10).** Written by Claude at shesha's request (D4 (b), decided 2026-11-05) on
+> `m4/metrics`, in review: the four bodies are in place, the strict xfail in `test_metrics.py` is
+> deleted and its 21 cases pass; the harness's own tests still use stand-ins, plus one summary test
+> with the real H2. The explain-back (§6) is shesha's and part of acceptance: read the code against
+> §1–§3 first.
 
 ## Your task
 

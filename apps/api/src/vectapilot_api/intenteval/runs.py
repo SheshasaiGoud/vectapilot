@@ -11,7 +11,8 @@ summary shares.
 - **Test** follows the discipline in `harness.py` and `ledger.py`: the ledger entry is appended
   before the first row is scored or sent.
 
-While H2 is unwritten, a run keeps its results and run.json and writes no summary.
+If H2 is unwritten (`NotImplementedError`), a run keeps its results and run.json and writes no
+summary.
 """
 
 import asyncio

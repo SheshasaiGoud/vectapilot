@@ -1,8 +1,8 @@
 """H2 (M4) — the router's metric functions. [HAND-WRITE]: written by Claude at shesha's request
 (D4 (b)), on its own branch `m4/metrics`, reviewed by shesha; the explain-back is shesha's.
 
-Guide: docs/learning/m4-metrics.md · Tests: tests/intenteval/test_metrics.py (strict xfails
-until the bodies are written; its hand-computed fixtures are the contract).
+Guide: docs/learning/m4-metrics.md · Tests: tests/intenteval/test_metrics.py (its hand-computed
+fixtures are the contract; strict xfails until the bodies were written, 2026-11-10).
 
 Built by the team and tested (tests/intenteval/test_metrics_types.py): the result types
 `ConfusionMatrix`, `ClassScores`, `MacroF1` and `ReliabilityBin`, and the `IntentMetrics`
@@ -51,6 +51,21 @@ def _is_count(value: object) -> bool:
 
 def _is_unit_fraction(value: object) -> bool:
     return isinstance(value, Fraction) and 0 <= value <= 1
+
+
+def _is_probability(value: object) -> bool:
+    """A finite real number in [0, 1]; a bool is not a confidence."""
+    return (
+        isinstance(value, int | float)
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+        and 0 <= value <= 1
+    )
+
+
+def _ratio(numerator: int, denominator: int) -> Fraction:
+    """`numerator / denominator` exactly, with the guide's 0/0 rule: a zero denominator is 0."""
+    return Fraction(numerator, denominator) if denominator else Fraction(0)
 
 
 @dataclass(frozen=True)
@@ -178,9 +193,23 @@ def confusion_matrix(gold: Sequence[Intent], decided: Sequence[Decided]) -> Conf
       Intent)` decides): the harness parses results into `Intent`s first.
     - Every cell is present, zeros included (`ConfusionMatrix` checks the shape).
     """
-    raise NotImplementedError(
-        "H2 (M4): write confusion_matrix (guide: docs/learning/m4-metrics.md)"
-    )
+    if len(gold) != len(decided):
+        raise ValueError(
+            f"gold and decided must have one entry per row: {len(gold)} vs {len(decided)}"
+        )
+    # Start from every cell at zero, so an intent with no rows still has its row and column.
+    counts: dict[Intent, dict[Decided, int]] = {
+        g: dict.fromkeys(COLUMNS, 0) for g in DECISION_ORDER
+    }
+    for g, d in zip(gold, decided, strict=True):
+        # isinstance, not "is a known value": the string "emergency" names an intent but is not
+        # one, and accepting it here would hide a parsing gap in the harness.
+        if not isinstance(g, Intent):
+            raise ValueError(f"a gold label is an Intent (no gold row is fail-closed): {g!r}")
+        if d is not None and not isinstance(d, Intent):
+            raise ValueError(f"a decision is an Intent or None (fail-closed): {d!r}")
+        counts[g][d] += 1
+    return ConfusionMatrix(counts)
 
 
 def macro_f1(matrix: ConfusionMatrix) -> MacroF1:
@@ -194,7 +223,28 @@ def macro_f1(matrix: ConfusionMatrix) -> MacroF1:
       and never left out: macro-F1 is the plain mean of all eight F1 values, always eight.
     - Every value is an exact `Fraction` (never a float).
     """
-    raise NotImplementedError("H2 (M4): write macro_f1 (guide: docs/learning/m4-metrics.md)")
+    per_intent = []
+    for intent in DECISION_ORDER:
+        tp = matrix.cell(intent, intent)
+        # decided_total(intent) sums the intent's column over gold rows only: a fail-closed row
+        # sits in the None column, so it is never anyone's false positive.
+        fp = matrix.decided_total(intent) - tp
+        # gold_total counts the whole row, the None column included: a fail-closed row is a miss.
+        fn = matrix.gold_total(intent) - tp
+        per_intent.append(
+            ClassScores(
+                intent=intent,
+                true_positives=tp,
+                false_positives=fp,
+                false_negatives=fn,
+                precision=_ratio(tp, tp + fp),
+                recall=_ratio(tp, tp + fn),
+                f1=_ratio(2 * tp, 2 * tp + fp + fn),
+            )
+        )
+    # Always all eight, so an intent with no rows pulls the mean down instead of vanishing.
+    mean = sum((s.f1 for s in per_intent), Fraction(0)) / len(DECISION_ORDER)
+    return MacroF1(per_intent=tuple(per_intent), macro_f1=mean)
 
 
 def reliability_bins(
@@ -211,9 +261,40 @@ def reliability_bins(
     - ValueError for a length mismatch, a confidence that is not a finite number in [0, 1], a
       `correct` entry that is not a bool, or `bins` that is not an int >= 1.
     """
-    raise NotImplementedError(
-        "H2 (M4): write reliability_bins (guide: docs/learning/m4-metrics.md)"
-    )
+    if not (isinstance(bins, int) and not isinstance(bins, bool) and bins >= 1):
+        raise ValueError(f"bins is an int >= 1: {bins!r}")
+    if len(confidences) != len(correct):
+        raise ValueError(
+            f"confidences and correct must have one entry per row: "
+            f"{len(confidences)} vs {len(correct)}"
+        )
+    members: list[list[tuple[float, bool]]] = [[] for _ in range(bins)]
+    for p, right in zip(confidences, correct, strict=True):
+        if not _is_probability(p):
+            raise ValueError(f"a confidence is a finite number in [0, 1]: {p!r}")
+        # A bool, not anything truthy: an int 1 here would mean the harness passed the wrong field.
+        if not isinstance(right, bool):
+            raise ValueError(f"correct is a bool per row: {right!r}")
+        # Fraction(p) is the float's exact value, so floor() never sees a rounded product: the
+        # float 0.6 (just below 3/5) lands in [2/5, 3/5), where int(0.6 * 5) would say bin 3.
+        index = min(math.floor(Fraction(p) * bins), bins - 1)
+        members[index].append((float(p), right))
+    table = []
+    for i, rows in enumerate(members):
+        n = len(rows)
+        hits = sum(1 for _, right in rows if right)
+        table.append(
+            ReliabilityBin(
+                low=Fraction(i, bins),
+                high=Fraction(i + 1, bins),
+                n=n,
+                correct=hits,
+                # fsum: one correctly rounded sum, independent of row order.
+                mean_confidence=math.fsum(p for p, _ in rows) / n if n else None,
+                accuracy=Fraction(hits, n) if n else None,
+            )
+        )
+    return tuple(table)
 
 
 def expected_calibration_error(bins: Sequence[ReliabilityBin]) -> float:
@@ -223,9 +304,17 @@ def expected_calibration_error(bins: Sequence[ReliabilityBin]) -> float:
     mean_confidence_b| over the non-empty bins, as a float in [0, 1]. ValueError when N is 0 (no
     rows, no ECE). Biased upward at small n (the guide says why); the report prints n with it.
     """
-    raise NotImplementedError(
-        "H2 (M4): write expected_calibration_error (guide: docs/learning/m4-metrics.md)"
-    )
+    total = sum(b.n for b in bins)
+    if total == 0:
+        raise ValueError("no rows in any bin: there is no ECE to report")
+    # Summed exactly (a float's own value is a Fraction) and rounded once at the end, so the
+    # result does not depend on bin order and stays inside [0, 1].
+    gap = Fraction(0)
+    for b in bins:
+        if b.n == 0 or b.accuracy is None or b.mean_confidence is None:
+            continue  # an empty bin has no gap; it adds no weight either
+        gap += Fraction(b.n, total) * abs(b.accuracy - Fraction(b.mean_confidence))
+    return float(gap)
 
 
 # ── How the harness calls H2 ─────────────────────────────────────────────────────────────────
@@ -247,5 +336,5 @@ H2_INTENT_METRICS: Final = IntentMetrics(
     reliability_bins=reliability_bins,
     expected_calibration_error=expected_calibration_error,
 )
-"""H2 as written. Until then each function raises `NotImplementedError`: the harness never
-catches it as a result, and a summary is then not written ("H2 not written yet")."""
+"""H2 as written (2026-11-10). The harness still treats a `NotImplementedError` from a bundle as
+"H2 not written yet" (no summary, results kept): its tests pass a local stand-in for that case."""
