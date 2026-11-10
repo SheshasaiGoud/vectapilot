@@ -209,10 +209,14 @@ Measure:  PR 7 close-out (after H1, H2, the freeze and M2 step 11's Anthropic ke
     `business_isolation` policy. Slot, booking and order ids are unique per `(business_id, id)`.
   - Grants: `SELECT` on slots and orders; `SELECT, INSERT, UPDATE` on bookings and pending
     actions; `SELECT, INSERT` on tickets and `tool_audit`; no `DELETE` [ADR 0016 decision 6].
-  - `pending_actions` keeps its single-column UUID key and adds `UNIQUE (business_id, id)` as the
-    FK target. Write tables get `FOREIGN KEY (business_id, action_id) REFERENCES pending_actions
-    (business_id, id)`, bookings also `(business_id, slot_id) → sandbox_slots`. `tool_audit`'s
-    `action_id` has no FK (refusals of unknown ids are still audited).
+  - `pending_actions` keeps its single-column UUID key and adds `UNIQUE (business_id, id,
+    customer_ref, status)` as the FK target. Write tables' action columns (`action_id`,
+    `retired_by_action_id`) get `FOREIGN KEY (business_id, <action column>, customer_ref,
+    <generated 'executed'>) REFERENCES pending_actions (business_id, id, customer_ref, status)
+    DEFERRABLE INITIALLY DEFERRED` [PR 1 review, diego and zara]: a write row exists only for an
+    executed action of its own business and customer, and that action cannot be reopened.
+    Bookings also `(business_id, slot_id) → sandbox_slots`. `tool_audit`'s `action_id` has no FK
+    (refusals of unknown ids are still audited).
   - Write tables get `origin text NOT NULL CHECK (origin IN ('seed', 'action'))` and
     `CHECK ((origin = 'seed') = (action_id IS NULL))`, plus `UNIQUE (business_id, action_id)`.
   - A partial unique index on active bookings (`business_id, slot_id`) makes a double booking
@@ -266,6 +270,10 @@ Measure:  PR 7 close-out (after H1, H2, the freeze and M2 step 11's Anthropic ke
 ## PR 3 — `m5/confirm` (leo; diego reviews the API and transactions) · M · after PR 2, D3, D4
 - **Pending actions:** a service stores a `WriteProposal` with its validated arguments,
   `customer_ref`, the token hash, a DB-set expiry and status (`pending → executed | failed`).
+  The proposal lifetime setting is checked at startup to be > 0 and ≤ 1 hour, migration 0006's
+  CHECK, so a typo stops startup instead of giving SQLSTATE 23514 on every proposal [PR 1 review,
+  diego]. The write row, the audit row and `executed` go in one transaction: the action keys are
+  checked at commit.
 - **`POST /v1/agent/actions/{id}/confirm`** (`X-Business-Id`, `customer_ref`, `confirm_token`): W2,
   W5, W6, W8 and W9, checks in W6's order. A unique violation (slot taken) rolls back to a SAVEPOINT
   and marks the action `failed` with `slot_unavailable`; a changed booking is `booking_changed`.
@@ -298,6 +306,10 @@ Measure:  PR 7 close-out (after H1, H2, the freeze and M2 step 11's Anthropic ke
   (`AnswerService`'s response model unchanged), with `X-Trace-Id`; no history field. The service
   wraps `run_turn` in `asyncio.timeout(turn)` (→ `turn_timeout`), maps any exception to a
   hand-off, and applies W11 (→ `safety_floor_off` with guidance, or `URGENT` with guidance).
+  The business type lives in the corpus manifest (M4's `policy_for`) and in `tools.json`: W11
+  treats a business as health if either says so, or startup refuses a mismatch, so a `tools.json`
+  typo can never switch W11 off for a clinic [PR 1 review, zara]. Guidance lines are shown as
+  separate lines, never joined.
 - **`agent_router`** [D7], default `off`. `on`: `route_message` first; safety and other hand-off
   intents hand off before any tool; `action_request` reaches the loop if tools are enabled;
   `rag` calls `AnswerService`. Startup refuses `on` without a committed live-embedding artifact.
