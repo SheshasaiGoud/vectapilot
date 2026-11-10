@@ -145,6 +145,7 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - [ADR 0013](docs/adr/0013-eval-harness.md) — eval harness: `evalrun` package, every hit checked for business and audience before the answer step (exit 4), eval businesses per model + chunk config, one cap for embeddings and answers, test runs ledgered once per config, Wilson for counts and a seeded bootstrap for MRR
 - [ADR 0014](docs/adr/0014-hybrid-retrieval.md) — hybrid retrieval: Postgres full-text search with a per-chunk config next to vector search, fused by RRF (k = 60, exact); the evidence gate stays cosine; one snapshot per search; vector stays the default until a paired dev comparison; no reranking in M3
 - [ADR 0015](docs/adr/0015-intent-router.md) — intent router (accepted 2026-11-05): one platform intent set with a route map per closed business type, L2 logistic regression on voyage-4 query embeddings scored without an ML library, temperature scaling, a safety floor before the threshold, a fail-closed `small` LLM fallback that may only tighten, test once per mode, measured offline against LLM-only routing
+- [ADR 0016](docs/adr/0016-tools-and-agent-loop.md) — tools and the agent loop (accepted 2026-11-10, D1–D8 decided as recommended): a typed tool core per business, a loop that can read and propose but never write, writes as pending actions executed once by a confirm call with a token no model sees, idempotency in Postgres, a sandbox under RLS, structured output instead of native tool use (M3's window), no tools before a safety step for health businesses (fail closed while M4's router is off), an MCP adapter in its own project that cannot confirm
 
 ## Current status
 - **M0 (foundations) — complete, 2026-10-13.** PRs #1 API skeleton + CI · #2 business context ·
@@ -208,10 +209,19 @@ Planned: `packages/mcp_server/`, `scripts/`.
   - Merged: PR 0 plan (#50), PR 1 (#51: intent list, route policy, dataset format, `intenteval`,
     writers' brief), PR 2 (#52: 400 training rows, draft hash, 80-id sample), PR 3 (#54: classifier
     scoring, calibration, LLM fallback, H1 scaffold), PR 4 (#55: eval harness, M4 spend at $2.00,
-    scikit-learn dev-only, H2 scaffold). H2 (metrics, `m4/metrics`) written by Claude at shesha's
-    request (D4), 2026-11-10, in review; explain-back due. shesha: H1 (`route_message`, guide
-    `docs/learning/m4-router.md`) and the eval rows from the writers' brief, never opening
-    `train.jsonl`. Then PR 5 close-out (live steps, shesha only).
+    scikit-learn dev-only, H2 scaffold), H2 (#56: metrics, written by Claude at shesha's request,
+    D4, 2026-11-10; explain-back due).
+- **M4 remaining, shesha only:** H1 (`route_message`, guide `docs/learning/m4-router.md`), the
+  eval rows from the writers' brief (never opening `train.jsonl`), then PR 5 close-out (live
+  steps).
+- **M5 (MCP tools + agent loop with confirmations) — planned and decided 2026-11-10**
+  (`docs/plans/m5-pr-checks.md`, ADR 0016 accepted; reviewed 2026-11-10 by leo-agents,
+  zara-safety and diego-backend, findings applied; D1–D8 decided by shesha as recommended). Built and tested at $0
+  (fake provider, sandbox backend); no change to `models.toml`, `PROMPT_VERSION`,
+  `answer/prompt.py`, the gateway's code or output path, or `POST /v1/answer` (M3's window);
+  `intents/policy.py` unchanged (M4). Health businesses fail closed on `/v1/agent` until M4's
+  router is live, so the loop is measured through the harness. shesha writes H1, the loop
+  (`[HAND-WRITE]`); Claude writes H2 at shesha's request (D5 (b)). Nothing is built yet.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -233,7 +243,7 @@ Planned: `packages/mcp_server/`, `scripts/`.
 - Docker Desktop must be running for `make up` / `make test-integration`. Its engine died around
   2026-10-16 and works again since 2026-10-23. If `docker info` cannot connect, run
   `docker desktop stop --force`, then `docker desktop start`. The likely trigger is the nearly full
-  disk (data volume 96 % used, 8.4 GiB free, 2026-11-05). Free space outside Docker's volumes: no
+  disk (data volume 98 % used, 5.0 GiB free, 2026-11-10). Free space outside Docker's volumes: no
   `make reset-db` or volume prune during M3's measurement window.
 - `Secret[...]` masks the DSNs in `Settings` (step A), not the plain string handed to SQLAlchemy and
   redis-py: pytest's default traceback can print it if those libraries fail. Tests only ever use
