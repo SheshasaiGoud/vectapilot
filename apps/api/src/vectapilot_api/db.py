@@ -52,6 +52,14 @@ any write is refused (SQLSTATE 25006), so the transaction never meets a serializ
 Postgres requires it before the transaction's first query."""
 _SNAPSHOT: Final = text(SNAPSHOT)
 
+READ_COMMITTED: Final = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+"""A write transaction's first statement when it depends on READ COMMITTED (M5 PR 3, W8): the
+confirm, whose waiting second call must re-read a row instead of failing with SQLSTATE 40001.
+Explicit, so a `default_transaction_isolation` from the server, the database or the role
+(`ALTER ROLE ... SET`, a managed-Postgres preset) cannot change it. Opt-in: the other callers keep
+the session's default and send one statement less."""
+_READ_COMMITTED: Final = text(READ_COMMITTED)
+
 RESET_BUSINESS: Final = "RESET app.business_id"
 """What `reset_business_on_return` sends: the session value goes back to the session default:
 unset (the policies read NULL and `''` alike as no business). A default from the role, the
@@ -192,7 +200,7 @@ def create_api_engine(url: str, **pool_options: int) -> AsyncEngine:
 
 @asynccontextmanager
 async def business_transaction(
-    engine: AsyncEngine, business_id: str, *, snapshot: bool = False
+    engine: AsyncEngine, business_id: str, *, snapshot: bool = False, read_committed: bool = False
 ) -> AsyncIterator[AsyncConnection]:
     """A transaction in which only `business_id`'s rows exist. Commits on success, rolls back on
     an exception; either way the business setting ends with the transaction.
@@ -205,11 +213,18 @@ async def business_transaction(
     (REPEATABLE READ READ ONLY), then `set_config` as always, so every later statement reads one
     snapshot and none may write. Without it (every other caller): Postgres' default, READ
     COMMITTED, where each statement sees what was committed before it started.
+
+    `read_committed` (M5 PR 3): the first statement sets READ COMMITTED explicitly instead of
+    trusting the default (`READ_COMMITTED`). The two are exclusive: `ValueError`.
     """
+    if snapshot and read_committed:
+        raise ValueError("a transaction is either the snapshot or read committed")
     valid = parse_business_id(business_id)
     async with engine.begin() as connection:
         if snapshot:
             await connection.execute(_SNAPSHOT)
+        elif read_committed:
+            await connection.execute(_READ_COMMITTED)
         await connection.execute(_SET_BUSINESS, {"business_id": valid})
         yield connection
 
@@ -259,13 +274,15 @@ class Database:
 
     @asynccontextmanager
     async def business_transaction(
-        self, business_id: str, *, snapshot: bool = False
+        self, business_id: str, *, snapshot: bool = False, read_committed: bool = False
     ) -> AsyncIterator[AsyncConnection]:
-        """`business_transaction(self.engine, business_id, snapshot=snapshot)` once the role check
-        has passed."""
+        """`business_transaction(self.engine, business_id, ...)` once the role check has
+        passed."""
         valid = parse_business_id(business_id)  # before the database: a bad id costs no query
         await self.verify_role()
-        async with business_transaction(self.engine, valid, snapshot=snapshot) as connection:
+        async with business_transaction(
+            self.engine, valid, snapshot=snapshot, read_committed=read_committed
+        ) as connection:
             yield connection
 
     async def business_exists(self, business_id: str) -> bool:

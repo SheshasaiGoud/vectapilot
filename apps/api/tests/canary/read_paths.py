@@ -52,6 +52,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
 from fastapi.testclient import TestClient
@@ -124,6 +125,20 @@ s.business_id` in `check_slots`' NOT EXISTS or `book`'s EXISTS) then sees the ot
 booking of `me`'s free slot: `check_slots` lists nothing and the proposals are refused, so the
 positive control turns red. With symmetric bait (both book the same id) that clause was
 invisible: the other business's booking only ever hid a slot `me` had booked anyway."""
+
+
+BAIT_CONFIRM_TOKEN: Final = "CanaryConfirmToken0001"  # noqa: S105 (the bait's token, synthetic)
+"""The confirm token of every planted business's bait action (M5 PR 3), shared on purpose like the
+bait ids: confirming another business's action id with it fails only because of that business's
+clause (RLS, and the confirm statements' own `business_id = :business_id` on the owner's
+connection), never because the token differs."""
+
+
+def bait_action_id(business_id: str) -> UUID:
+    """The id of `business_id`'s planted, confirmable `book` action (`test_leakage.plant`): derived
+    from the business id, so a write path can name it without reading the database. A planted
+    business id is random per run, so the id is too."""
+    return uuid5(NAMESPACE_URL, f"vectapilot-canary-action:{business_id}")
 
 
 def bait_slots(business_id: str) -> tuple[str, str]:
@@ -328,9 +343,11 @@ class EngineTransactions:
         self.engine = engine
 
     def business_transaction(
-        self, business_id: str, *, snapshot: bool = False
+        self, business_id: str, *, snapshot: bool = False, read_committed: bool = False
     ) -> AbstractAsyncContextManager[AsyncConnection]:
-        return business_transaction(self.engine, business_id, snapshot=snapshot)
+        return business_transaction(
+            self.engine, business_id, snapshot=snapshot, read_committed=read_committed
+        )
 
 
 def bait_tools(business_id: str) -> ToolsConfig:

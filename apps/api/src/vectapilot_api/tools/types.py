@@ -54,6 +54,17 @@ class ToolErrorCode(StrEnum):
     SLOT_UNAVAILABLE = "slot_unavailable"
 
 
+class WriteFailure(StrEnum):
+    """Why a confirmed action wrote nothing (`pending_actions.failure_reason`, M5 PR 3). Here, not
+    in `tools.execute`, so the confirm route's types can name it without importing the one module
+    only the confirm service may import (W1)."""
+
+    SLOT_UNAVAILABLE = "slot_unavailable"
+    BOOKING_CHANGED = "booking_changed"
+    NOT_ENABLED = "not_enabled"
+    INVALID_ARGUMENTS = "invalid_arguments"
+
+
 ERROR_MESSAGES: Final[Mapping[ToolErrorCode, str]] = {
     ToolErrorCode.INVALID_ARGUMENTS: "The arguments do not fit this tool's schema.",
     ToolErrorCode.NOT_FOUND: "Nothing matching was found.",

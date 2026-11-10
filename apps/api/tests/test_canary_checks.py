@@ -703,7 +703,11 @@ async def test_the_hybrid_read_path_runs_both_legs_and_the_fusion_in_one_snapsho
 
     @asynccontextmanager
     async def recording(
-        engine: AsyncEngine, business_id: str, *, snapshot: bool = False
+        engine: AsyncEngine,
+        business_id: str,
+        *,
+        snapshot: bool = False,
+        read_committed: bool = False,
     ) -> AsyncIterator[ModelsConnection]:
         opened.append((business_id, snapshot))
         yield connection

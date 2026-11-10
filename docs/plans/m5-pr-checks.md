@@ -55,9 +55,9 @@ written without an explicit confirmation, executed exactly once.
 
 ## Write-safety rules W1–W12 (fixed before any code; tests in PR 2–5 pin them)
 - **W1 · The loop cannot write.** Its tool runner has reads and `propose` only. A write tool the
-  model picks becomes a `WriteProposal`, and the turn ends at once. A test checks that nothing
-  under `agent/` or `packages/mcp_server/` imports the execute function; only the confirm service
-  does.
+  model picks becomes a `WriteProposal`, and the turn ends at once. A test checks that no module
+  under `src/` or `packages/mcp_server/` imports `tools.execute` except `actions/confirm.py`, the
+  confirm service (PR 3's import fences).
 - **W2 · Confirmation is a separate call with its own credential** [D3]. Proposal creation makes a
   128-bit `confirm_token` (`secrets.token_urlsafe`), stores only its hash, and returns it only in
   `/v1/agent`'s HTTP response: never in an observation, the prompt, the audit, logs or MCP
@@ -73,9 +73,10 @@ written without an explicit confirmation, executed exactly once.
 - **W4 · Every write needs confirmation,** `create_ticket` included; there is no exception list.
 - **W5 · Exactly once** [D4]. The action id is the idempotency key. Confirm locks the action,
   re-runs the full proposal validation inside the write transaction (booking exists, is `active`,
-  is the customer's and has not started by the sandbox clock, locked `FOR UPDATE`; slot free and in the future by the sandbox clock; tool
-  still enabled), writes, inserts the `executed` audit row and marks the action `executed` with its
-  result, all in one transaction. A second confirm returns the stored result.
+  is the customer's and has not started by the sandbox clock, locked `FOR UPDATE`; slot free and
+  in the future by the sandbox clock; tool still enabled), writes, inserts the `executed` audit
+  row and marks the action `executed` with its result, all in one transaction, its deferred
+  action keys checked before COMMIT (PR 3). A second confirm returns the stored result.
 - **W6 · Expiry and ownership.** `expires_at` is set by the database (`now()` plus a configured 15
   minutes [proposal]); the sandbox clock only decides which slots are in the future. Confirm
   checks: visible for (business, `customer_ref`) and token matches → `executed`/`failed` returns
@@ -87,13 +88,30 @@ written without an explicit confirmation, executed exactly once.
   only in local, test and ci (`business.py:24`); the IDOR is closed only when M8 authenticates the
   customer.
 - **W8 · Reads cannot write.** Read tools run in a snapshot transaction, which is `READ ONLY`
-  (`db.py:47`); confirm runs in READ COMMITTED, so a waiting second confirm re-reads the row as
-  `executed` instead of failing with SQLSTATE 40001.
-- **W9 · Timeouts are bounded on the server** [proposal]. Each tool and confirm transaction starts
-  with `SET LOCAL statement_timeout` and `lock_timeout` below its budget (reads 2 s, writes 5 s);
-  `asyncio.timeout` is only the outer backstop. A timed-out confirm has an unknown outcome to the
-  caller: it returns a typed `outcome_unknown` ("retry confirm"), never "not written", and the retry
-  returns the stored result if it committed or executes it once if it did not.
+  (`db.py:47`); confirm runs in READ COMMITTED, set explicitly (PR 3), so a waiting second confirm
+  re-reads the row as `executed` instead of failing with SQLSTATE 40001.
+- **W9 · Timeouts are bounded on the server; a timed-out confirm is never "not written"**
+  [proposal; PR 3 review]. Each tool, store and confirm transaction starts with transaction-local
+  `statement_timeout` and `lock_timeout` (`set_config(..., true)`) at 75 % and 50 % of its budget
+  (reads 2 s, writes 5 s, an after-the-fact audit 2 s); `asyncio.timeout(budget)` is only the
+  outer backstop. For a confirm, **every timeout** (the asyncio backstop, `statement_timeout`
+  57014, `lock_timeout` 55P03) and any failure while committing is `outcome_unknown` ("retry
+  confirm"), never "not written": a timed-out attempt may have waited behind another confirm of
+  the same action that is about to commit. The retry returns the stored result if a COMMIT landed
+  or executes once if none did. `confirm_failed` is only for another database or network error
+  before the COMMIT was sent: this attempt changed nothing, but a parallel confirm may have run
+  the action, so it says "confirm again", never "not written" (`actions/audit.unknown_outcome`
+  decides between the two). Responses, each with `X-Trace-Id`:
+
+  | Status | Body | Meaning |
+  |---|---|---|
+  | 200 | `ConfirmResponse`, `executed` | written now, or earlier (a repeat: the stored result) |
+  | 409 | `ConfirmResponse`, `failed` | nothing written, a typed reason; a repeat: the same body |
+  | 404 | `action_not_found` | every refusal, one body (W6) |
+  | 503 | `confirm_failed` or `outcome_unknown` | as above; neither says "not written" |
+
+  A missing or refused `X-Business-Id` is a 400, a bad path or body a 422 (echoing nothing), and
+  a bug (`BrokenWrite` included) propagates as a 500.
 - **W10 · Tool outputs are data** [carried rule 5]. Each observation reaches the model inside a
   boundary block recomputed at every step over the whole prompt, and is capped (rows and bytes,
   configuration). Some seeded sandbox fields carry instruction-like text on purpose.
@@ -103,12 +121,22 @@ written without an explicit confirmation, executed exactly once.
   the route fails closed: a normal hand-off (`safety_floor_off`) that shows the business's
   configured emergency guidance. Every `handoff(safety)` the loop produces becomes `Priority.URGENT`
   plus that guidance from configuration, never model text.
-- **W12 · Audit, metadata only, fails closed** [carried ADR 0007]. The `executed` audit row
-  commits in the write's transaction, so no write exists without it. Refused, failed and
-  `outcome_unknown` rows go in a short transaction after the rollback; a read whose audit insert
-  fails returns `unavailable`. One `tool_call` log record per call, cancellations included.
-  Fields: tool, kind, phase, outcome, duration, trace id, action id; no arguments hash
-  (low-entropy ids are reversible), never the arguments, results or token.
+- **W12 · Audit, metadata only, fails closed** [carried ADR 0007; PR 3 review]. The `executed`
+  or `failed` audit row commits in the confirm's transaction, so no write exists without it; a
+  pending action commits with its `stored` row. A refusal of a known action (`wrong_token`,
+  `expired`) and a replay (`replayed`) also commit their audit row inside the confirm's own
+  transaction, so every refusal costs one transaction, as an unknown id does (the one INSERT a
+  known action's refusal adds is a known timing gap). Only a rollback (`rolled_back`) and an
+  unknown outcome (`outcome_unknown`) are audited afterwards, in a short transaction of their own
+  (`audit_after`: it never raises; a failed insert is a warning with the error's type only).
+  A confirm whose tool is unknown is logged only, since `tool_audit.tool` is NOT NULL: an unknown
+  id, another business's or customer's action, a business without tools, and any failure before
+  the action row is read, a `lock_timeout` on the action row itself included [decided
+  2026-11-10, PR 3 review, item 1]. A failed store (no action id yet) and a cancellation are
+  logged only; a read whose audit insert fails returns `unavailable`. One `tool_call` log record
+  per call, with `audited`, cancellations included. Fields: tool, kind, phase, outcome, duration,
+  trace id, action id; no arguments hash (low-entropy ids are reversible), never the arguments,
+  results, token or its hash.
 
 ## Scoring rules (fixed before any scenario; the H2 guide and the harness's tests pin them)
 - **Tool success.** The outcome kind matches (`reply`, `confirmation_required`, `handoff`,
@@ -270,21 +298,48 @@ Measure:  PR 7 close-out (after H1, H2, the freeze and M2 step 11's Anthropic ke
   `order_status` and `reschedule`'s proposal never show customer Y's canary, on both connections.
 
 ## PR 3 — `m5/confirm` (leo; diego reviews the API and transactions) · M · after PR 2, D3, D4
-- **Pending actions:** a service stores a `WriteProposal` with its validated arguments,
-  `customer_ref`, the token hash, a DB-set expiry and status (`pending → executed | failed`).
-  The proposal lifetime setting is checked at startup to be > 0 and ≤ 1 hour, migration 0006's
-  CHECK, so a typo stops startup instead of giving SQLSTATE 23514 on every proposal [PR 1 review,
-  diego]. The write row, the audit row and `executed` go in one transaction: the action keys are
-  checked at commit.
-- **`POST /v1/agent/actions/{id}/confirm`** (`X-Business-Id`, `customer_ref`, `confirm_token`): W2,
-  W5, W6, W8 and W9, checks in W6's order. A unique violation (slot taken) rolls back to a SAVEPOINT
-  and marks the action `failed` with `slot_unavailable`; a changed booking is `booking_changed`.
+- **Pending actions** (`actions/pending.py`): `PendingActionStore.create` validates the
+  proposal's arguments again against the business's input model (refused if that changes them)
+  and stores them with `customer_ref`, the token's SHA-256 (`actions/tokens.py`: 128 bits,
+  compared in constant time, a pydantic `Secret`), a DB-set expiry and status (`pending →
+  executed | failed`), together with its `stored` audit row in one transaction.
+  **`action_lifetime_seconds`** (`VECTAPILOT_ACTION_LIFETIME_SECONDS`, default 900 [proposal]) is
+  bounded in Settings to > 0 and ≤ 3600, migration 0006's CHECK, so a typo stops startup instead
+  of giving SQLSTATE 23514 on every proposal [PR 1 review, diego]; the store checks it again.
+- **`ConfirmService.confirm`** (`actions/confirm.py`): one transaction, **READ COMMITTED set
+  explicitly** as its first statement (`business_transaction(read_committed=True)`, `db.py`), so
+  no server, database or role default can change W8; then the server timeouts (W9); then W6's
+  order: lock the action `FOR UPDATE` by business, customer and id → token → stored result →
+  expiry (`clock_timestamp()`, after any lock wait) → set `confirmed_at` and `confirm_trace_id`,
+  `tools.execute`, mark `executed` or `failed`, insert the audit row.
+  **`SET CONSTRAINTS ALL IMMEDIATE`** is the body's last statement before COMMIT: migration
+  0006's deferred action keys are checked there, so a violation is `BrokenWrite` (a bug: a 500,
+  audited `rolled_back`), not a failed COMMIT that would read as `outcome_unknown` and fail every
+  retry the same way until the action expires. The COMMIT can then fail only in transport.
+  Migration 0006 is unchanged.
+- **`POST /v1/agent/actions/{id}/confirm`** (`X-Business-Id`; the body is `{customer_ref,
+  confirm_token}` only, `extra="forbid"`; the token is in the body, never the URL): W2, W5, W6,
+  W8, W9 and W12, with W9's responses. A unique violation (slot taken) rolls back to a SAVEPOINT
+  and marks the action `failed` with `slot_unavailable`; a changed booking is `booking_changed`, a
+  disabled tool `not_enabled`, arguments that no longer fit `invalid_arguments`.
+- **Import fences (W1, W2)** (`tests/actions/test_write_boundary.py`, unit, a red proof per
+  spelling): only `actions/confirm.py` imports `tools.execute`, across every module under `src/`
+  and `packages/mcp_server/` (absolute, relative, attribute-chain and `importlib.import_module` /
+  `__import__` spellings); only `main.py` imports `actions.pending`, the one holder of a token,
+  and the MCP server imports nothing of `vectapilot_api.actions`; only `actions/confirm.py` (and
+  the migrations) names `confirmed_at` or `confirm_trace_id` in SQL; the confirm is the one route
+  under `/v1/agent`. Tripwires for ordinary spellings, not a sandbox: the deferred keys are the
+  database's fence, review the third.
 - **Tests:** double and concurrent confirms leave one row; two actions for one slot and two
   reschedules of one booking (sequential and concurrent) leave one active booking, the loser
   writing nothing; the id without the token cannot confirm, and the token is never in `caplog` or
   `tool_audit`; a timeout after COMMIT plus a retry gives one row and the stored result; a
-  rolled-back confirm leaves one `failed` audit row; an executed action confirmed after expiry
-  returns its result; a raw owner write for an unconfirmed action is counted; refused outside
+  `lock_timeout` on the action is `outcome_unknown`, logged only (tool `None`), and the retry runs
+  once; a `lock_timeout` on the booking is an audited `outcome_unknown`; a confirm rolled back by
+  another error before COMMIT is `confirm_failed` with one `rolled_back` audit row; a broken action
+  key is `BrokenWrite` with nothing written; with the session default SERIALIZABLE, two concurrent
+  confirms still return one stored result; an executed action confirmed after expiry returns its
+  result; a raw owner write for an unconfirmed action is counted; refused outside
   `HEADER_ENVIRONMENTS`.
 - **Canary:** confirm joins `WRITE_PATHS` (an action `plant` creates for the actor); confirming
   A's action as B is the 404 with nothing changed.
@@ -481,6 +536,17 @@ The options below stay as the record of what was weighed.
    row ids match; a booking starting exactly at "now" is not started (as `book`), so it can be
    moved. PR 3's confirm inherits it through W5's re-validation. Tests: unit (days ago, 1 µs ago,
    exactly now, future) and integration (days ago, in progress, exactly now, future).
+
+## Decided 2026-11-10 (shesha, M5 PR 3 review)
+1. **A `lock_timeout` on the action row itself stays log-only for M5.** Its tool is unknown (the
+   row was never read) and `tool_audit.tool` is NOT NULL, so the call leaves one `tool_call`
+   record (`outcome_unknown`, `audited: false`, tool `None`) and no audit row; the caller still
+   gets `outcome_unknown` and the retry runs once (W9, W12; tested).
+
+The review's other changes are team recommendations applied in lean mode, not separate
+decisions: every timeout is `outcome_unknown` (W9); refusals of known actions and replays audit
+in the confirm's transaction (W12); `SET CONSTRAINTS ALL IMMEDIATE` before COMMIT, explicit READ
+COMMITTED, `action_lifetime_seconds` and the import fences (PR 3).
 
 ## Risks
 - **Small n.** About 20 test scenarios (an estimate under D8 (b)): 20 of 20 has a Wilson lower
