@@ -28,6 +28,20 @@
       "name": "Vaccinations"
     }
   ],
+  "ticket_categories": [
+    {
+      "id": "appointment",
+      "name": "Appointments"
+    },
+    {
+      "id": "feedback",
+      "name": "Feedback"
+    },
+    {
+      "id": "other",
+      "name": "Something else"
+    }
+  ],
   "emergency_guidance": [
     "We cannot treat emergencies.",
     "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",

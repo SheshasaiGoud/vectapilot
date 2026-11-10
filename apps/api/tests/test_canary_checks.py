@@ -43,14 +43,17 @@ from tests.canary.checks import (
 )
 from tests.canary.read_paths import (
     BAIT,
+    BAIT_SLOT_IDS,
     BAIT_WORD,
     NEEDED_OUTSIDE_READ_PATHS,
     NEEDS_HAND_WRITE,
     OWNER_CONNECTION_PATHS,
     PENDING_HAND_WRITE,
     READ_PATHS,
+    TOOL_PATHS,
     answer_through_the_api,
     answer_through_the_api_hybrid,
+    bait_slots,
     hybrid_search_as_staff,
     pending_hand_write,
     pending_hand_writes,
@@ -351,12 +354,29 @@ def test_every_search_leg_also_runs_on_the_owners_connection() -> None:
     # Every read path that is neither the whole-table SQL nor an API route runs a statement
     # with its own business clause, so it also runs where RLS cannot help (M3 PR 4 added
     # hybrid_search: both legs' clauses, through the fusion).
+    # M5 PR 2 added the tool paths: every tool statement's own business clause, the same way.
     legs = {name for name in READ_PATHS if name != "sql" and not API_ROUTE.match(name)}
     assert (
-        legs == OWNER_CONNECTION_PATHS.keys() == {"vector_search", "text_search", "hybrid_search"}
+        legs
+        == OWNER_CONNECTION_PATHS.keys()
+        == {"vector_search", "text_search", "hybrid_search", *TOOL_PATHS}
     )
+    assert set(TOOL_PATHS) == {
+        "tool check_slots",
+        "tool order_status",
+        "tool book (propose)",
+        "tool reschedule (propose)",
+    }
     # The very read path the app role runs, not a copy that could drift from it.
     assert all(OWNER_CONNECTION_PATHS[name] is READ_PATHS[name] for name in legs)
+
+
+def test_the_bait_booking_is_asymmetric() -> None:
+    # Each business's free bait slot is the one the other business booked, so a booking check
+    # without its own business clause hides it (zara's M5 PR 2 review).
+    assert bait_slots(A.business_id) == BAIT_SLOT_IDS
+    assert bait_slots(B.business_id) == BAIT_SLOT_IDS[::-1]
+    assert bait_slots(A.business_id)[1] == bait_slots(B.business_id)[0]
 
 
 def marking_problems(

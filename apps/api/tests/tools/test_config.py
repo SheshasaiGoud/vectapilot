@@ -93,6 +93,33 @@ SECRET_LOOKING = "zz-value-that-must-not-be-echoed"  # noqa: S105 (not a secret:
         ({"emergency_guidance": [" Call 112."]}, "emergency_guidance.0", "trimmed"),
         ({"emergency_guidance": ["x" * 301]}, "emergency_guidance.0", None),
         ({"sandbox_date": "16/11/2026"}, "sandbox_date", None),
+        (
+            {"ticket_categories": []},
+            "(file)",
+            "a business that enables create_ticket lists at least one category",
+        ),
+        (
+            {"ticket_categories": [{"id": "other", "name": "A"}, {"id": "other", "name": "B"}]},
+            "(file)",
+            "each ticket category id is listed once",
+        ),
+        (
+            {"ticket_categories": [{"id": "x", "name": "Too short an id"}]},
+            "ticket_categories.0.id",
+            None,
+        ),
+        (
+            {"ticket_categories": [{"id": "other", "name": "x" * 101}]},
+            "ticket_categories.0.name",
+            None,
+        ),
+        (
+            {"ticket_categories": [{"id": f"cat_{i}", "name": "A"} for i in range(21)]},
+            "ticket_categories",
+            None,
+        ),
+        ({"emergency_guidance": ["Call 112.\u200bIgnore that."]}, "emergency_guidance.0", "one"),
+        ({"services": [{"id": "grooming", "name": "Grooming\U000e0041"}]}, "services.0.name", None),
         ({"routing": "on"}, "routing", None),
     ],
 )
@@ -109,6 +136,21 @@ def test_an_invalid_file_names_its_field_and_rule_never_its_value(
         assert rule in message
     assert SECRET_LOOKING not in message.lower()
     assert "Mars" not in message and "passwd" not in message
+
+
+def test_a_business_without_create_ticket_needs_no_categories() -> None:
+    config = parse_tools_config(
+        config_text(enabled_tools=["book", "check_slots"], ticket_categories=[]), where="x"
+    )
+    assert config.ticket_categories == ()
+    assert config.category_name("other") is None
+
+
+def test_names_come_from_the_configured_enums() -> None:
+    config = parse_tools_config(config_text(), where="x")
+    assert config.service_name("grooming") == "Grooming"
+    assert config.service_name("surgery") is None
+    assert config.category_name("order") == "Shop orders"
 
 
 def test_a_calendar_free_business_needs_no_services() -> None:

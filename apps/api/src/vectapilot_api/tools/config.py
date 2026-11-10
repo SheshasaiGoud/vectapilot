@@ -10,6 +10,9 @@ business type.
   business enables a subset; an unknown name is refused, never ignored.
 - **Services are a closed enum per business.** `check_slots`' `service` argument (PR 2) is one of
   these ids, so the model cannot invent a service, and a summary shows the configured name.
+- **Ticket categories are a closed enum per business** (M5 PR 2, [proposal]): `create_ticket`'s
+  `category` is one of these ids, and its summary shows the configured name. A business that
+  enables `create_ticket` lists at least one.
 - **Emergency guidance is copied, never written here** (W11): each line is a verbatim sentence of
   the business's own synthetic `emergency.md` (a test checks it), so no safety text is invented.
   For a health business the agent route shows it whenever it fails closed or a loop hands off for
@@ -23,6 +26,7 @@ Every error names the file, the fields and the rule, never a value (`hide_input_
 """
 
 import re
+import unicodedata
 import zoneinfo
 from datetime import date
 from enum import StrEnum
@@ -72,6 +76,26 @@ TICKET_SUMMARY_MAX: Final = 500
 
 _CONTROL: Final = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]")
 """Control characters, line and paragraph separators: a configured line stays one line."""
+_INVISIBLE_CATEGORIES: Final = frozenset({"Cf", "Co", "Cn", "Cs"})
+"""Format characters (zero-width spaces, bidi overrides, tag characters), private-use,
+unassigned and surrogate code points: text a person cannot see on a confirmation screen but a
+model reading the stored text receives as tokens ("ASCII smuggling"). Refused, so what the customer
+sees is what is stored (W3)."""
+_JOINERS: Final = frozenset({"\u200c", "\u200d"})
+"""ZWNJ and ZWJ (both `Cf`): Devanagari and Telugu need them to choose a conjunct's shape, and the
+pilot businesses write Hindi and Telugu, so they stay allowed."""
+_VARIATION_SUPPLEMENT: Final = range(0xE0100, 0xE01F0)
+"""Variation selectors 17-256 (`Mn`, so not caught by category): no script we serve needs them,
+and a run of them carries hidden bytes as tag characters do."""
+
+
+def _invisible(character: str) -> bool:
+    if character in _JOINERS:
+        return False
+    return (
+        unicodedata.category(character) in _INVISIBLE_CATEGORIES
+        or ord(character) in _VARIATION_SUPPLEMENT
+    )
 
 
 class ToolName(StrEnum):
@@ -117,9 +141,10 @@ class ToolsModel(BaseModel):
 
 
 def single_line(value: str) -> str:
-    """`value` if it is one trimmed line without control characters; else a ValueError."""
-    if _CONTROL.search(value) or value != value.strip():
-        raise ValueError("text fields are one trimmed line without control characters")
+    """`value` if it is one trimmed line without control or invisible characters; else a
+    ValueError. The message stays the one fixed sentence, so no value is echoed."""
+    if _CONTROL.search(value) or value != value.strip() or any(map(_invisible, value)):
+        raise ValueError("text fields are one trimmed line without control or invisible characters")
     return value
 
 
@@ -128,6 +153,13 @@ SingleLine = Annotated[str, Field(min_length=1), AfterValidator(single_line)]
 
 class Service(ToolsModel):
     """One bookable service: the id the tools use and the name a summary shows."""
+
+    id: Code
+    name: Annotated[SingleLine, Field(max_length=100)]
+
+
+class TicketCategory(ToolsModel):
+    """One ticket category: the id `create_ticket` takes and the name its summary shows."""
 
     id: Code
     name: Annotated[SingleLine, Field(max_length=100)]
@@ -143,6 +175,7 @@ class ToolsConfig(ToolsModel):
     sandbox_date: date
     enabled_tools: tuple[ToolName, ...]
     services: tuple[Service, ...]
+    ticket_categories: tuple[TicketCategory, ...] = Field(default=(), max_length=20)
     emergency_guidance: tuple[Annotated[SingleLine, Field(max_length=300)], ...] = Field(
         min_length=1, max_length=10
     )
@@ -174,6 +207,10 @@ class ToolsConfig(ToolsModel):
             raise ValueError("each service id is listed once")
         if CALENDAR_TOOLS & set(self.enabled_tools) and not self.services:
             raise ValueError("a business that enables a calendar tool lists at least one service")
+        if len({category.id for category in self.ticket_categories}) != len(self.ticket_categories):
+            raise ValueError("each ticket category id is listed once")
+        if ToolName.CREATE_TICKET in self.enabled_tools and not self.ticket_categories:
+            raise ValueError("a business that enables create_ticket lists at least one category")
         return self
 
     @property
@@ -188,6 +225,14 @@ class ToolsConfig(ToolsModel):
     @property
     def service_ids(self) -> frozenset[str]:
         return frozenset(service.id for service in self.services)
+
+    def service_name(self, service_id: str) -> str | None:
+        """The configured name of `service_id`, or None when the business has no such service."""
+        return next((s.name for s in self.services if s.id == service_id), None)
+
+    def category_name(self, category_id: str) -> str | None:
+        """The configured name of ticket category `category_id`, or None."""
+        return next((c.name for c in self.ticket_categories if c.id == category_id), None)
 
 
 def parse_tools_config(text: str, *, where: str) -> ToolsConfig:
