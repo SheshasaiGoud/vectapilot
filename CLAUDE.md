@@ -207,10 +207,11 @@ Planned: `packages/mcp_server/`, `scripts/`.
   for M2 step 11's keys.
   - Merged: PR 0 plan (#50), PR 1 (#51: intent list, route policy, dataset format, `intenteval`,
     writers' brief), PR 2 (#52: 400 training rows, draft hash, 80-id sample), PR 3 (#54: classifier
-    scoring, calibration, LLM fallback, H1 scaffold). PR 4 (eval harness, M4 spend at $2.00,
-    scikit-learn dev-only, H2 scaffold) in review. shesha: H1 (`route_message`, guide
+    scoring, calibration, LLM fallback, H1 scaffold), PR 4 (#55: eval harness, M4 spend at $2.00,
+    scikit-learn dev-only, H2 scaffold). H2 (metrics, `m4/metrics`) written by Claude at shesha's
+    request (D4), 2026-11-10, in review; explain-back due. shesha: H1 (`route_message`, guide
     `docs/learning/m4-router.md`) and the eval rows from the writers' brief, never opening
-    `train.jsonl`. Then H2 (Claude), then PR 5 close-out (live steps, shesha only).
+    `train.jsonl`. Then PR 5 close-out (live steps, shesha only).
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

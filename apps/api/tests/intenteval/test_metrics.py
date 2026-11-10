@@ -1,16 +1,12 @@
 """H2 tests: the router's metric functions (guide: docs/learning/m4-metrics.md).
 
-The four functions in `intenteval/metrics.py` are [HAND-WRITE] (D4 (b): Claude writes them at
-shesha's request, on `m4/metrics`). Until then they raise NotImplementedError, so the whole module
-is marked `xfail(strict=True, raises=NotImplementedError)`:
+The four functions in `intenteval/metrics.py` are [HAND-WRITE] (D4 (b): written by Claude at
+shesha's request, on `m4/metrics`, 2026-11-10). Until then the module was a strict xfail
+(`raises=NotImplementedError`); the bodies turned every test into XPASS(strict), and the mark was
+then deleted, so every test here must simply pass.
 
-- not implemented yet          → "xfailed" (expected);
-- implemented, wrong answer    → a normal failure (only NotImplementedError counts as expected);
-- implemented, right answer    → "XPASS(strict)", a failure on purpose: that is the signal.
-
-When no test here is xfailed any more, delete the `pytestmark` statement below and run again:
-every test must then simply pass. Change the code, never a fixture: every expected value here was
-worked out by hand (the comments show the arithmetic), before any code existed.
+Change the code, never a fixture: every expected value here was worked out by hand (the comments
+show the arithmetic), before any code existed.
 
 Every row is made up; no number here is a result.
 """
@@ -32,12 +28,6 @@ from vectapilot_api.intenteval.metrics import (
     reliability_bins,
 )
 from vectapilot_api.intents.taxonomy import DECISION_ORDER, Intent
-
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    raises=NotImplementedError,
-    reason="H2 (M4): intenteval/metrics.py — see docs/learning/m4-metrics.md",
-)
 
 E, PJ, C, R, HR, AR, Q, OOS = DECISION_ORDER
 
@@ -205,6 +195,61 @@ def test_bins_are_equal_width_placed_exactly_with_1_in_the_last() -> None:
         assert got.mean_confidence == pytest.approx(mean, abs=1e-12)
 
 
+# Bins are closed on the left, [low, high), and only the last one also holds its high edge.
+# With 5 bins, 0.0 and 1.0 are the only edges a float hits exactly (the floats 0.2 and 0.4 sit
+# just above 1/5 and 2/5), so the edge rule needs a power-of-two bin count to be visible:
+#   (0.0, 5) → 0: the left edge of bin 0 (a right-closed rule, ceil(p·5) - 1, would say -1).
+#   (0.2, 5) → 1 and (0.4, 5) → 2: just above the edge, so the next bin up.
+#   (0.25, 4) → 1 and (0.5, 4) → 2: exact edges, and an exact edge opens the upper bin.
+#   (1.0, 4) → 3: 1.0 is the high edge of the last bin, which keeps it.
+@pytest.mark.parametrize(
+    ("p", "bins", "index"),
+    [(0.0, 5, 0), (0.2, 5, 1), (0.4, 5, 2), (0.25, 4, 1), (0.5, 4, 2), (1.0, 4, 3)],
+)
+def test_an_exact_edge_opens_the_upper_bin(p: float, bins: int, index: int) -> None:
+    table = reliability_bins((p,), (True,), bins=bins)
+
+    assert len(table) == bins
+    assert [i for i, b in enumerate(table) if b.n] == [index]
+    assert table[index].low == Fraction(index, bins)
+    assert table[index].high == Fraction(index + 1, bins)
+
+
+def test_four_bins_with_one_confidence_on_each_left_edge() -> None:
+    # 0, 1/4, 1/2 and 3/4 are exact floats, each the low edge of its own bin.
+    table = reliability_bins((0.0, 0.25, 0.5, 0.75), (True, True, False, True), bins=4)
+
+    assert [b.n for b in table] == [1, 1, 1, 1]
+    assert [b.mean_confidence for b in table] == [0.0, 0.25, 0.5, 0.75]
+    assert [b.accuracy for b in table] == [Fraction(1), Fraction(1), Fraction(0), Fraction(1)]
+    assert reliability_bins((0.5,), (True,), bins=2)[1].n == 1
+
+
+def test_a_confidence_of_0_is_a_probability() -> None:
+    # [0, 1] is closed at both ends: a top probability of 0.0 is odd but valid, and it is bin 0.
+    table = reliability_bins((0.0,), (False,))
+
+    assert [b.n for b in table] == [1, 0, 0, 0, 0]
+    assert table[0].mean_confidence == 0.0
+    assert table[0].accuracy == Fraction(0)
+
+
+def test_int_confidences_are_accepted_and_averaged_as_floats() -> None:
+    # The contract takes any finite real number in [0, 1]; the ints 0 and 1 qualify. The mean
+    # stays a float (probabilities are floats; only counts are Fractions).
+    table = reliability_bins((1, 0), (True, False))
+
+    assert [(b.n, b.mean_confidence) for b in table] == [
+        (1, 0.0),
+        (0, None),
+        (0, None),
+        (0, None),
+        (1, 1.0),
+    ]
+    assert type(table[0].mean_confidence) is float
+    assert type(table[4].mean_confidence) is float
+
+
 def test_an_empty_bin_has_no_mean_and_no_accuracy() -> None:
     bins = reliability_bins((0.9, 0.95), (True, False))
 
@@ -228,11 +273,24 @@ def test_the_bins_do_not_depend_on_row_order() -> None:
         ((math.nan,), (True,), 5),
         ((0.5,), (1,), 5),  # an int is not a bool
         ((0.5,), (True,), 0),
+        ((True,), (True,), 5),  # a bool is not a confidence, even though True == 1
+        ((0.5,), (True,), True),  # a bool is not a bin count (it would mean one bin)
+        ((0.5,), (True,), 2.5),  # a float bin count is a ValueError, not range()'s TypeError
     ],
-    ids=["length", "above-1", "negative", "nan", "not-bool", "no-bins"],
+    ids=[
+        "length",
+        "above-1",
+        "negative",
+        "nan",
+        "not-bool",
+        "no-bins",
+        "bool-confidence",
+        "bins-bool",
+        "bins-float",
+    ],
 )
 def test_bins_refuse_what_is_not_a_confidence_table(
-    confidences: tuple[float, ...], correct: tuple[object, ...], bins: int
+    confidences: tuple[object, ...], correct: tuple[object, ...], bins: object
 ) -> None:
     with pytest.raises(ValueError):
         reliability_bins(confidences, correct, bins=bins)  # type: ignore[arg-type]
