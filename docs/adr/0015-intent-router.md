@@ -159,6 +159,9 @@ Each part:
      folder names never match M3's pattern (tested).
 10. **Integration** (D6: not in M4). `POST /v1/answer`, `route` (`rag`) and the
     `rag_answer` record are unchanged in M4. Wiring comes with M5's tool route, behind a setting.
+    *Amended 2026-11-10 (shesha, M5 D7 (a); ADR 0016):* M5 puts `route_message` in front of
+    `/v1/agent` behind `agent_router` (default off); while it is off, health businesses fail closed
+    there, and `POST /v1/answer` stays unchanged.
 11. **Not in M4.**
     - **LoRA or any fine-tuning.** There is no GPU, the Mac has 8 GB, and a fine-tune of a hosted
       model is outside the gateway. It is worth reconsidering only if a measured gap between the

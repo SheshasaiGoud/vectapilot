@@ -12,7 +12,7 @@ export interface Milestone {
   pending?: string;
 }
 
-export const currentMilestone = "M4";
+export const currentMilestone = "M5";
 
 /** Teammates who review every milestone; shown as always active. */
 export const reviewers: string[] = ["maya-tech-lead"];
@@ -50,6 +50,7 @@ export const milestones: Milestone[] = [
     title: "Intent router",
     summary: "Trained classifier with an LLM fallback",
     owners: ["kenji-ml", "noah-evals"],
+    pending: "H1, eval rows and live runs pending",
   },
   {
     id: "M5",
