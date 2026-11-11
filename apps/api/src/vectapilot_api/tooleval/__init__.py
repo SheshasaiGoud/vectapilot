@@ -14,8 +14,8 @@ The harness (`run`, `summarize`, `label-sheet`):
 - `turns` — one scenario: reset, the agent service with `router=none`, the leak check, the confirm
   of a matching proposal (twice, once concurrently), and the counts from the database
 - `writes` — those counts: read-only SQL on the owner's connection, by business and trace id
-- `metrics` — **H2 [HAND-WRITE]**: the five metric functions (stubs until written; guide
-  docs/learning/m5-metrics.md)
+- `metrics` — **H2 [HAND-WRITE]**: the five metric functions (written 2026-11-11 by Claude at
+  shesha's request, D5 (b), in review; guide docs/learning/m5-metrics.md)
 - `summary` — `summary.md`, from the results through H2
 - `ledger`, `spend` — the test-run ledger, and M5's spend against D8's $1.00
 - `harness`, `runs` — what every harness command shares, and the commands
