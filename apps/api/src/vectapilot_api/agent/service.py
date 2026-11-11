@@ -9,7 +9,18 @@ the pending-action store.
    `tools.json` or the corpus manifest says so):
    - `agent_router = off`: fail closed. A normal hand-off (`safety_floor_off`) with the business's
      emergency guidance, before any model call or tool.
-   - `agent_router = on`: the router first (`routing.ClassifierRouter`, M4's `route_message`).
+   - `agent_router = on`: the router first (`routing.ClassifierRouter`, M4's `route_message`),
+     inside `asyncio.timeout(agent_router_timeout_seconds)` [decided 2026-11-11]. Its expiry
+     and any router exception fail closed as `router_failed` (`_router_failed`). Before the
+     classifier has scored the message (`RouterProgress.top1` is None), both are urgent for a
+     health business and high for any other [decided 2026-11-11, shesha]. After scoring, both
+     hand off as `route_message`'s own fail-closed step would (urgent when the top-1's route is
+     an urgent hand-off, else high) [decided 2026-11-11, shesha], so the kind of failure never
+     decides urgency. The guidance is shown for a health business or an urgent hand-off.
+     Expiry is told apart from a `TimeoutError` the router raises by `.expired()` and recorded
+     as `router_timeout`; it wins even when the router swallows its cancel and returns a
+     decision (never followed) or turns it into another exception. The answer and the loop run
+     after the scope.
      The service does not trust the decision's route: it recomputes the route from the
      business's own policy (`policy.route(intent)`), and a decision that disagrees fails closed
      (`router_failed`: urgent with the guidance for a safety intent or an urgent route, else
@@ -43,15 +54,16 @@ harness (PR 6) calls it, its report says "safety floor not exercised", no settin
 (the harness passes `CapReached`, so a spend cap stops a run instead of reading as a hand-off).
 
 **One `agent_turn` record per message**, metadata only: business, trace id, prompt version,
-routing, the router model's artifact sha256 (under `on`), kind, reason, priority, intent and
-how it was decided, the proposal's tool and action id, steps, the exception's class name,
-latency. Never the message, a reply, an observation, the
+routing, the router model's artifact sha256 (under `on`), whether the router ran past its limit,
+kind, reason, priority, intent and how it was decided, the proposal's tool and action id, steps,
+the exception's class name, latency. Never the message, a reply, an observation, the
 arguments, the summary or the token.
 """
 
 import asyncio
 import contextlib
 import logging
+import math
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -71,7 +83,7 @@ from vectapilot_api.agent.responses import (
     ReplyResponse,
     handoff_reason,
 )
-from vectapilot_api.agent.routing import IntentRouter
+from vectapilot_api.agent.routing import IntentRouter, RouterProgress
 from vectapilot_api.agent.step_model import GatewayStepModel
 from vectapilot_api.agent.tools import BoundTools
 from vectapilot_api.agent.types import (
@@ -138,6 +150,7 @@ class _Tally:
     steps: int = 0
     error: str | None = None
     decision: RouteDecision | None = None
+    router_timeout: bool = False
 
 
 class AgentService:
@@ -155,6 +168,7 @@ class AgentService:
         turn_timeout_s: float,
         routing: AgentRouting = "off",
         router: IntentRouter | None = None,
+        router_timeout_s: float | None = None,
         router_artifact: str | None = None,
         loop: TurnLoop = run_turn,
         propagate: tuple[type[Exception], ...] = (),
@@ -162,8 +176,14 @@ class AgentService:
     ) -> None:
         if routing == "on" and router is None:
             raise ValueError("agent_router = on needs a router")
+        if routing == "on" and router_timeout_s is None:
+            raise ValueError("agent_router = on needs a router timeout")
         if not turn_timeout_s > 0:
             raise ValueError("the turn timeout must be positive")
+        if router_timeout_s is not None and not (
+            math.isfinite(router_timeout_s) and router_timeout_s > 0
+        ):
+            raise ValueError("the router timeout must be positive and finite")
         self._profiles = profiles
         self._gateway = gateway
         self._store = store
@@ -172,6 +192,7 @@ class AgentService:
         self._turn_timeout_s = turn_timeout_s
         self._routing: AgentRouting = routing
         self._router = router
+        self._router_timeout_s = router_timeout_s
         self._router_artifact = router_artifact
         self._loop = loop
         self._propagate = propagate
@@ -250,22 +271,40 @@ class AgentService:
     ) -> AgentRun | None:
         """The router's decision as a response, or None when the message goes to the loop."""
         policy = profile.policy
-        guidance = profile.guidance if profile.health else ()
-        if self._router is None:  # pragma: no cover (refused in __init__)
-            raise RuntimeError("agent_router = on needs a router")
+        if self._router is None or self._router_timeout_s is None:  # pragma: no cover
+            raise RuntimeError("agent_router = on needs a router and its timeout")  # (__init__)
+        # The router's own limit [decided 2026-11-11]: the embedding and the fallback call only,
+        # never the answer or the loop below. Its expiry cancels the router, so nothing it started
+        # keeps running; a cancel from outside is not this scope's and propagates unchanged.
+        progress = RouterProgress()
+        scope = asyncio.timeout(self._router_timeout_s)
         try:
-            decision = await self._router.route(
-                request.message,
-                policy=policy,
-                business_id=profile.business_id,
-                trace_id=trace_id,
-            )
+            async with scope:
+                decision = await self._router.route(
+                    request.message,
+                    policy=policy,
+                    business_id=profile.business_id,
+                    trace_id=trace_id,
+                    progress=progress,
+                )
+        except TimeoutError as failure:
+            if scope.expired():
+                return self._router_failed(profile, trace_id, tally, progress, expired=True)
+            # Raised inside the router, not its limit: a failure like any other (below).
+            tally.error = type(failure).__name__
+            return self._router_failed(profile, trace_id, tally, progress, expired=False)
         except self._propagate:
             raise
         except Exception as failure:
-            # The safety step did not run: fail closed, with the guidance for a health business.
+            # The safety step did not run: fail closed (`_router_failed`).
             tally.error = type(failure).__name__
-            return self._handoff(trace_id, HandoffReason.ROUTER_FAILED, Priority.HIGH, guidance)
+            # A router that turned its limit's cancel into another exception is still its limit.
+            expired = scope.expired()
+            return self._router_failed(profile, trace_id, tally, progress, expired=expired)
+        if scope.expired():
+            # The router swallowed its limit's cancel and returned anyway (a broad `except` in
+            # it). The limit still wins: its decision is never followed, so no loop and no answer.
+            return self._router_failed(profile, trace_id, tally, progress, expired=True)
         tally.decision = decision
         intent = decision.intent
         if decision.decided_by == "fail_closed" or intent is None:
@@ -306,6 +345,47 @@ class AgentService:
             expected.priority or Priority.NORMAL,
             profile.guidance if expected.priority is Priority.URGENT else (),
             decision=decision,
+        )
+
+    def _router_failed(
+        self,
+        profile: AgentProfile,
+        trace_id: str,
+        tally: _Tally,
+        progress: RouterProgress,
+        *,
+        expired: bool,
+    ) -> AgentRun:
+        """The router ran past its own limit (`expired`) or raised: the safety step did not
+        finish, so fail closed as `router_failed`.
+
+        - **Before any score** (`progress.top1` is None: still embedding, or the router failed
+          before scoring), timeout and exception alike: a health business (`profile.health`, from
+          its business type) hands off **urgent** with its guidance, because nothing has cleared
+          the message; any other business high, without it [decided 2026-11-11, shesha,
+          router-timeout review]. So timing never decides urgency.
+        - **After scoring** (`progress.top1` set), timeout and exception alike hand off exactly
+          as `route_message`'s own fail-closed step does when its fallback call fails (its
+          contract, step 4): urgent when the top-1's route is an urgent hand-off, else high
+          [router-timeout review, zara; the exception too: decided 2026-11-11, shesha]. So the
+          kind of failure never decides urgency either: a scored emergency stays urgent whether
+          the limit fired or the router raised.
+
+        The guidance is shown for a health business, or whenever the hand-off is urgent (§3.5:
+        an emergency is urgent everywhere). `expired` only feeds the record (`router_timeout`);
+        it never changes the priority or the guidance."""
+        tally.router_timeout = expired
+        top1 = progress.top1
+        if top1 is None:
+            urgent = profile.health
+        else:
+            urgent = profile.policy.route(top1).priority is Priority.URGENT
+        shown = profile.guidance if profile.health or urgent else ()
+        return self._handoff(
+            trace_id,
+            HandoffReason.ROUTER_FAILED,
+            Priority.URGENT if urgent else Priority.HIGH,
+            shown,
         )
 
     async def _answer(
@@ -470,6 +550,7 @@ class AgentService:
             else decision.intent.value,
             "decided_by": None if decision is None else decision.decided_by,
             "router_artifact": self._router_artifact if tally.routing == "on" else None,
+            "router_timeout": tally.router_timeout,
             "tool": response.tool.value if isinstance(response, ConfirmationResponse) else None,
             "action_id": (
                 str(response.action_id) if isinstance(response, ConfirmationResponse) else None

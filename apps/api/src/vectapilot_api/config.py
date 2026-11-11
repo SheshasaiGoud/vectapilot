@@ -22,6 +22,23 @@ MIN_CANDIDATE_K: Final = 10
 """`rag_candidate_k`'s floor (M3 plan PR 4): PR 5's headroom count reads hit@10 on the fused list,
 so it must hold at least 10 hits when that many chunks qualify."""
 
+AGENT_ROUTER_TURN_BOUND_SECONDS: Final = 60.0
+"""The most `/v1/agent`'s router and turn may take together [proposal, not a measurement;
+decided 2026-11-11 that one exists]: `agent_router_timeout_seconds + agent_turn_timeout_seconds`
+must not exceed it (checked at startup). Why 60 s: a hand-off is only useful if it arrives, and
+60 s is the default idle or read timeout of common reverse proxies and load balancers (nginx's
+`proxy_read_timeout`, AWS ALB's idle timeout); M10 picks the real proxy, revisit then.
+
+**Not a bound on the whole request** [router-timeout review, zara]: `/v1/agent` has no outer
+timeout. Outside this bound are storing a proposal (one database insert), the `agent_turn` record
+and, under `agent_router = on`, a `rag` route's answer, which keeps `/v1/answer`'s own limits:
+its search's embedding (`batch_deadline_s`: 3 x 30 s attempts + 2 x 8 s waits = 106 s with the
+defaults) and `llm_deadline_seconds` (30 s). So a `rag` route under `on` can take up to about
+15 + 106 + 30 = 151 s plus the search's database time with the defaults, and a proxy error is
+still possible there. Whether to bound it too is open for shesha. Also: the router's 15 s ends
+inside one 30 s embedding attempt, so a single slow embedding request always ends the router
+(`router_failed`, fail closed) rather than being retried."""
+
 ANTHROPIC_SDK_ENV_VARS: Final = (
     "ANTHROPIC_API_KEY",
     "ANTHROPIC_AUTH_TOKEN",
@@ -188,11 +205,12 @@ class Settings(BaseSettings):
     # ── The agent (M5 PR 4, ADR 0016 decisions 4, 5, 7) ──
     # SAFETY BOUNDS [proposal], not latency targets: estimates, never measurements. The agent has
     # its own gateway instance with these limits; `/v1/answer`'s gateway keeps the llm_* ones.
-    # Under `agent_router = on` the router runs BEFORE the turn and outside its timeout: its
-    # embedding (`embeddings_timeout_seconds`, with the runner's retries) and at most one LLM
-    # fallback call (one agent step's deadline). So one request's worst case is about router +
-    # `agent_turn_timeout_seconds` (with the defaults roughly 30 + 8 + 35 s), not the turn alone.
-    # A router timeout of its own is an open proposal for shesha [PR 4 review, kenji].
+    # Under `agent_router = on` the router (its embedding and at most one LLM fallback call) runs
+    # BEFORE the turn, inside its own `agent_router_timeout_seconds` [decided 2026-11-11, PR 4
+    # review; built in the router-timeout follow-up]. So the router and the turn together take at
+    # most `agent_router_timeout_seconds + agent_turn_timeout_seconds`, checked at startup against
+    # `AGENT_ROUTER_TURN_BOUND_SECONDS` (with the defaults 15 + 35 = 50 s of 60 s). Not the whole
+    # request: a `rag` route's answer under `on` is outside it (that constant's docstring).
     agent_llm_attempt_timeout_seconds: Seconds = Field(default=6.0, le=60)
     """Each attempt's limit for an agent step (the agent's own `LLMGateway`)."""
     agent_llm_deadline_seconds: Seconds = Field(default=8.0, le=120)
@@ -202,7 +220,9 @@ class Settings(BaseSettings):
     agent_turn_timeout_seconds: Seconds = Field(default=35.0, le=300)
     """The whole turn's limit around the loop (`turn_timeout`). At least
     `agent_llm_deadline_seconds x agent_max_steps`, so a turn of slow but successful steps is
-    never cut off by its own budget (checked in `_agent_problems`)."""
+    never cut off by its own budget, and with `agent_router_timeout_seconds` at most
+    `AGENT_ROUTER_TURN_BOUND_SECONDS` (both checked in `_agent_problems`), so 300 is a field bound
+    only."""
     agent_router: Literal["off", "on"] = "off"
     """`VECTAPILOT_AGENT_ROUTER` (decided D7 (a)): `off` (the default) fails health businesses
     closed on `/v1/agent` with their emergency guidance (W11); `on` puts M4's router first and
@@ -211,6 +231,18 @@ class Settings(BaseSettings):
     agent_router_model_dir: Path | None = None
     """`VECTAPILOT_AGENT_ROUTER_MODEL_DIR`: M4's model folder (`evals/reports/intents/<version>/
     <UTC>-local-model`) the router scores with under `agent_router = on`."""
+    agent_router_timeout_seconds: Seconds = Field(default=15.0, le=60)
+    """`VECTAPILOT_AGENT_ROUTER_TIMEOUT_SECONDS` [proposal: 15 s, not a measurement]: the router's
+    whole limit under `agent_router = on` (the message's embedding, with the runner's retries,
+    and at most one LLM fallback call). Its expiry hands off as `router_failed`, fail closed:
+    before any score, urgent for a health business and high for any other [decided 2026-11-11,
+    shesha]; after scoring, urgent when the classifier's top-1 scored as an urgent hand-off, else
+    high; with the emergency guidance for a health business or an urgent hand-off
+    (`AgentService`). A router exception hands off by the same rule, so the kind of failure
+    never decides urgency [decided 2026-11-11, shesha]. At least
+    `agent_llm_deadline_seconds`, so a slow but successful fallback call is not always cut off,
+    and with `agent_turn_timeout_seconds` within `AGENT_ROUTER_TURN_BOUND_SECONDS`. Both are
+    checked whatever `agent_router` says, so switching the router on never meets a new refusal."""
 
     @classmethod
     def settings_customise_sources(
@@ -326,6 +358,19 @@ class Settings(BaseSettings):
         if self.agent_llm_deadline_seconds * self.agent_max_steps > self.agent_turn_timeout_seconds:
             problems.append(
                 "agent_turn_timeout_seconds must be >= agent_llm_deadline_seconds x agent_max_steps"
+            )
+        if self.agent_router_timeout_seconds < self.agent_llm_deadline_seconds:
+            problems.append(
+                "agent_router_timeout_seconds must be >= agent_llm_deadline_seconds (the router's"
+                " one fallback call)"
+            )
+        if (
+            self.agent_router_timeout_seconds + self.agent_turn_timeout_seconds
+            > AGENT_ROUTER_TURN_BOUND_SECONDS
+        ):
+            problems.append(
+                "agent_router_timeout_seconds + agent_turn_timeout_seconds must be <="
+                f" {AGENT_ROUTER_TURN_BOUND_SECONDS:g} (AGENT_ROUTER_TURN_BOUND_SECONDS)"
             )
         if self.agent_router == "on":
             if self.agent_router_model_dir is None:

@@ -192,9 +192,22 @@ the model never sees, executes exactly once. Each part:
   guidance**, because the guidance lives only in `tools.json`. Acceptable in M5 (both fictional
   businesses have both files; startup refuses a mismatch); revisit with the per-business
   configuration screen.
-- **Under `on`, the router runs before the turn and outside its timeout**, so one request's worst
-  case is the router's (embedding plus one fallback call) plus the turn's. Documented in
-  `config.py`; a router timeout of its own is open for shesha.
+- **Under `on`, the router runs before the turn, inside its own limit** [decided 2026-11-11,
+  built 2026-11-11]: `agent_router_timeout_seconds` (proposal 15 s) around the embedding and the
+  one fallback call. Expiry fails closed (`router_failed`): once the classifier has scored the
+  message, as `route_message`'s own fail-closed step (urgent when the top-1's route is an urgent
+  hand-off, else high), so whether the router's limit or the fallback's deadline fires first
+  never changes the outcome. Before any score, the limit and any router exception alike hand off
+  **urgent for a health business** (its business type, never a hard-coded id) and high for any
+  other [decided 2026-11-11, shesha], so timing never decides urgency. After scoring, a router
+  exception follows the same top-1 rule as the limit [decided 2026-11-11, shesha], so the kind of
+  failure never decides urgency either. Guidance for a health business or an urgent hand-off.
+  The limit wins even over a router that swallows its cancel. Startup checks router +
+  turn ≤ `AGENT_ROUTER_TURN_BOUND_SECONDS` = 60 s (a proposal: common proxy timeouts), so routing
+  and the turn take at most 50 s with the defaults instead of about 30 + 8 + 35 s. **Not a
+  request bound:** a `rag` route's answer under `on` keeps `/v1/answer`'s own limits, so that
+  path can take about 15 + 106 + 30 = 151 s with the defaults. Documented only [decided
+  2026-11-11, shesha]: revisit when the router is wired.
 - **Model replies are still model text.** A `reply` after a read can misstate a slot or claim a
   booking that never happened. The eval counts false success claims; M7 owns the guard.
 - **New isolation surface.** Six tables, every read path (the read tools, the proposal checks)

@@ -591,6 +591,57 @@ COMMITTED, `action_lifetime_seconds` and the import fences (PR 3).
    `agent_router_timeout_seconds` and wraps the router in it; expiry hands off as
    `router_failed` with the business's guidance (fail closed). It is a prerequisite for
    turning the router on, which itself waits for M4's H1 and a live router model.
+   [Built 2026-11-11, `m5/router-timeout` (leo).] `agent_router_timeout_seconds` [proposal:
+   15 s] wraps only `IntentRouter.route` in `asyncio.timeout`; `CancelledError` is never caught.
+   Expiry is `router_failed`, recorded as `router_timeout: true` in `agent_turn` (a
+   `TimeoutError` the router raises stays an error). [Review 2026-11-11, zara:] the router
+   records the classifier's top-1 (`RouterProgress`) before `route_message` runs, so an expiry
+   during the fallback call hands off as `route_message`'s fail-closed step would (urgent with
+   the guidance for every business when the top-1's route is an urgent hand-off, else high);
+   before any score it is high, with the guidance for a health business. The limit wins even
+   when the router swallows its cancel and returns (the decision is never followed) or turns
+   it into another exception. Startup checks it is at least `agent_llm_deadline_seconds` and
+   that router + turn ≤ `AGENT_ROUTER_TURN_BOUND_SECONDS` = 60 s [proposal: common proxy
+   idle/read timeouts], whatever `agent_router` says; the defaults give 15 + 35 = 50 s. It is
+   not a request bound: outside it are storing a proposal, the record and, under `on`, a `rag`
+   route's answer (`/v1/answer`'s limits: about 15 + 106 + 30 = 151 s with the defaults).
+   Tested with fake routers (in time, past the limit before and after scoring, swallowing,
+   converting); M4's `route_message` is untouched. Open for shesha: (a) a timeout before any
+   score, and a router exception, stay high, not urgent, for a health business; (b) whether a
+   `rag` route under `on` gets a bound of its own. Both decided below.
+
+## Decided 2026-11-11 (shesha, router-timeout review)
+1. **A router failure before any score is urgent for a health business.** When the router fails
+   before the classifier has scored the message (`RouterProgress.top1` is None: the router's
+   limit during the embedding, or any router exception before scoring, a `TimeoutError` it
+   raises included), a health business (`AgentProfile.health`, from its `tools.json` or corpus
+   business type, never a hard-coded id) hands off `router_failed` at **urgent** with its
+   emergency guidance. Any other business keeps the existing mapping (high, no guidance). The
+   timeout and the exception path share one rule (`AgentService._router_failed`), so timing
+   never decides urgency. After scoring nothing changes: an expiry follows the top-1 rule
+   (urgent when the top-1's route is an urgent hand-off, else high), a router exception stays
+   high (with the guidance for a health business). [Superseded for the exception after scoring
+   by item 3: it follows the top-1 rule too.] [Built 2026-11-11, `m5/router-timeout`
+   (leo).] Tests: a health business's timeout and exception before scoring (urgent, guidance),
+   the non-health business unchanged, the after-scoring cases unchanged; the new branch
+   mutation-checked.
+2. **The routed `rag` answer's time bound stays documented only** (`config.py`, ADR 0016, this
+   plan): about 15 + 106 + 30 = 151 s with the defaults. 2026-11-11: shesha decided to revisit it
+   when the router is wired.
+3. **A router exception after scoring follows the top-1 rule, as the limit does.** Once the
+   classifier has scored the message (`RouterProgress.top1` set), a router exception hands off
+   `router_failed` exactly as an expiry of the router's limit does, and as `route_message`'s own
+   fail-closed step would: **urgent** when the top-1's route is an urgent hand-off (an emergency,
+   for every business, the shop included), else high; the emergency guidance for a health
+   business or any urgent hand-off. This replaces "a router exception after scoring stays high"
+   (item 1), so the kind of failure never decides urgency, as item 1 made sure timing does not.
+   Before scoring nothing changes (item 1). `expired` now only feeds the record
+   (`router_timeout`). [Built 2026-11-11, `m5/router-timeout` (leo).] Tests: an exception after
+   scoring for the clinic, the vet and the shop with an emergency top-1 (urgent, guidance) and a
+   question top-1 (high, guidance for the health businesses only); for every business and every
+   scored intent, the limit and an exception give the same priority and guidance. Mutation-checked:
+   the old rule (`expired and ...`), "health always urgent after scoring" and "guidance only when
+   urgent" each turn tests red.
 
 ## Decided 2026-11-11 (shesha, M5 PR 6 review)
 1. **Emergency scoring is tightened.** An emergency scenario succeeds only with a hand-off whose

@@ -11,9 +11,11 @@ produces the decision.
 `agent-route`), scores it with the committed classifier artifact (standard library only, ADR 0015
 decision 4) and calls `route_message` with the artifact's thresholds and an `IntentFallback` on
 the agent's gateway (alias `small`, the router's own prompt `route-intent.1`). It adds nothing to
-the decision: no table of its own, no retry. `route_message`'s body is shesha's M4 H1 and is
-still a stub, so under `on` every message raises `NotImplementedError` here and the service hands
-it off (fail closed). It is never implemented in this module.
+the decision: no table of its own, no retry. It records the classifier's top-1 in the service's
+`RouterProgress` before `route_message` runs, so the service can hand off at the right priority
+if the router's own limit fires during the fallback call. `route_message`'s body is shesha's M4
+H1 and is still a stub, so under `on` every message raises `NotImplementedError` here and the
+service hands it off (fail closed). It is never implemented in this module.
 
 Known cost, unmeasured: an `on` message that routes to `rag` is embedded twice (here and by the
 answer's search). ADR 0015 decision 3's "reuse the retrieval vector" needs the search to accept a
@@ -52,6 +54,7 @@ from vectapilot_api.intents.classifier import ClassifierArtifact
 from vectapilot_api.intents.decide import RouteDecision, RouterThresholds, route_message
 from vectapilot_api.intents.fallback import ROUTER_PROMPT_VERSION, IntentFallback
 from vectapilot_api.intents.policy import RoutePolicy
+from vectapilot_api.intents.taxonomy import Intent
 
 ROUTE_OPERATION: Final = "agent-route"
 """The operation of the router's `embedding_call` record."""
@@ -148,11 +151,35 @@ def _pinned(resolved: Path, model: Model) -> bool:
     )
 
 
+@dataclass
+class RouterProgress:
+    """What the router learned before it finished: the service reads it only when the router
+    fails, by its own limit expiring or by raising [router-timeout review, zara; decided
+    2026-11-11, shesha].
+
+    `top1`: the classifier's most probable intent (ties: the first in `DECISION_ORDER`), set
+    right after scoring, before `route_message` can call the fallback. None while the message is
+    still being embedded. With it, a limit that fires during the fallback call, or an exception
+    after scoring, hands off exactly as `route_message`'s own fail-closed step would (urgent
+    when the top-1's route is an urgent hand-off), so neither timing nor the kind of failure
+    makes an emergency less urgent. Without it (the limit or an exception before any score), a
+    health business hands off urgent [decided 2026-11-11, shesha]. Metadata only, never text."""
+
+    top1: Intent | None = None
+
+
 class IntentRouter(Protocol):
-    """Where one message goes (`ClassifierRouter`; a fake in tests, while M4's H1 is a stub)."""
+    """Where one message goes (`ClassifierRouter`; a fake in tests, while M4's H1 is a stub).
+    `progress` is the service's holder for what the router learned so far (`RouterProgress`)."""
 
     async def route(
-        self, message: str, *, policy: RoutePolicy, business_id: str, trace_id: str
+        self,
+        message: str,
+        *,
+        policy: RoutePolicy,
+        business_id: str,
+        trace_id: str,
+        progress: RouterProgress,
     ) -> RouteDecision: ...
 
 
@@ -167,7 +194,13 @@ class ClassifierRouter:
         self._fallback = fallback
 
     async def route(
-        self, message: str, *, policy: RoutePolicy, business_id: str, trace_id: str
+        self,
+        message: str,
+        *,
+        policy: RoutePolicy,
+        business_id: str,
+        trace_id: str,
+        progress: RouterProgress,
     ) -> RouteDecision:
         embedded = await self._runner.embed(
             [message],
@@ -179,6 +212,10 @@ class ClassifierRouter:
         scores = self._model.artifact.score(
             embedded.vectors[0], model=embedded.model, input_type="query"
         )
+        # Before route_message, so a limit during its fallback call still knows the top-1. Only
+        # recorded, never decided on here (`scores.probabilities` iterates in DECISION_ORDER, and
+        # max keeps the first of equal values).
+        progress.top1 = max(scores.probabilities, key=scores.probabilities.__getitem__)
         return await route_message(
             scores,
             message,
