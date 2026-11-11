@@ -74,6 +74,8 @@ From the repository root (`make` lists everything):
   so `make migrate` only sees a new migration once the image is rebuilt.
 - `make check` — lint + types + tests under coverage, as CI · `make test-integration` — tests against the real stack
 - `make coverage` — tests under coverage, then the gateway gate (combined and branch-only ≥ 95 %, ADR 0006)
+- `make mcp-check` · `make mcp-test-integration` (stack up, migrations at head) · `make mcp-lock`
+  (re-lock `packages/mcp_server`; run it in any PR that changes `apps/api`'s dependencies)
 - `make llm-demo` — the M1 measurement CLI as a dry run (fake provider, $0) into the git-ignored
   `evals/reports/tmp/`
 - `make eval-check` — check eval v0 (`evals/datasets/support_qa/`) for its stage, then print its
@@ -128,9 +130,10 @@ evals/               datasets (synthetic: gateway_smoke, support_qa = eval v0); 
                      evals/reports/support_qa/test-runs.jsonl); dry runs in git-ignored evals/reports/tmp/
 .github/workflows/   ci.yml (lint, types, tests, image build) · deploy-site.yml (GitHub Pages)
 infra/               compose.yaml — the local stack
+packages/mcp_server/ M5 MCP server: its own uv project and lock (the `mcp` SDK stays out of the API)
 Makefile             developer commands
 ```
-Planned: `packages/mcp_server/`, `scripts/`.
+Planned: `scripts/`.
 
 ## Decisions
 - [ADR 0001](docs/adr/0001-virtual-team-as-claude-code-subagents.md) — virtual team as Claude Code subagents

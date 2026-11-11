@@ -1,0 +1,82 @@
+[project]
+name = "vectapilot-mcp"
+version = "0.1.0"
+description = "VectaPilot MCP server: the tool core's reads and write proposals over stdio (M5, ADR 0016)"
+authors = [
+    { name = "shesha", email = "sheshasaigoud@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    # Exact pin, rule 11 (shesha, D1 (a), decided 2026-11-10): `mcp`, the Model Context Protocol
+    # project's official Python SDK (github.com/modelcontextprotocol/python-sdk, MIT), only in
+    # this project, never in apps/api (tests/test_lock.py checks both locks). The newest release
+    # at least 7 days old on install day, 2026-11-11: 2.3.0, uploaded 2026-10-02. It pulls in
+    # mcp-types (the same project's wire types, same version), jsonschema (+ attrs, referencing,
+    # jsonschema-specifications, rpds-py), pyjwt[crypto] (+ cryptography, cffi, pycparser),
+    # python-multipart, sse-starlette and pywin32 (Windows only, never installed here); the rest
+    # (anyio, httpx2, pydantic, starlette, uvicorn, opentelemetry-api, ...) are already in the
+    # API's lock, at the same versions. uv.lock holds sse-starlette at 3.6.0 (2026-10-25), since
+    # 3.7.0 was 4 days old on install day. 2.x uses `httpx2`, so classic `httpx` stays out here too.
+    # This lock records apps/api's dependencies too: a PR that changes them (dev ones included)
+    # also runs `make mcp-lock`, or this project's `uv sync --locked` fails in CI.
+    # shesha accepted these transitive packages on 2026-11-11 (rule 11, M5 PR 5).
+    "mcp==2.3.0",
+    # The API package by path (D1 (a)): the tool core, Settings and Database come from it, so the
+    # server is a thin adapter and never a second implementation. Editable, so a change under
+    # apps/api/src is what this server runs.
+    "vectapilot-api",
+]
+
+[project.scripts]
+# `vectapilot-mcp --business-id <id> --customer-ref <ref>`: one stdio server per business and
+# customer, sandbox only (local, test, ci).
+vectapilot-mcp = "vectapilot_mcp.cli:main"
+
+[tool.uv.sources]
+vectapilot-api = { path = "../../apps/api", editable = true }
+
+[build-system]
+requires = ["uv_build>=0.12.24,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+# The API's dev tools, at the versions its lock holds (tests/test_lock.py).
+dev = [
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# As apps/api: pycodestyle, pyflakes, isort, pyupgrade, bugbear, simplify, async pitfalls,
+# ruff-specific, bandit (security), banned imports (TID251, below)
+select = ["E", "W", "F", "I", "UP", "B", "SIM", "ASYNC", "RUF", "S", "TID251"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["vectapilot_mcp", "vectapilot_api"]
+
+# W1 and W2 (ADR 0016): this server proposes and never executes, and never sees a confirm token.
+# apps/api's tests/actions/test_write_boundary.py checks every spelling; these catch the plain
+# ones at lint time, in this project's own job.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"vectapilot_api.tools.execute".msg = "only the API's confirm service executes a write (W1)"
+"vectapilot_api.actions".msg = "the MCP server imports nothing of vectapilot_api.actions (W2)"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"] # `assert` is how pytest works
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src", "tests", "scripts"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+# An xfail test that unexpectedly passes is reported as a failure, as in apps/api.
+xfail_strict = true
+filterwarnings = ["error"]

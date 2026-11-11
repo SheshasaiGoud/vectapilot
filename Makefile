@@ -2,13 +2,14 @@
 
 COMPOSE := docker compose -f infra/compose.yaml
 API     := cd apps/api &&
+MCP     := cd packages/mcp_server &&
 # The API's role and the owner's (ADR 0009); the passwords default like infra/compose.yaml's.
 LOCAL_DB_URL    := postgresql+asyncpg://vectapilot_app:$${VECTAPILOT_APP_DB_PASSWORD:-vectapilot-app-dev}@127.0.0.1:5432/vectapilot
 LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapilot-dev}@127.0.0.1:5432/vectapilot
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check llm-demo eval-check eval-dry-run intent-check intent-dry-run
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check mcp-check mcp-test-integration mcp-lock llm-demo eval-check eval-dry-run intent-check intent-dry-run
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -55,7 +56,22 @@ test-integration: up ## API tests including real Postgres + Redis (starts the st
 		VECTAPILOT_MIGRATION_DATABASE_URL="$(LOCAL_OWNER_URL)" \
 		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run pytest
 
+# The MCP lock records apps/api's dependencies (the API package comes in by path), so a PR that
+# changes them also re-locks here, or the `mcp` CI job's `uv sync --locked` fails. Plain `uv lock`
+# keeps every version it can; then the lock tests check the shared versions and new packages.
+mcp-lock: ## Re-lock the MCP server after apps/api's dependencies change (reads PyPI)
+	$(MCP) uv lock && uv run pytest -p no:cacheprovider tests/test_lock.py
+
 check: lint typecheck coverage ## Everything CI checks, locally
+
+# ── MCP server (M5, packages/mcp_server: its own uv project and lock, ADR 0016 decision 8) ──
+mcp-check: ## MCP server: format check, lint, strict types and the tests that need no services
+	$(MCP) uv run ruff format --check . && uv run ruff check . && uv run mypy && uv run pytest
+
+mcp-test-integration: ## MCP server tests against the running local stack (run `make up` first)
+	$(MCP) RUN_INTEGRATION=1 VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" \
+		VECTAPILOT_MIGRATION_DATABASE_URL="$(LOCAL_OWNER_URL)" \
+		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run pytest
 
 # ── LLM gateway (M1) ────────────────────────────────────────────────────────────────────
 # Always the dry run: there is deliberately no make target for `--live` (shesha runs it by hand).
