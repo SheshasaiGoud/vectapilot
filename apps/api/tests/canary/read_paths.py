@@ -163,7 +163,10 @@ async def sql_on_every_business_table(engine: AsyncEngine, me: Planted) -> Mappi
             rows = await connection.exec_driver_sql(
                 f"SELECT row_to_json(t)::text FROM {table} AS t"  # noqa: S608
             )
-            outputs[f"sql:{table}"] = "\n".join(row[0] for row in rows)
+            # Sorted: without ORDER BY, Postgres may return the same rows in another order after an
+            # UPDATE, and the "nothing changed" checks compare these strings (flaked in CI on
+            # 2026-11-11). Sorting keeps every row in the comparison; only the order is ignored.
+            outputs[f"sql:{table}"] = "\n".join(sorted(row[0] for row in rows))
     return outputs
 
 
