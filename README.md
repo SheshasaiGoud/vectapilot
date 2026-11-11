@@ -10,8 +10,8 @@ Details: [docs/business-context.md](docs/business-context.md).
 **🌐 Meet the team:** [sheshasaigoud.github.io/vectapilot](https://sheshasaigoud.github.io/vectapilot/)
 
 > **Status:** ✅ M0 (foundations) complete · 🚧 M1 (LLM gateway), M2 (ingestion + cited answers),
-> M3 (hybrid search) and M4 (intent router, except its hand-written fallback) code merged, live
-> measurements pending · ⏳ M5 (tools + agent loop) planning.
+> M3 (hybrid search), M4 (intent router) and M5 (tools + agent loop) code merged except their
+> hand-written pieces still open, live measurements pending · ⏳ M6 (document extraction) planning.
 > Nothing here serves real customers yet; this README is updated as each milestone lands. Any
 > metric shown here will be a real, measured number — never a placeholder.
 
@@ -50,8 +50,8 @@ message → guardrails → router (classifier, LLM fallback) → RAG | agent + M
 | M2 | Ingestion + baseline RAG with citations | 🚧 Code merged; live runs pending |
 | M3 | RAG v2 — hybrid search, reranking, abstention | 🚧 Code merged; live runs pending; reranking deferred ([ADR 0014](docs/adr/0014-hybrid-retrieval.md)) |
 | M4 | Intent router — trained classifier + LLM fallback | 🚧 Code merged except the hand-written fallback (H1); eval rows and live runs pending ([plan](docs/plans/m4-pr-checks.md), [ADR 0015](docs/adr/0015-intent-router.md)) |
-| M5 | MCP tools + agent loop with confirmations | ⏳ Planning ([plan](docs/plans/m5-pr-checks.md), [ADR 0016](docs/adr/0016-tools-and-agent-loop.md)); decisions pending |
-| M6 | Document extraction pipeline | ⏳ |
+| M5 | MCP tools + agent loop with confirmations | 🚧 Code merged except the hand-written agent loop (H1); scenarios and live runs pending ([plan](docs/plans/m5-pr-checks.md), [ADR 0016](docs/adr/0016-tools-and-agent-loop.md)) |
+| M6 | Document extraction pipeline | ⏳ Planning ([plan](docs/plans/m6-pr-checks.md), [ADR 0017](docs/adr/0017-document-extraction.md)); decisions pending |
 | M7 | Safety — PII masking, injection defense, red-team suite | ⏳ |
 | M8 | Staff review dashboard | ⏳ |
 | M9 | Observability + cost optimization | ⏳ |

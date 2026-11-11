@@ -154,6 +154,7 @@ Planned: `scripts/`.
 - [ADR 0014](docs/adr/0014-hybrid-retrieval.md) — hybrid retrieval: Postgres full-text search with a per-chunk config next to vector search, fused by RRF (k = 60, exact); the evidence gate stays cosine; one snapshot per search; vector stays the default until a paired dev comparison; no reranking in M3
 - [ADR 0015](docs/adr/0015-intent-router.md) — intent router (accepted 2026-11-05): one platform intent set with a route map per closed business type, L2 logistic regression on voyage-4 query embeddings scored without an ML library, temperature scaling, a safety floor before the threshold, a fail-closed `small` LLM fallback that may only tighten, test once per mode, measured offline against LLM-only routing
 - [ADR 0016](docs/adr/0016-tools-and-agent-loop.md) — tools and the agent loop (accepted 2026-11-10, D1–D8 decided as recommended): a typed tool core per business, a loop that can read and propose but never write, writes as pending actions executed once by a confirm call with a token no model sees, idempotency in Postgres, a sandbox under RLS, structured output instead of native tool use (M3's window), no tools before a safety step for health businesses (fail closed while M4's router is off), an MCP adapter in its own project that cannot confirm
+- [ADR 0017](docs/adr/0017-document-extraction.md) — document extraction (accepted 2026-11-11, reviewed by ananya-rag, zara-safety and noah-evals, D1–D8 decided as recommended): schemas per business type from configuration compiled into shape-only Pydantic models, one structured `small` call with a verbatim quote per field, confidence as levels from checks in code (quote, value and field label), per-field review routing that fails closed behind a team invariant check, an OCR seam without an engine, file bytes never stored, rows hidden at expiry and purged by hand
 
 ## Current status
 - **Next steps for shesha, M1–M4 in one ordered checklist** (commands, caps, rules, what runs in
@@ -231,9 +232,22 @@ Planned: `scripts/`.
   `answer/prompt.py`, the gateway's code or output path, or `POST /v1/answer` (M3's window);
   `intents/policy.py` unchanged (M4). Health businesses fail closed on `/v1/agent` until M4's
   router is live, so the loop is measured through the harness. shesha writes H1, the loop
-  (`[HAND-WRITE]`); Claude writes H2 at shesha's request (D5 (b)). Merged: PR 1–6 (#60, #61,
-  #62, #63, #64, #65). H2 (tool-call metrics, `m5/tool-metrics`) written by Claude at shesha's
-  request, 2026-11-11, in review; explain-back due. H1 still open (shesha), then PR 7 close-out.
+  (`[HAND-WRITE]`); Claude writes H2 at shesha's request (D5 (b)). Merged: PR 1–6 (#60–#65:
+  sandbox, tool core, confirm, agent scaffold + H1 scaffold, MCP server, tool eval + H2
+  scaffold), H2 (#66: tool-call metrics, written by Claude at shesha's request, 2026-11-11;
+  explain-back due), router timeout (#67: `agent_router_timeout_seconds`, fail closed).
+- **M5 remaining, shesha only:** H1 (`run_turn`, guide `docs/learning/m5-agent-loop.md`), at least
+  40 scenarios (D8 (b)) then freeze, PR 7 close-out (live dev and test runs, $1.00 in total), the
+  note, H1/H2 explain-backs.
+- **M6 (document extraction) — planned and decided 2026-11-11** (`docs/plans/m6-pr-checks.md`, ADR 0017
+  accepted; drafted from ananya-rag's targets; reviewed read-only 2026-11-11 by ananya-rag,
+  zara-safety and noah-evals, findings applied). D1–D8 decided by shesha as recommended: no OCR engine
+  (pages with images go to review), schemas per business type as JSON compiled into Pydantic,
+  `small` with a verified quote per field, levels from checks in code, review per field, synthetic
+  only with file bytes never stored, short quote spans and rows hidden at expiry, shesha writes H1
+  (field routing) and Claude H2 (metrics), ≥ 24 shesha-written documents and $1.00. Built at $0
+  inside M3's window (own prompt version `extract-fields.1`; the route uses the fake provider).
+  Nothing built yet.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
@@ -255,7 +269,7 @@ Planned: `scripts/`.
 - Docker Desktop must be running for `make up` / `make test-integration`. Its engine died around
   2026-10-16 and works again since 2026-10-23. If `docker info` cannot connect, run
   `docker desktop stop --force`, then `docker desktop start`. The likely trigger is the nearly full
-  disk (data volume 98 % used, 5.0 GiB free, 2026-11-10). Free space outside Docker's volumes: no
+  disk (data volume 96 % used, 9.1 GiB free, 2026-11-11). Free space outside Docker's volumes: no
   `make reset-db` or volume prune during M3's measurement window.
 - `Secret[...]` masks the DSNs in `Settings` (step A), not the plain string handed to SQLAlchemy and
   redis-py: pytest's default traceback can print it if those libraries fail. Tests only ever use
