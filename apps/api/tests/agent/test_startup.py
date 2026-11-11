@@ -35,6 +35,7 @@ from vectapilot_api.agent.routing import (
 from vectapilot_api.agent.service import AgentService
 from vectapilot_api.agent.types import MAX_STEPS_LIMIT
 from vectapilot_api.answer.service import AnswerService
+from vectapilot_api.config import AGENT_ROUTER_TURN_BOUND_SECONDS, Settings
 from vectapilot_api.embeddings.base import EmbeddingSpec
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.gateway.providers.fake import FakeProvider
@@ -47,6 +48,14 @@ from vectapilot_api.tools.executor import TransactionSource
 from vectapilot_api.tools.files import load_tools_dir
 
 WITH_TOOLS: dict[str, Any] = {"tools_config_dir": SANDBOX_DIR, "corpus_dir": CORPUS_DIR}
+AGENT_LIMITS = (
+    "agent_max_steps",
+    "agent_llm_attempt_timeout_seconds",
+    "agent_llm_deadline_seconds",
+    "agent_turn_timeout_seconds",
+    "agent_router",
+    "agent_router_timeout_seconds",
+)
 
 
 def problems(**fields: Any) -> str:
@@ -59,18 +68,30 @@ def problems(**fields: Any) -> str:
 
 
 def test_the_defaults_fit_the_plans_proposal() -> None:
-    settings = make_settings()
-    # [proposal] 4 steps, 6 s, 8 s, 35 s per turn: bounds, never measurements.
+    # The declared defaults, not make_settings() (which takes conftest's values) [mutant C10].
+    defaults = {name: field.default for name, field in Settings.model_fields.items()}
+    # [proposal] 4 steps, 6 s, 8 s, 35 s per turn, a 15 s router: bounds, never measurements.
     assert (
-        settings.agent_max_steps,
-        settings.agent_llm_attempt_timeout_seconds,
-        settings.agent_llm_deadline_seconds,
-        settings.agent_turn_timeout_seconds,
-        settings.agent_router,
-    ) == (4, 6.0, 8.0, 35.0, "off")
-    assert settings.agent_llm_deadline_seconds * settings.agent_max_steps <= (
-        settings.agent_turn_timeout_seconds
+        defaults["agent_max_steps"],
+        defaults["agent_llm_attempt_timeout_seconds"],
+        defaults["agent_llm_deadline_seconds"],
+        defaults["agent_turn_timeout_seconds"],
+        defaults["agent_router"],
+        defaults["agent_router_timeout_seconds"],
+    ) == (4, 6.0, 8.0, 35.0, "off", 15.0)
+    assert (
+        defaults["agent_llm_deadline_seconds"] * defaults["agent_max_steps"]
+        <= (defaults["agent_turn_timeout_seconds"])
     )
+    assert defaults["agent_llm_deadline_seconds"] <= defaults["agent_router_timeout_seconds"]
+    assert (
+        defaults["agent_router_timeout_seconds"] + defaults["agent_turn_timeout_seconds"]
+        <= AGENT_ROUTER_TURN_BOUND_SECONDS
+        == 60.0
+    )
+    # conftest's test settings use the same values, so every other test runs at the defaults.
+    settings = make_settings()
+    assert all(getattr(settings, name) == defaults[name] for name in AGENT_LIMITS)
 
 
 def test_an_attempt_longer_than_the_deadline_is_refused() -> None:
@@ -91,7 +112,13 @@ def test_the_step_cap_is_bounded_like_the_loops_own() -> None:
     text = problems(agent_max_steps=MAX_STEPS_LIMIT + 1, agent_turn_timeout_seconds=300)
     assert "agent_max_steps\n  Input should be less than or equal to 10" in text
     assert "agent_max_steps" in problems(agent_max_steps=0)
-    make_settings(agent_max_steps=MAX_STEPS_LIMIT, agent_turn_timeout_seconds=80)
+    # 10 steps fit the request bound only with shorter steps: 10 x 4 s + a 15 s router <= 60 s.
+    make_settings(
+        agent_max_steps=MAX_STEPS_LIMIT,
+        agent_llm_attempt_timeout_seconds=4.0,
+        agent_llm_deadline_seconds=4.0,
+        agent_turn_timeout_seconds=40.0,
+    )
 
 
 @pytest.mark.parametrize(
@@ -100,12 +127,66 @@ def test_the_step_cap_is_bounded_like_the_loops_own() -> None:
         ("agent_llm_attempt_timeout_seconds", 61, 60),
         ("agent_llm_deadline_seconds", 121, 120),
         ("agent_turn_timeout_seconds", 301, 300),
+        ("agent_router_timeout_seconds", 61, 60),
     ],
 )
 def test_the_agents_time_limits_have_upper_bounds(field: str, value: float, bound: int) -> None:
     # C06: a typo cannot make a step's attempt ten minutes long.
     text = problems(**{field: value})
     assert f"{field}\n  Input should be less than or equal to {bound}" in text
+
+
+# ── The router's own limit (decided 2026-11-11, shesha, M5 PR 4 review) ─────────────────────
+
+ROUTER_BELOW_DEADLINE = (
+    "agent_router_timeout_seconds must be >= agent_llm_deadline_seconds (the router's one"
+    " fallback call)"
+)
+OVER_THE_BOUND = (
+    "agent_router_timeout_seconds + agent_turn_timeout_seconds must be <= 60"
+    " (AGENT_ROUTER_TURN_BOUND_SECONDS)"
+)
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (0, "Input should be greater than 0"),
+        (-1.0, "Input should be greater than 0"),
+        (True, "Value error, must be a number of seconds, not a bool"),
+        # The field's le=60 refuses these before Seconds' finiteness check does (nan <= 60 is
+        # false). The service refuses them on its own too (test_service.py).
+        (float("inf"), "Input should be less than or equal to 60"),
+        (float("nan"), "Input should be less than or equal to 60"),
+    ],
+)
+def test_the_router_timeout_must_be_a_positive_finite_number(value: object, message: str) -> None:
+    # The field's own validation refuses these, not the deadline rule [mutant C9: a plain float
+    # would let 0, -1.0 and True through to the model rules]. A field error stops those rules.
+    text = problems(agent_router_timeout_seconds=value)
+    assert f"agent_router_timeout_seconds\n  {message}" in text
+    assert ROUTER_BELOW_DEADLINE not in text
+
+
+def test_a_router_timeout_below_one_fallback_call_is_refused() -> None:
+    assert ROUTER_BELOW_DEADLINE in problems(agent_router_timeout_seconds=7.9)
+    make_settings(agent_router_timeout_seconds=8.0)  # exactly the step deadline fits
+
+
+def test_the_router_and_the_turn_must_fit_the_request_bound() -> None:
+    assert OVER_THE_BOUND in problems(agent_turn_timeout_seconds=45.1)  # 15 + 45.1 > 60
+    assert OVER_THE_BOUND in problems(agent_router_timeout_seconds=25.1)  # 25.1 + 35 > 60
+    make_settings(agent_turn_timeout_seconds=45.0)  # exactly 60 fits
+    make_settings(agent_router_timeout_seconds=25.0)
+
+
+@pytest.mark.parametrize("routing", ["off", "on"])
+def test_the_router_rules_hold_whatever_agent_router_says(routing: str) -> None:
+    # Checked under `off` too, so switching the router on never meets a new refusal.
+    text = problems(agent_router=routing, agent_router_timeout_seconds=7.0, **WITH_TOOLS)
+    assert ROUTER_BELOW_DEADLINE in text
+    text = problems(agent_router=routing, agent_turn_timeout_seconds=50.0, **WITH_TOOLS)
+    assert OVER_THE_BOUND in text
 
 
 def test_a_deadline_equal_to_the_attempt_timeout_is_allowed() -> None:
@@ -466,6 +547,7 @@ def test_the_app_wires_the_agents_settings_and_its_own_gateway() -> None:
         assert service._gateway._attempt_timeout_s == settings.agent_llm_attempt_timeout_seconds
         assert answers._gateway._deadline_s == settings.llm_deadline_seconds
         assert (service._limits.max_steps, service._turn_timeout_s) == (3, 30.0)
+        assert service._router_timeout_s == settings.agent_router_timeout_seconds
         assert (service.routing, service._router, service._router_artifact) == ("off", None, None)
 
 
@@ -483,10 +565,17 @@ def test_the_app_starts_on_with_the_router_on_the_agents_gateway(
     folder = pinned_model(repo, dataset, now)
     model = load_router_model(folder, voyage_spec())
     monkeypatch.setattr(main_module, "load_router_model", lambda path, spec: model)
-    app = create_app(make_settings(agent_router="on", agent_router_model_dir=folder, **WITH_TOOLS))
+    settings = make_settings(
+        agent_router="on",
+        agent_router_model_dir=folder,
+        agent_router_timeout_seconds=12.5,
+        **WITH_TOOLS,
+    )
+    app = create_app(settings)
     with TestClient(app):
         service: AgentService = app.state.agent_service
         assert service.routing == "on"
+        assert service._router_timeout_s == 12.5
         assert isinstance(service._router, ClassifierRouter)
         assert service._router._model is model
         assert isinstance(service._router._fallback, LLMIntentFallback)

@@ -47,7 +47,7 @@ from vectapilot_api.agent.responses import (
     HandoffResponse,
     ReplyResponse,
 )
-from vectapilot_api.agent.routing import IntentRouter
+from vectapilot_api.agent.routing import IntentRouter, RouterProgress
 from vectapilot_api.agent.service import AGENT_TURN, AgentRun, AgentService
 from vectapilot_api.agent.types import (
     ConfirmationRequired,
@@ -154,7 +154,13 @@ class CannedRouter:
     asked: list[tuple[str, str, str]] = field(default_factory=list)
 
     async def route(
-        self, message: str, *, policy: RoutePolicy, business_id: str, trace_id: str
+        self,
+        message: str,
+        *,
+        policy: RoutePolicy,
+        business_id: str,
+        trace_id: str,
+        progress: RouterProgress,
     ) -> RouteDecision:
         self.asked.append((message, business_id, trace_id))
         if self.error is not None:
@@ -189,6 +195,7 @@ def build(
     store: RecordingStore | None = None,
     answers: CannedAnswers | None = None,
     turn_timeout_s: float = 35.0,
+    router_timeout_s: float = 15.0,
     propagate: tuple[type[Exception], ...] = (),
     profiles: dict[str, AgentProfile] | None = None,
     router_artifact: str | None = None,
@@ -205,6 +212,7 @@ def build(
         turn_timeout_s=turn_timeout_s,
         routing="on" if router is not None else "off",
         router=router,
+        router_timeout_s=router_timeout_s,
         router_artifact=router_artifact,
         loop=must_not_run() if loop is None else loop,
         propagate=propagate,
@@ -511,19 +519,32 @@ async def test_under_on_a_fail_closed_decision_keeps_its_priority_and_shows_the_
     assert response.guidance == SUNRISE.emergency_guidance
 
 
-@pytest.mark.parametrize(
-    ("business", "guided"), [("sunrise-clinic", True), (SHOP.business_id, False)]
-)
-async def test_under_on_a_router_that_raises_fails_closed(business: str, guided: bool) -> None:
-    # M4's route_message is a stub today: under `on`, every message ends here.
-    built = build(router=CannedRouter(error=NotImplementedError("H1 (M4)")))
+BEFORE_SCORING: Final = [
+    # [decided 2026-11-11, shesha] Nothing cleared the message: urgent with the guidance for a
+    # health business (by its business type), the router-failure mapping (high) for any other.
+    pytest.param("sunrise-clinic", Priority.URGENT, True, id="human_healthcare"),
+    pytest.param("paws-and-co", Priority.URGENT, True, id="veterinary"),
+    pytest.param(SHOP.business_id, Priority.HIGH, False, id="retail"),
+]
+
+
+@pytest.mark.parametrize(("business", "priority", "guided"), BEFORE_SCORING)
+async def test_under_on_a_router_that_raises_before_scoring_fails_closed(
+    business: str, priority: Priority, guided: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    # CannedRouter raises before any score (no top-1 in RouterProgress), like a failed embedding.
+    caplog.set_level(logging.INFO)
+    built = build(router=CannedRouter(error=RuntimeError("embedding failed")))
 
     run = await built.service.respond(business, request(), trace_id=TRACE)
 
     response = handoff_of(run)
-    assert (response.reason, response.priority) == (HandoffReason.ROUTER_FAILED, Priority.HIGH)
+    assert (response.reason, response.priority) == (HandoffReason.ROUTER_FAILED, priority)
+    assert response.guidance == (ALL[business].guidance if guided else ())
     assert bool(response.guidance) is guided
-    assert run.error == "NotImplementedError"
+    assert run.error == "RuntimeError"
+    [record] = agent_turns(caplog)
+    assert (record["router_timeout"], record["priority"]) == (False, priority.value)
 
 
 def test_on_needs_a_router() -> None:
@@ -537,6 +558,411 @@ def test_on_needs_a_router() -> None:
             turn_timeout_s=35.0,
             routing="on",
         )
+
+
+# ── The router's own limit (decided 2026-11-11, shesha, M5 PR 4 review) ─────────────────────
+
+
+@dataclass
+class SlowRouter:
+    """Waits `delay_s`, then returns the policy's decision for `intent`. Stands in for M4's
+    router (embedding plus fallback call); records whether its wait was cancelled, so a test can
+    see the limit stopped it instead of leaving it running.
+
+    `top1`: recorded in the service's `RouterProgress` before the wait, as `ClassifierRouter`
+    does after scoring (so the wait stands for the fallback call). `swallow`: a misbehaving
+    router that catches its limit's cancel and returns its decision anyway. `convert`: one that
+    turns the cancel into this exception instead."""
+
+    delay_s: float
+    intent: Intent = Intent.ACTION_REQUEST
+    top1: Intent | None = None
+    swallow: bool = False
+    convert: Exception | None = None
+    started: int = 0
+    cancelled: bool = False
+    entered: asyncio.Event = field(default_factory=asyncio.Event)
+
+    async def route(
+        self,
+        message: str,
+        *,
+        policy: RoutePolicy,
+        business_id: str,
+        trace_id: str,
+        progress: RouterProgress,
+    ) -> RouteDecision:
+        self.started += 1
+        self.entered.set()
+        if self.top1 is not None:
+            progress.top1 = self.top1
+        try:
+            await asyncio.sleep(self.delay_s)
+        except asyncio.CancelledError:
+            self.cancelled = True
+            if self.convert is not None:
+                raise self.convert from None
+            if not self.swallow:
+                raise
+        return RouteDecision(
+            intent=self.intent, route=policy.route(self.intent), decided_by="classifier"
+        )
+
+
+def sleeping_loop(delay_s: float, result: TurnOutcome) -> TurnLoop:
+    """A stand-in for `run_turn` that waits `delay_s`, then returns `result` (not a loop)."""
+
+    async def loop(message: str, **_: Any) -> TurnOutcome:
+        await asyncio.sleep(delay_s)
+        return result
+
+    return cast(TurnLoop, loop)
+
+
+def agent_turns(caplog: pytest.LogCaptureFixture) -> list[dict[str, Any]]:
+    return [getattr(r, AGENT_TURN) for r in caplog.records if r.getMessage() == AGENT_TURN]
+
+
+@pytest.mark.parametrize(("business", "priority", "guided"), BEFORE_SCORING)
+async def test_a_router_past_its_limit_before_scoring_fails_closed_as_router_failed(
+    business: str, priority: Priority, guided: bool
+) -> None:
+    # Before any score (still embedding: no top-1): urgent with the guidance for a health
+    # business, high for any other [decided 2026-11-11, shesha]: the same as a router exception
+    # at that point, so timing never decides urgency. The loop (must_not_run) and the answer
+    # never run: no tool, no model call, no proposal. The router would answer after 1 s, well
+    # inside the turn's 35 s: only its own limit stops it.
+    router = SlowRouter(delay_s=1.0)
+    built = build(router=router, router_timeout_s=0.01)
+
+    run = await built.service.respond(business, request(EMERGENCIES[0][1]), trace_id=TRACE)
+
+    response = handoff_of(run)
+    assert (response.reason, response.priority, response.intent) == (
+        HandoffReason.ROUTER_FAILED,
+        priority,
+        None,
+    )
+    assert response.guidance == (ALL[business].guidance if guided else ())
+    assert bool(response.guidance) is guided
+    assert (run.error, run.decision, run.outcome, run.action) == (None, None, None, None)
+    assert router.started == 1 and router.cancelled  # stopped, not left running
+    assert built.provider.calls == [] and built.store.created == [] and built.answers.asked == []
+
+
+URGENT_TOP1: Final = [
+    pytest.param(business, id=business)
+    for business in ("sunrise-clinic", "paws-and-co", SHOP.business_id)
+]
+
+
+@pytest.mark.parametrize("business", URGENT_TOP1)
+async def test_a_limit_during_the_fallback_keeps_an_emergency_top1_urgent_everywhere(
+    business: str,
+) -> None:
+    # [router-timeout review, zara] The classifier already scored an emergency (below sigma, so
+    # route_message went on to its fallback call), then the router's limit fired. That must hand
+    # off exactly as route_message's own fail-closed step would if the fallback's deadline had
+    # fired first: urgent, with the guidance for every business (§3.5), the shop included.
+    router = SlowRouter(delay_s=1.0, top1=Intent.EMERGENCY)
+    built = build(router=router, router_timeout_s=0.01)
+
+    run = await built.service.respond(
+        business, request("my kid swallowed a button battery from your order"), trace_id=TRACE
+    )
+
+    response = handoff_of(run)
+    assert (response.reason, response.priority, response.intent) == (
+        HandoffReason.ROUTER_FAILED,
+        Priority.URGENT,
+        None,
+    )
+    assert response.guidance == ALL[business].guidance and response.guidance
+    assert (run.error, run.decision) == (None, None) and router.cancelled
+    assert built.provider.calls == [] and built.store.created == [] and built.answers.asked == []
+
+
+@pytest.mark.parametrize(
+    ("business", "top1"),
+    [
+        # route_message's step 4: only an urgent hand-off top-1 raises the priority; a high
+        # hand-off (professional judgement, complaint) and a rag route (question) stay high.
+        ("sunrise-clinic", Intent.PROFESSIONAL_JUDGEMENT),
+        ("paws-and-co", Intent.COMPLAINT),
+        ("sunrise-clinic", Intent.QUESTION),
+        (SHOP.business_id, Intent.COMPLAINT),
+        (SHOP.business_id, Intent.QUESTION),
+        (SHOP.business_id, Intent.HUMAN_REQUEST),
+    ],
+)
+async def test_a_limit_during_the_fallback_with_another_top1_is_high(
+    business: str, top1: Intent
+) -> None:
+    built = build(router=SlowRouter(delay_s=1.0, top1=top1), router_timeout_s=0.01)
+
+    run = await built.service.respond(business, request(), trace_id=TRACE)
+
+    response = handoff_of(run)
+    assert (response.reason, response.priority) == (HandoffReason.ROUTER_FAILED, Priority.HIGH)
+    assert response.guidance == (ALL[business].guidance if ALL[business].health else ())
+
+
+@pytest.mark.parametrize(
+    ("business", "top1", "priority"),
+    [
+        ("sunrise-clinic", None, Priority.URGENT),
+        ("sunrise-clinic", Intent.QUESTION, Priority.HIGH),
+        (SHOP.business_id, None, Priority.HIGH),
+        (SHOP.business_id, Intent.EMERGENCY, Priority.URGENT),
+    ],
+)
+async def test_a_router_that_swallows_its_limit_is_never_followed(
+    business: str, top1: Intent | None, priority: Priority, caplog: pytest.LogCaptureFixture
+) -> None:
+    # [router-timeout review, zara] The router catches its limit's cancel and returns an
+    # action_request anyway. The limit still wins: no loop (must_not_run), no decision kept.
+    caplog.set_level(logging.INFO)
+    router = SlowRouter(delay_s=1.0, top1=top1, swallow=True)
+    built = build(router=router, router_timeout_s=0.01)
+
+    run = await built.service.respond(business, request(), trace_id=TRACE)
+
+    response = handoff_of(run)
+    assert (response.reason, response.priority) == (HandoffReason.ROUTER_FAILED, priority)
+    assert router.cancelled and (run.error, run.decision, run.outcome) == (None, None, None)
+    assert built.provider.calls == [] and built.store.created == [] and built.answers.asked == []
+    [record] = agent_turns(caplog)
+    assert (record["router_timeout"], record["error"], record["intent"]) == (True, None, None)
+
+
+@pytest.mark.parametrize(
+    ("business", "top1", "priority"),
+    [
+        (SHOP.business_id, None, Priority.HIGH),
+        (SHOP.business_id, Intent.EMERGENCY, Priority.URGENT),
+        ("paws-and-co", None, Priority.URGENT),
+        ("paws-and-co", Intent.COMPLAINT, Priority.HIGH),
+    ],
+)
+async def test_a_router_that_turns_its_limit_into_another_error_is_still_its_limit(
+    business: str, top1: Intent | None, priority: Priority, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The class name is kept (it is the exception that became the hand-off), and the record says
+    # the limit fired, with the same priority as a clean expiry.
+    caplog.set_level(logging.INFO)
+    router = SlowRouter(delay_s=1.0, top1=top1, convert=RuntimeError("cancelled"))
+    built = build(router=router, router_timeout_s=0.01)
+
+    run = await built.service.respond(business, request(), trace_id=TRACE)
+
+    response = handoff_of(run)
+    assert (response.reason, response.priority) == (HandoffReason.ROUTER_FAILED, priority)
+    assert run.error == "RuntimeError"
+    [record] = agent_turns(caplog)
+    assert (record["router_timeout"], record["error"]) == (True, "RuntimeError")
+
+
+@dataclass
+class ScoredThenFailed(CannedRouter):
+    """Records `top1` as scored, then raises, as `ClassifierRouter` does today when M4's
+    `route_message` stub raises `NotImplementedError` after scoring."""
+
+    top1: Intent = Intent.EMERGENCY
+
+    async def route(
+        self,
+        message: str,
+        *,
+        policy: RoutePolicy,
+        business_id: str,
+        trace_id: str,
+        progress: RouterProgress,
+    ) -> RouteDecision:
+        progress.top1 = self.top1
+        raise NotImplementedError("H1 (M4)")
+
+
+@pytest.mark.parametrize(
+    ("business", "top1", "priority"),
+    [
+        # [decided 2026-11-11, shesha] A router exception after scoring follows the top-1 rule,
+        # as the limit does: urgent when the top-1's route is an urgent hand-off (an emergency,
+        # for every business: §3.5), else high (a question's rag route).
+        pytest.param("sunrise-clinic", Intent.EMERGENCY, Priority.URGENT, id="clinic-emergency"),
+        pytest.param("sunrise-clinic", Intent.QUESTION, Priority.HIGH, id="clinic-question"),
+        pytest.param("paws-and-co", Intent.EMERGENCY, Priority.URGENT, id="vet-emergency"),
+        pytest.param("paws-and-co", Intent.QUESTION, Priority.HIGH, id="vet-question"),
+        pytest.param(SHOP.business_id, Intent.EMERGENCY, Priority.URGENT, id="shop-emergency"),
+        pytest.param(SHOP.business_id, Intent.QUESTION, Priority.HIGH, id="shop-question"),
+    ],
+)
+async def test_a_router_error_after_scoring_follows_the_top1_rule(
+    business: str, top1: Intent, priority: Priority, caplog: pytest.LogCaptureFixture
+) -> None:
+    # The guidance for a health business, or whenever the hand-off is urgent (the shop's
+    # emergency included). The record still tells the exception from the limit. Under `on`
+    # today, M4's route_message stub ends every message here.
+    caplog.set_level(logging.INFO)
+    built = build(router=ScoredThenFailed(top1=top1))
+
+    run = await built.service.respond(business, request(), trace_id=TRACE)
+
+    response = handoff_of(run)
+    profile = ALL[business]
+    assert (response.reason, response.priority, response.intent, run.error) == (
+        HandoffReason.ROUTER_FAILED,
+        priority,
+        None,
+        "NotImplementedError",
+    )
+    guided = profile.health or priority is Priority.URGENT
+    assert response.guidance == (profile.guidance if guided else ())
+    assert bool(response.guidance) is guided
+    assert built.provider.calls == [] and built.store.created == [] and built.answers.asked == []
+    [record] = agent_turns(caplog)
+    assert (record["router_timeout"], record["error"]) == (False, "NotImplementedError")
+
+
+@pytest.mark.parametrize("top1", list(Intent))
+@pytest.mark.parametrize("business", ["sunrise-clinic", "paws-and-co", SHOP.business_id])
+async def test_after_scoring_the_kind_of_failure_never_decides_urgency(
+    business: str, top1: Intent
+) -> None:
+    # [decided 2026-11-11, shesha] For every scored top-1: the router's limit and a router
+    # exception hand off at the same priority with the same guidance.
+    expired = await build(
+        router=SlowRouter(delay_s=1.0, top1=top1), router_timeout_s=0.01
+    ).service.respond(business, request(), trace_id=TRACE)
+    raised = await build(router=ScoredThenFailed(top1=top1)).service.respond(
+        business, request(), trace_id=TRACE
+    )
+
+    by_limit, by_error = handoff_of(expired), handoff_of(raised)
+    assert by_limit.reason is by_error.reason is HandoffReason.ROUTER_FAILED
+    assert (by_limit.priority, by_limit.guidance) == (by_error.priority, by_error.guidance)
+    assert (expired.error, raised.error) == (None, "NotImplementedError")
+
+
+async def test_a_router_in_time_is_followed_as_before() -> None:
+    router = SlowRouter(delay_s=0.01, intent=Intent.EMERGENCY)
+    built = build(router=router, router_timeout_s=5.0)
+
+    run = await built.service.respond("sunrise-clinic", request(), trace_id=TRACE)
+
+    response = handoff_of(run)
+    assert (response.reason, response.priority) == (HandoffReason.SAFETY, Priority.URGENT)
+    assert response.guidance == SUNRISE.emergency_guidance
+    assert not router.cancelled and run.error is None
+
+
+async def test_the_routers_limit_covers_the_router_only_never_the_turn() -> None:
+    # A turn longer than the router's limit (but inside its own) still replies: the scope ends
+    # when the router returns, and the turn keeps agent_turn_timeout_seconds.
+    built = build(
+        sleeping_loop(0.2, TurnReply("Monday is free.")),
+        router=SlowRouter(delay_s=0.0),
+        router_timeout_s=0.05,
+    )
+
+    run = await built.service.respond(SHOP.business_id, request(), trace_id=TRACE)
+
+    assert run.response == ReplyResponse(trace_id=TRACE, text="Monday is free.")
+
+
+async def test_the_routers_limit_does_not_cover_the_answer() -> None:
+    @dataclass
+    class SlowAnswers(CannedAnswers):
+        async def answer(self, business_id: str, question: str, *, trace_id: str) -> AnswerRun:
+            await asyncio.sleep(0.2)
+            return await super().answer(business_id, question, trace_id=trace_id)
+
+    built = build(
+        router=SlowRouter(delay_s=0.0, intent=Intent.QUESTION),
+        answers=SlowAnswers(),
+        router_timeout_s=0.05,
+    )
+
+    run = await built.service.respond("sunrise-clinic", request(), trace_id=TRACE)
+
+    assert isinstance(run.response, AnswerKindResponse)
+
+
+async def test_a_timeout_error_raised_by_the_router_is_a_failure_not_its_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    # Raised before any score: for a health business that is urgent, like the limit itself.
+    built = build(router=CannedRouter(error=TimeoutError()))
+
+    run = await built.service.respond("sunrise-clinic", request(), trace_id=TRACE)
+
+    response = handoff_of(run)
+    assert (response.reason, response.priority) == (HandoffReason.ROUTER_FAILED, Priority.URGENT)
+    assert response.guidance == SUNRISE.emergency_guidance
+    assert run.error == "TimeoutError"
+    [record] = agent_turns(caplog)
+    assert (record["router_timeout"], record["error"]) == (False, "TimeoutError")
+
+
+async def test_the_record_names_a_router_past_its_limit(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    built = build(router=SlowRouter(delay_s=60.0), router_timeout_s=0.01)
+
+    await built.service.respond("sunrise-clinic", request(), trace_id=TRACE)
+
+    [record] = agent_turns(caplog)
+    assert {k: record[k] for k in ("routing", "kind", "reason", "priority", "error")} == {
+        "routing": "on",
+        "kind": "handoff",
+        "reason": "router_failed",
+        "priority": "urgent",
+        "error": None,
+    }
+    assert record["router_timeout"] is True and record["decided_by"] is None
+
+
+async def test_a_cancel_while_routing_propagates_and_is_not_the_routers_limit(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # CancelledError is never caught: the scope converts only its own cancel into TimeoutError.
+    caplog.set_level(logging.INFO)
+    router = SlowRouter(delay_s=60.0)
+    built = build(router=router, router_timeout_s=30.0)
+    task = asyncio.create_task(built.service.respond("sunrise-clinic", request(), trace_id=TRACE))
+    await router.entered.wait()
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert router.cancelled
+    [record] = agent_turns(caplog)
+    assert (record["kind"], record["error"], record["router_timeout"]) == (
+        "error",
+        "CancelledError",
+        False,
+    )
+
+
+def test_on_needs_a_router_timeout() -> None:
+    with pytest.raises(ValueError, match="needs a router timeout"):
+        AgentService(
+            ALL,
+            gateway=gateway_for(FakeProvider()),
+            store=RecordingStore(),
+            answers=CannedAnswers(),
+            limits=LoopLimits(max_steps=4),
+            turn_timeout_s=35.0,
+            routing="on",
+            router=CannedRouter(Intent.QUESTION),
+        )
+
+
+@pytest.mark.parametrize("timeout", [0.0, -1.0, float("nan"), float("inf")])
+def test_a_router_timeout_that_is_not_positive_and_finite_is_refused(timeout: float) -> None:
+    # Settings refuses it too (`Seconds`: gt=0, finite); the service's own guard is checked here.
+    with pytest.raises(ValueError, match="router timeout must be positive and finite"):
+        build(router=CannedRouter(Intent.QUESTION), router_timeout_s=timeout)
 
 
 # ── The record ───────────────────────────────────────────────────────────────────────────────
@@ -564,6 +990,7 @@ async def test_one_agent_turn_record_metadata_only(caplog: pytest.LogCaptureFixt
         "intent": None,
         "decided_by": None,
         "router_artifact": None,
+        "router_timeout": False,
         "tool": "book",
         "action_id": str(run.action.id),
         "steps": 0,
@@ -677,7 +1104,13 @@ class MisroutingRouter:
     asked: int = 0
 
     async def route(
-        self, message: str, *, policy: RoutePolicy, business_id: str, trace_id: str
+        self,
+        message: str,
+        *,
+        policy: RoutePolicy,
+        business_id: str,
+        trace_id: str,
+        progress: RouterProgress,
     ) -> RouteDecision:
         self.asked += 1
         return RouteDecision(intent=self.intent, route=self.wrong, decided_by="classifier")
@@ -727,7 +1160,7 @@ async def test_a_route_that_disagrees_with_the_policy_fails_closed(
     if intent in profile.policy.safety_intents or expected.priority is Priority.URGENT:
         assert response.priority is Priority.URGENT
         assert response.guidance == profile.guidance
-    else:  # failing closed shows a health business its guidance, as a router exception does
+    else:  # failing closed shows a health business its guidance, as a router failure does
         assert response.priority is Priority.HIGH
         assert response.guidance == (profile.guidance if profile.health else ())
     if intent is Intent.EMERGENCY:

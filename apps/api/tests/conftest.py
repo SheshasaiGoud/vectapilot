@@ -66,6 +66,7 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "agent_turn_timeout_seconds": 35.0,
     "agent_router": "off",
     "agent_router_model_dir": None,
+    "agent_router_timeout_seconds": 15.0,
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 

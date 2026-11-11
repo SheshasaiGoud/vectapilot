@@ -199,6 +199,7 @@ def create_app(
                 turn_timeout_s=settings.agent_turn_timeout_seconds,
                 routing=settings.agent_router,
                 router=router,
+                router_timeout_s=settings.agent_router_timeout_seconds,
                 router_artifact=None if router_model is None else router_model.artifact_sha256,
             )
             logger.info(
