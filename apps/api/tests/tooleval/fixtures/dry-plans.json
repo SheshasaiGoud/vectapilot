@@ -1,0 +1,32 @@
+{
+  "synthetic": true,
+  "plans": [
+    [
+      {"action": "call_tool", "tool": "check_slots", "arguments": {"date_from": "2026-11-16", "date_to": "2026-11-20"}},
+      {"action": "reply", "text": "DRY RUN: a scripted reply after one read."}
+    ],
+    [
+      {"action": "call_tool", "tool": "check_slots", "arguments": {"date_from": "2026-11-20", "date_to": "2026-11-24"}},
+      {"action": "call_tool", "tool": "book", "arguments": {"slot_id": "S-09"}}
+    ],
+    [
+      {"action": "call_tool", "tool": "book", "arguments": {"slot_id": "S-11"}}
+    ],
+    [
+      {"action": "call_tool", "tool": "reschedule", "arguments": {"booking_id": "B-103", "new_slot_id": "S-10"}}
+    ],
+    [
+      {"action": "call_tool", "tool": "create_ticket", "arguments": {"category": "other", "summary": "DRY RUN: a scripted ticket."}}
+    ],
+    [
+      {"action": "handoff", "reason": "safety"}
+    ],
+    [
+      {"action": "handoff", "reason": "customer_asked"}
+    ],
+    [
+      {"action": "call_tool", "tool": "order_status", "arguments": {"order_id": "1042"}},
+      {"action": "reply", "text": "DRY RUN: a scripted reply after an order lookup."}
+    ]
+  ]
+}

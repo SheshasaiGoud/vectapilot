@@ -5,7 +5,7 @@ Or directly:  uv run uvicorn --factory vectapilot_api.main:create_app
 """
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from typing import Final
 
@@ -21,7 +21,7 @@ from vectapilot_api.agent.llm import build_agent_gateway
 from vectapilot_api.agent.profiles import build_profiles, business_types
 from vectapilot_api.agent.router import router as agent_router
 from vectapilot_api.agent.routing import ClassifierRouter, load_router_model
-from vectapilot_api.agent.service import AgentService
+from vectapilot_api.agent.service import AgentService, ProposalStore
 from vectapilot_api.agent.types import LoopLimits
 from vectapilot_api.answer.router import router as answer_router
 from vectapilot_api.answer.service import ANSWER_ALIAS, AnswerService, RagConfig
@@ -42,6 +42,8 @@ from vectapilot_api.kb.store import PostgresKbStore
 from vectapilot_api.log import configure_logging
 from vectapilot_api.retrieval.router import router as search_router
 from vectapilot_api.retrieval.search import RetrievalConfig, SearchService
+from vectapilot_api.tools.config import ToolsConfig
+from vectapilot_api.tools.executor import TransactionSource
 from vectapilot_api.tools.files import load_tools_dir
 
 logger = logging.getLogger("vectapilot_api")
@@ -64,6 +66,21 @@ signals off, `FastAPI.__call__` never enters its telemetry layer (`NativeTelemet
 `operation_spans` and `auto_configure` add nothing while every signal is off; they are pinned so
 that turning one signal back on later is a deliberate change. The span comes with M9 (D12).
 `tests/test_fastapi_telemetry.py` proves it, and proves the defaults would record."""
+
+
+def build_action_services(
+    database: TransactionSource, configs: Mapping[str, ToolsConfig], *, lifetime_s: int
+) -> tuple[ProposalStore, ConfirmService]:
+    """The pending-action store and the confirm service for the businesses in `configs` (M5 PR 3).
+
+    Built here because this module is the only one that imports the store (`actions.pending`, the
+    only code that creates a confirm token: W2's fence, tests/actions/test_write_boundary.py). The
+    app's lifespan and the tool-call eval harness (`tooleval`, M5 PR 6) both take them from here,
+    so the harness stores and confirms exactly as the API does."""
+    return (
+        PendingActionStore(database, configs, lifetime_s=lifetime_s),
+        ConfirmService(database, configs),
+    )
 
 
 def create_app(
@@ -158,10 +175,9 @@ def create_app(
         # M5 PR 3: pending actions and their confirm route (ADR 0016 decisions 2-3). Without a
         # tool configuration no business has tools, so nothing can be stored or confirmed.
         tool_configs = {business: t.config for business, t in (tools or {}).items()}
-        app.state.pending_actions = PendingActionStore(
+        app.state.pending_actions, app.state.confirm_service = build_action_services(
             database, tool_configs, lifetime_s=settings.action_lifetime_seconds
         )
-        app.state.confirm_service = ConfirmService(database, tool_configs)
         async with (
             build_gateway(settings, provider=llm_provider) as gateway,
             build_agent_gateway(settings, provider=agent_provider) as agent_gateway,

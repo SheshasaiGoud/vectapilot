@@ -60,8 +60,8 @@ each milestone's planning PR moves it forward, and a milestone whose code is mer
 live runs are not done keeps a `pending` note (it shows "Code done", never "Done").
 
 ## How changes land
-Feature branch → pull request → CI (`api (lint, types, tests)`, `api image (docker build)` and
-`web (lint, build)`) must pass → the human reviews and merges. `main` is branch-protected; never push to it directly.
+Feature branch → pull request → CI (`api (lint, types, tests)`, `api image (docker build)`,
+`web (lint, build)` and `mcp (lint, types, tests)`, required since 2026-11-11) must pass → the human reviews and merges. `main` is branch-protected; never push to it directly.
 `[HAND-WRITE]` work happens on the human's own branch and PR.
 Automatic CI fixes are **disabled** (the human's choice): when CI fails, read the log, explain the
 cause, and propose the fix.
@@ -74,6 +74,8 @@ From the repository root (`make` lists everything):
   so `make migrate` only sees a new migration once the image is rebuilt.
 - `make check` — lint + types + tests under coverage, as CI · `make test-integration` — tests against the real stack
 - `make coverage` — tests under coverage, then the gateway gate (combined and branch-only ≥ 95 %, ADR 0006)
+- `make tool-check` · `make tool-dry-run` — M5 tool-call eval (`python -m vectapilot_api.tooleval
+  check|report|freeze|run|summarize|label-sheet`; `run --live` is shesha's alone)
 - `make mcp-check` · `make mcp-test-integration` (stack up, migrations at head) · `make mcp-lock`
   (re-lock `packages/mcp_server`; run it in any PR that changes `apps/api`'s dependencies)
 - `make llm-demo` — the M1 measurement CLI as a dry run (fake provider, $0) into the git-ignored

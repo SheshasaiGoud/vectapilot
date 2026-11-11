@@ -9,7 +9,7 @@ LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapi
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check mcp-check mcp-test-integration mcp-lock llm-demo eval-check eval-dry-run intent-check intent-dry-run
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check mcp-check mcp-test-integration mcp-lock llm-demo eval-check eval-dry-run intent-check intent-dry-run tool-check tool-dry-run
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -110,3 +110,19 @@ intent-dry-run: ## Dry run of the intent harness on dev: embed, train, calibrate
 	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_EMBEDDINGS_PROVIDER=fake \
 		VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" \
 		uv run python -m vectapilot_api.intenteval dry-run
+
+# ── Tool-call eval (M5 PR 6) ────────────────────────────────────────────────────────────
+# Reads evals/datasets/tool_calls/v0.1, the business manifests in data/sample and the sandbox in
+# data/sandbox; no model, no network, no database, writes nothing.
+tool-check: ## Check the tool_calls dataset for its stage, then print its counts
+	$(API) uv run python -m vectapilot_api.tooleval check && uv run python -m vectapilot_api.tooleval report
+
+# Always a dry run: a scripted fake model reading fixture plans from apps/api/tests/, $0, into the
+# git-ignored evals/reports/tmp/tool_calls/. Needs `make up` (the database at migration 0006), a
+# frozen dataset, and H1 written (until then it stops after the first scenario and says so). It
+# resets each business's sandbox as the owner. There is deliberately no make target for `--live`
+# or the test split (shesha runs them by hand: docs/plans/m5-pr-checks.md, PR 7).
+tool-dry-run: ## Dry run of the tool-call harness on dev: scripted fake model, no cost
+	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_EMBEDDINGS_PROVIDER=fake \
+		VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" VECTAPILOT_MIGRATION_DATABASE_URL="$(LOCAL_OWNER_URL)" \
+		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run python -m vectapilot_api.tooleval run --split dev
