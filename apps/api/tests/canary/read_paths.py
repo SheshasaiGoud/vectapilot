@@ -507,16 +507,23 @@ NEEDS_HAND_WRITE: Final[Mapping[str, frozenset[str]]] = {
 `text_search` for its own path, and both legs and M3 H2's `rrf_fuse` for M3 PR 4's hybrid
 paths)."""
 
-NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {}
-"""[HAND-WRITE] stubs that no read path runs yet, but other tests wait for through this same
-switch: stub → who waits. Empty since M3 PR 4: M3 H2's `rrf_fuse` left when the hybrid read paths
-came, which run it."""
+NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {
+    "run_turn": "M5 H1's tests, the fake-provider turns and the POST /v1/agent write path",
+}
+"""[HAND-WRITE] stubs that no read path runs, but other tests wait for through this same
+switch: stub → who waits. M3 H2's `rrf_fuse` left in M3 PR 4, when the hybrid read paths came,
+which run it. M5 H1's `run_turn` runs on no read path (the agent's reads are the tool paths,
+checked without the loop); `write_paths.WRITE_NEEDS_HAND_WRITE` names the write path."""
 
-PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset()
+PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"run_turn"})
 """[HAND-WRITE] stubs still raising NotImplementedError, one switch each. Remove a name once
 every test that runs it shows XPASS(strict) (guide: docs/learning/m3-hybrid.md §1):
 
-- None pending today. M3 H1 "text_search" and M3 H2 "rrf_fuse" were removed on 2026-10-28 (both
+- "run_turn" (M5 H1, the agent loop, shesha's; guide: docs/learning/m5-agent-loop.md §1): its
+  own tests (tests/agent/test_loop.py), the fake-provider turns through the real step model and
+  tools (tests/agent/test_turns_db.py) and the `POST /v1/agent` write path
+  (`write_paths.WRITE_NEEDS_HAND_WRITE`).
+- M3 H1 "text_search" and M3 H2 "rrf_fuse" were removed on 2026-10-28 (both
   written by Claude at shesha's request, for the deadline), so their own tests, the `text_search`
   and hybrid read paths, the owner-connection checks and PR 4/5's real-leg tests are plain tests.
 

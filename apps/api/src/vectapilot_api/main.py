@@ -17,6 +17,12 @@ from vectapilot_api import __version__
 from vectapilot_api.actions.confirm import ConfirmService
 from vectapilot_api.actions.pending import PendingActionStore
 from vectapilot_api.actions.router import router as actions_router
+from vectapilot_api.agent.llm import build_agent_gateway
+from vectapilot_api.agent.profiles import build_profiles, business_types
+from vectapilot_api.agent.router import router as agent_router
+from vectapilot_api.agent.routing import ClassifierRouter, load_router_model
+from vectapilot_api.agent.service import AgentService
+from vectapilot_api.agent.types import LoopLimits
 from vectapilot_api.answer.router import router as answer_router
 from vectapilot_api.answer.service import ANSWER_ALIAS, AnswerService, RagConfig
 from vectapilot_api.config import Settings
@@ -28,6 +34,7 @@ from vectapilot_api.gateway.catalog import load_catalog
 from vectapilot_api.gateway.gateway import build_gateway
 from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.health import router as health_router
+from vectapilot_api.intents.fallback import LLMIntentFallback
 from vectapilot_api.kb.errors import install_error_handlers
 from vectapilot_api.kb.router import router as kb_router
 from vectapilot_api.kb.service import KbService
@@ -60,13 +67,18 @@ that turning one signal back on later is a deliberate change. The span comes wit
 
 
 def create_app(
-    settings: Settings | None = None, *, llm_provider: Provider | None = None
+    settings: Settings | None = None,
+    *,
+    llm_provider: Provider | None = None,
+    agent_provider: Provider | None = None,
 ) -> FastAPI:
     """Build the app. A factory (not a module-level `app`) so tests can pass their own settings.
 
     `llm_provider`, if given, replaces the provider Settings name (`build_gateway`'s `provider`):
     tests pass a scripted fake. Without it, `llm_provider = "fake"` gives the fake with an empty
     script, so an answer that reaches the model step fails (500) until a test scripts it.
+    `agent_provider` does the same for the agent's own gateway (M5 PR 4, `agent/llm.py`); an
+    unscripted agent step is a hand-off (`agent_error`), never a 500.
 
     Every paid provider in Settings (`llm_provider`, `embeddings_provider`) needs
     `api_allow_paid_llm` (ADR 0006 Exposure, 2026-10-22 and D9 2026-10-23), injected provider or
@@ -91,6 +103,21 @@ def create_app(
     # Fail fast (ADR 0016 decision 1, M5 PR 1): with a tool configuration folder, every business's
     # tools.json and seed.json must be there and valid, or the app stops here (ToolsConfigError).
     tools = None if settings.tools_config_dir is None else load_tools_dir(settings.tools_config_dir)
+    # Fail fast (W11, M5 PR 4): each business's tools.json and corpus manifest must name the same
+    # business type, so a typo in either can never switch the safety step off (AgentConfigError).
+    # Settings requires corpus_dir whenever tools_config_dir is set.
+    corpus_types = None
+    if tools is not None:
+        if settings.corpus_dir is None:  # pragma: no cover (Settings refuses it)
+            raise ValueError("corpus_dir is required with tools_config_dir")
+        corpus_types = business_types(tools, settings.corpus_dir)
+    # Fail fast (D7 (a)): `agent_router = on` needs a live M4 model for the API's embedding model
+    # (RouterModelError); Settings requires the folder's setting when it is on.
+    router_model = None
+    if settings.agent_router == "on":
+        if settings.agent_router_model_dir is None:  # pragma: no cover (Settings refuses it)
+            raise ValueError("agent_router_model_dir is required when agent_router is 'on'")
+        router_model = load_router_model(settings.agent_router_model_dir, embedding_spec)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -135,9 +162,28 @@ def create_app(
             database, tool_configs, lifetime_s=settings.action_lifetime_seconds
         )
         app.state.confirm_service = ConfirmService(database, tool_configs)
-        async with build_gateway(settings, provider=llm_provider) as gateway:
+        async with (
+            build_gateway(settings, provider=llm_provider) as gateway,
+            build_agent_gateway(settings, provider=agent_provider) as agent_gateway,
+        ):
             app.state.answer_service = AnswerService(
                 search, gateway, RagConfig.from_settings(settings)
+            )
+            # M5 PR 4: `/v1/agent` (ADR 0016 decisions 4, 5, 7), on its own gateway instance. The
+            # router (when on) embeds with the API's runner and falls back on the agent's gateway.
+            router = None
+            if router_model is not None:
+                router = ClassifierRouter(runner, router_model, LLMIntentFallback(agent_gateway))
+            app.state.agent_service = AgentService(
+                build_profiles(database, tools or {}, corpus_types or {}),
+                gateway=agent_gateway,
+                store=app.state.pending_actions,
+                answers=app.state.answer_service,
+                limits=LoopLimits(max_steps=settings.agent_max_steps),
+                turn_timeout_s=settings.agent_turn_timeout_seconds,
+                routing=settings.agent_router,
+                router=router,
+                router_artifact=None if router_model is None else router_model.artifact_sha256,
             )
             logger.info(
                 "startup", extra={"environment": settings.environment, "version": __version__}
@@ -159,6 +205,7 @@ def create_app(
     app.include_router(search_router)
     app.include_router(answer_router)
     app.include_router(actions_router)
+    app.include_router(agent_router)
     install_error_handlers(app)
     return app
 

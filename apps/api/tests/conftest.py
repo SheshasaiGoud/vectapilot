@@ -59,6 +59,13 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "rag_rrf_k": 60,
     "tools_config_dir": None,
     "action_lifetime_seconds": 900,
+    "corpus_dir": None,
+    "agent_llm_attempt_timeout_seconds": 6.0,
+    "agent_llm_deadline_seconds": 8.0,
+    "agent_max_steps": 4,
+    "agent_turn_timeout_seconds": 35.0,
+    "agent_router": "off",
+    "agent_router_model_dir": None,
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 

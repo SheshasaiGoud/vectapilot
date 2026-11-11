@@ -548,6 +548,15 @@ decisions: every timeout is `outcome_unknown` (W9); refusals of known actions an
 in the confirm's transaction (W12); `SET CONSTRAINTS ALL IMMEDIATE` before COMMIT, explicit READ
 COMMITTED, `action_lifetime_seconds` and the import fences (PR 3).
 
+
+## Decided 2026-11-11 (shesha, M5 PR 4 review)
+1. **The router gets its own time limit before `agent_router` can be `on`.** Today the router
+   (embedding and LLM fallback) runs outside the turn's timeout, so one request's worst case
+   is about 30 + 8 + 35 s with the defaults. A small follow-up PR adds
+   `agent_router_timeout_seconds` and wraps the router in it; expiry hands off as
+   `router_failed` with the business's guidance (fail closed). It is a prerequisite for
+   turning the router on, which itself waits for M4's H1 and a live router model.
+
 ## Risks
 - **Small n.** About 20 test scenarios (an estimate under D8 (b)): 20 of 20 has a Wilson lower
   bound near 84 %, and 95 % needs about 73 straight successes. The claim is the count.

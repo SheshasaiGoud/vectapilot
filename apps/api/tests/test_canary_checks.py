@@ -61,6 +61,7 @@ from tests.canary.read_paths import (
     search_through_the_api,
     search_through_the_api_hybrid,
 )
+from tests.canary.write_paths import WRITE_NEEDS_HAND_WRITE, WRITE_PATHS
 from tests.conftest import make_settings
 from tests.retrieval.standins import FakeDatabase, StandInFuse, hit
 from vectapilot_api.db import Database
@@ -347,7 +348,10 @@ def test_every_stub_dependency_names_a_read_path_and_every_pending_stub_is_used(
     }
     assert runs("text_search") == {"text_search", *hybrid}
     assert runs("rrf_fuse") == hybrid
-    assert NEEDED_OUTSIDE_READ_PATHS == {}
+    # M5 PR 4: the agent loop runs on no read path; the write path that waits for it is named.
+    assert NEEDED_OUTSIDE_READ_PATHS.keys() == {"run_turn"}
+    assert {"POST /v1/agent": {"run_turn"}} == WRITE_NEEDS_HAND_WRITE
+    assert WRITE_PATHS.keys() >= WRITE_NEEDS_HAND_WRITE.keys()
 
 
 def test_every_search_leg_also_runs_on_the_owners_connection() -> None:

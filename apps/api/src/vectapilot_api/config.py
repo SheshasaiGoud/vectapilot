@@ -170,13 +170,47 @@ class Settings(BaseSettings):
     seeds (`data/sandbox/` in the repository; a read-only bind mount under compose, so the image is
     unchanged). When set, `create_app` reads and validates the whole folder before it serves
     anything (`tools.files.load_tools_dir`), and any missing or invalid business file stops
-    startup. None: no business has tools. PR 4 makes it required when the agent route is on."""
+    startup. None: no business has tools, and `/v1/agent` hands off for every business. Required
+    when `agent_router` is `on` (M5 PR 4), and needs `corpus_dir` with it."""
     action_lifetime_seconds: int = Field(default=900, gt=0, le=3600)
     """`VECTAPILOT_ACTION_LIFETIME_SECONDS`: how long a proposed write waits for its confirm call
     (W6) [proposal: 15 minutes, a configured value, not a measurement]. The database sets
     `expires_at` to `now()` plus this. Bounded to migration 0006's CHECK (more than zero, at most
     one hour), so a typo stops startup instead of refusing every proposal with SQLSTATE 23514
     (M5 PR 1 review, diego)."""
+    corpus_dir: Path | None = None
+    """`VECTAPILOT_CORPUS_DIR`: the corpus folder (`data/sample/` in the repository; a read-only
+    bind mount under compose). Required with `tools_config_dir` (M5 PR 4): every business with
+    tools needs its corpus manifest, whose `business_type` must equal its `tools.json`'s, so a
+    typo in either can never switch W11 off for a clinic (`agent/profiles.py`). Only each
+    manifest's business type is read, never a document."""
+
+    # ── The agent (M5 PR 4, ADR 0016 decisions 4, 5, 7) ──
+    # SAFETY BOUNDS [proposal], not latency targets: estimates, never measurements. The agent has
+    # its own gateway instance with these limits; `/v1/answer`'s gateway keeps the llm_* ones.
+    # Under `agent_router = on` the router runs BEFORE the turn and outside its timeout: its
+    # embedding (`embeddings_timeout_seconds`, with the runner's retries) and at most one LLM
+    # fallback call (one agent step's deadline). So one request's worst case is about router +
+    # `agent_turn_timeout_seconds` (with the defaults roughly 30 + 8 + 35 s), not the turn alone.
+    # A router timeout of its own is an open proposal for shesha [PR 4 review, kenji].
+    agent_llm_attempt_timeout_seconds: Seconds = Field(default=6.0, le=60)
+    """Each attempt's limit for an agent step (the agent's own `LLMGateway`)."""
+    agent_llm_deadline_seconds: Seconds = Field(default=8.0, le=120)
+    """One step's whole call: attempts, backoff waits and the one repair."""
+    agent_max_steps: int = Field(default=4, ge=1, le=10)
+    """Model steps per turn (`LoopLimits.max_steps`; at most `agent.types.MAX_STEPS_LIMIT`)."""
+    agent_turn_timeout_seconds: Seconds = Field(default=35.0, le=300)
+    """The whole turn's limit around the loop (`turn_timeout`). At least
+    `agent_llm_deadline_seconds x agent_max_steps`, so a turn of slow but successful steps is
+    never cut off by its own budget (checked in `_agent_problems`)."""
+    agent_router: Literal["off", "on"] = "off"
+    """`VECTAPILOT_AGENT_ROUTER` (decided D7 (a)): `off` (the default) fails health businesses
+    closed on `/v1/agent` with their emergency guidance (W11); `on` puts M4's router first and
+    needs `agent_router_model_dir` (a live model, checked at startup) and `tools_config_dir`.
+    The eval harness's `router=none` is not a setting (`AgentService.respond_unrouted`)."""
+    agent_router_model_dir: Path | None = None
+    """`VECTAPILOT_AGENT_ROUTER_MODEL_DIR`: M4's model folder (`evals/reports/intents/<version>/
+    <UTC>-local-model`) the router scores with under `agent_router = on`."""
 
     @classmethod
     def settings_customise_sources(
@@ -254,6 +288,7 @@ class Settings(BaseSettings):
             # M3 PR 4: the answer takes its rag_context_k hits from the top of the fused list.
             problems.append("rag_candidate_k must be >= rag_context_k")
         problems += self._embedding_problems()
+        problems += self._agent_problems()
         if problems:
             raise ValueError("; ".join(problems))
         return self
@@ -279,6 +314,29 @@ class Settings(BaseSettings):
                     f"{', '.join(found)} must not be set when embeddings_provider is 'voyage'"
                     " (they replace the OS trust store or write TLS session keys): unset them"
                 )
+        return problems
+
+    def _agent_problems(self) -> list[str]:
+        """M5 PR 4's fail-fast rules for the agent. Every message names fields, never a value."""
+        problems: list[str] = []
+        if self.agent_llm_deadline_seconds < self.agent_llm_attempt_timeout_seconds:
+            problems.append(
+                "agent_llm_deadline_seconds must be >= agent_llm_attempt_timeout_seconds"
+            )
+        if self.agent_llm_deadline_seconds * self.agent_max_steps > self.agent_turn_timeout_seconds:
+            problems.append(
+                "agent_turn_timeout_seconds must be >= agent_llm_deadline_seconds x agent_max_steps"
+            )
+        if self.agent_router == "on":
+            if self.agent_router_model_dir is None:
+                problems.append("agent_router_model_dir is required when agent_router is 'on'")
+            if self.tools_config_dir is None:
+                problems.append("tools_config_dir is required when agent_router is 'on'")
+        if self.tools_config_dir is not None and self.corpus_dir is None:
+            problems.append(
+                "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with tools_config_dir: W11 checks"
+                " each business's type in both"
+            )
         return problems
 
     def require_api_paid_provider_opt_in(self) -> None:

@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from tests.actions.db import active_on, audits, written_by
 from tests.conftest import integration
 from tests.tools.core import PAWS, config_for, context_for
-from tests.tools.helpers import copy_sandbox
+from tests.tools.helpers import copy_sandbox, corpus_matching
 from tests.tools.sandbox_db import (
     app_url,
     fresh_engine,
@@ -94,7 +94,9 @@ async def served(owner: AsyncEngine, tmp_path: Path) -> AsyncIterator[Served]:
     config = config_for(business_id, PAWS)
     try:
         await seed_business(owner, seed_for(business_id, PAWS.seed))
-        with TestClient(create_app(Settings(tools_config_dir=folder))) as client:
+        corpus = corpus_matching(tmp_path / "corpus", folder)
+        settings = Settings(tools_config_dir=folder, corpus_dir=corpus)
+        with TestClient(create_app(settings)) as client:
             yield Served(
                 business_id=business_id,
                 client=client,
