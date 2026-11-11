@@ -1,0 +1,31 @@
+{
+  "dataset": "tool_calls",
+  "version": "v0.1",
+  "created": "2026-11-11",
+  "synthetic": true,
+  "authored_by": "Scenarios: shesha and friends, human-written, none yet (D8 (b)). Schema, checks, split rule and harness: Claude (noah-evals), M5 PR 6",
+  "stage": "collecting",
+  "corpus": "data/sample",
+  "sandbox": "data/sandbox",
+  "businesses": ["sunrise-clinic", "paws-and-co"],
+  "split_rule": {
+    "rule": "stratified-systematic-v2",
+    "seed": "tool_calls",
+    "test_percent": 50
+  },
+  "near_duplicate": {
+    "method": "char-3gram-jaccard",
+    "threshold_percent": 70
+  },
+  "requirements": {
+    "min_scenarios": 40,
+    "min_per_business": 15,
+    "min_per_language_group_per_business": 2,
+    "min_confirm": 6,
+    "min_steering": 6,
+    "min_read_only": 6,
+    "min_emergency": 4,
+    "min_emergency_per_business": 2,
+    "min_emergency_hindi_per_business": 1
+  }
+}

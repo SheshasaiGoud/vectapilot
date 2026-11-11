@@ -8,11 +8,14 @@
   string. Any importer but `actions/confirm.py` fails.
 - **Only `main.py` imports the pending-action store** (`actions.pending`), the only code that holds
   a confirm token, and the MCP server imports nothing of `vectapilot_api.actions` at all: a token
-  can never reach an MCP result (W2). PR 4 names its agent service here explicitly.
+  can never reach an MCP result (W2). PR 4 names its agent service here explicitly; the tool-call
+  eval (M5 PR 6) takes the store from `main.build_action_services`, never from `actions.pending`.
 - **Only the confirm service names `confirmed_at` and `confirm_trace_id` in SQL** (W2): any
   string literal under `src/` (docstrings aside) that mentions either column, outside
   `actions/confirm.py` and the migrations, fails, whatever the statement's form (`SET col =`,
-  `SET (a, b) = (...)`, an INSERT's column list).
+  `SET (a, b) = (...)`, an INSERT's column list). One reader is allowed (M5 PR 6): the tool-call
+  eval's counts (`tooleval/writes.py`) read both columns to count unconfirmed writes from outside
+  the code they check, and every mention there must be a single SELECT with no writing word.
 - **Two routes under `/v1/agent`, and only the confirm writes:** PR 4 adds `POST /v1/agent`,
   which only proposes (its service stores a pending action through the store `main.py` hands it,
   and imports neither `tools.execute` nor `actions.pending`).
@@ -245,6 +248,20 @@ def sql_mentions(source: str) -> list[str]:
     ]
 
 
+EVAL_READER: Final = SRC / "tooleval" / "writes.py"
+"""The tool-call eval's counts (M5 PR 6): it reads both columns on the owner's connection to count
+unconfirmed writes from outside the code it checks. It may read them, never set them."""
+WRITING_SQL: Final = re.compile(
+    r"\b(insert|update|delete|merge|set|alter|truncate|grant|copy|call|do)\b", re.IGNORECASE
+)
+
+
+def read_only_sql(statement: str) -> bool:
+    """A single SELECT with no word that writes (`set` included, so no `UPDATE ... SET`)."""
+    flat = " ".join(statement.split())
+    return flat.lower().startswith("select") and ";" not in flat and not WRITING_SQL.search(flat)
+
+
 def test_only_the_confirm_service_names_confirmed_at_in_sql() -> None:
     setters = [
         path
@@ -252,7 +269,28 @@ def test_only_the_confirm_service_names_confirmed_at_in_sql() -> None:
         if path.parent.name != "versions" and sql_mentions(path.read_text("utf-8"))
     ]
 
-    assert setters == [CONFIRM_SERVICE]
+    assert setters == [CONFIRM_SERVICE, EVAL_READER]
+
+
+def test_the_eval_reader_only_reads_the_confirm_columns() -> None:
+    mentions = sql_mentions(EVAL_READER.read_text("utf-8"))
+
+    assert mentions
+    assert all(read_only_sql(statement) for statement in mentions)
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "UPDATE pending_actions SET confirmed_at = now()",
+        "SELECT 1; UPDATE pending_actions SET confirm_trace_id = :t",
+        "WITH x AS (UPDATE pending_actions SET confirmed_at = now() RETURNING *) SELECT 1",
+        "SELECT confirmed_at FROM pending_actions FOR UPDATE",
+        "INSERT INTO pending_actions (confirmed_at) SELECT now()",
+    ],
+)
+def test_red_proof_the_reader_check_refuses_every_write(statement: str) -> None:
+    assert not read_only_sql(statement), statement
 
 
 @pytest.mark.parametrize(
