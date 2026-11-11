@@ -63,7 +63,7 @@ from tests.canary.read_paths import (
     read_path_params,
     sql_on_every_business_table,
 )
-from tests.canary.write_paths import WRITE_PATHS, served_with_tools
+from tests.canary.write_paths import WRITE_PATHS, served_with_tools, write_path_params
 from tests.canary.write_paths import confirm as confirm_through_the_api
 from tests.conftest import integration
 from tests.retrieval.standins import hit
@@ -914,7 +914,7 @@ def api() -> Iterator[TestClient]:
         yield client
 
 
-@pytest.mark.parametrize("path", sorted(WRITE_PATHS))
+@pytest.mark.parametrize("path", write_path_params())
 @pytest.mark.parametrize("me", [0, 1], ids=["as a", "as b"])
 async def test_no_write_path_changes_another_businesss_rows(
     fresh_engine: AsyncEngine,

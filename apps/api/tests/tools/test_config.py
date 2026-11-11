@@ -11,7 +11,14 @@ from typing import Any
 import pytest
 
 from tests.conftest import make_settings
-from tests.tools.helpers import BUSINESSES, SANDBOX_DIR, copy_sandbox, read_json, write_json
+from tests.tools.helpers import (
+    BUSINESSES,
+    CORPUS_DIR,
+    SANDBOX_DIR,
+    copy_sandbox,
+    read_json,
+    write_json,
+)
 from vectapilot_api.config import Settings
 from vectapilot_api.intents.policy import BusinessType
 from vectapilot_api.main import create_app
@@ -285,7 +292,7 @@ def test_without_the_setting_no_business_has_tools() -> None:
 
 
 def test_the_app_loads_the_folder_at_startup() -> None:
-    app = create_app(make_settings(tools_config_dir=SANDBOX_DIR))
+    app = create_app(make_settings(tools_config_dir=SANDBOX_DIR, corpus_dir=CORPUS_DIR))
 
     assert tuple(app.state.tools) == BUSINESSES
 
@@ -295,13 +302,14 @@ def test_the_app_refuses_to_start_on_an_invalid_folder(tmp_path: Path) -> None:
     (folder / "paws-and-co" / SEED_FILE).unlink()
 
     with pytest.raises(ToolsConfigError, match=r"paws-and-co: missing seed\.json"):
-        create_app(make_settings(tools_config_dir=folder))
+        create_app(make_settings(tools_config_dir=folder, corpus_dir=CORPUS_DIR))
     with pytest.raises(ToolsConfigError, match="is missing"):
-        create_app(make_settings(tools_config_dir=tmp_path / "nowhere"))
+        create_app(make_settings(tools_config_dir=tmp_path / "nowhere", corpus_dir=CORPUS_DIR))
 
 
 def test_the_setting_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("VECTAPILOT_TOOLS_CONFIG_DIR", str(SANDBOX_DIR))
+    monkeypatch.setenv("VECTAPILOT_CORPUS_DIR", str(CORPUS_DIR))
 
     settings = Settings(
         _env_file=None,
@@ -309,3 +317,4 @@ def test_the_setting_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatc
         redis_url="redis://127.0.0.1:1/0",
     )
     assert settings.tools_config_dir == SANDBOX_DIR
+    assert settings.corpus_dir == CORPUS_DIR

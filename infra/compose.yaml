@@ -19,6 +19,10 @@ x-api-environment: &api-environment
   # M5 (ADR 0016 decision 1): the per-business tool configurations and sandbox seeds, mounted
   # read-only below. The API validates the whole folder at startup.
   VECTAPILOT_TOOLS_CONFIG_DIR: /app/data/sandbox
+  # M5 PR 4 (W11): the corpus folder, mounted read-only below. Required with the tools folder:
+  # startup refuses a business whose tools.json and corpus manifest name different business
+  # types. Only each manifest's business_type is read, never a document.
+  VECTAPILOT_CORPUS_DIR: /app/data/sample
 
 services:
   postgres:
@@ -74,6 +78,7 @@ services:
     # not re-run migrate).
     volumes:
       - ../data/sandbox:/app/data/sandbox:ro
+      - ../data/sample:/app/data/sample:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

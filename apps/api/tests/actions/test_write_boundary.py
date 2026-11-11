@@ -13,8 +13,9 @@
   string literal under `src/` (docstrings aside) that mentions either column, outside
   `actions/confirm.py` and the migrations, fails, whatever the statement's form (`SET col =`,
   `SET (a, b) = (...)`, an INSERT's column list).
-- **The confirm is the one route under `/v1/agent`** in PR 3 (PR 4 adds `POST /v1/agent`, which
-  only proposes).
+- **Two routes under `/v1/agent`, and only the confirm writes:** PR 4 adds `POST /v1/agent`,
+  which only proposes (its service stores a pending action through the store `main.py` hands it,
+  and imports neither `tools.execute` nor `actions.pending`).
 
 These are tripwires for ordinary spellings, not a sandbox: `getattr` with a computed name
 defeats any static check. The database is the other fence (migration 0006's deferred keys tie
@@ -253,8 +254,11 @@ def test_the_column_check_skips_docstrings_and_attributes() -> None:
     assert sql_mentions(source) == []
 
 
-def test_the_one_route_under_v1_agent_is_the_confirm() -> None:
+def test_the_routes_under_v1_agent_are_the_turn_and_the_confirm() -> None:
     paths = create_app(make_settings()).openapi()["paths"]
     routes = {path: sorted(paths[path]) for path in paths if path.startswith("/v1/agent")}
 
-    assert routes == {"/v1/agent/actions/{action_id}/confirm": ["post"]}
+    assert routes == {
+        "/v1/agent": ["post"],
+        "/v1/agent/actions/{action_id}/confirm": ["post"],
+    }

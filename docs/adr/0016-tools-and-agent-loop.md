@@ -150,7 +150,12 @@ the model never sees, executes exactly once. Each part:
    their configured emergency guidance. Every loop `handoff(safety)` becomes `URGENT` plus that
    guidance, never model text. The eval harness calls the service with `router=none`, which no route
    or setting can produce, and labels its report "safety floor not exercised". `intents/policy.py`
-   does not change.
+   does not change. [PR 4 review, 2026-11-11] The service does not trust a decision's route: it
+   recomputes `policy.route(intent)` and fails closed (`router_failed`, never looser than the
+   policy) on any disagreement, and checks mandatory intents before the loop and `rag`. `on`
+   starts only with the model M4 pinned (the ledger's `PinEntry`: artifact sha256, T, tau, sigma,
+   router prompt version), from a clean tree; the pin is what proves "committed" to an API image
+   with no git. The `agent_turn` record names the router's artifact sha256.
 8. **MCP** (decided D1 (a); rule 11 yes for the official `mcp` package, only in this project, its
    dependencies confirmed with `uv lock` on install day). `packages/mcp_server/` is its own uv
    project with its own lock (shared packages pinned to the API lock's versions, tested). It is a
@@ -183,6 +188,13 @@ the model never sees, executes exactly once. Each part:
   own record. A model that ignores instructions can propose a wrong write; it cannot execute one.
 - **The route is closed for both fictional businesses until M4's router is live** (D7 (a)).
   The loop is measured through the harness, without the safety floor, and the note says so.
+- **A health business with a corpus but no `tools.json` gets `not_configured` with no
+  guidance**, because the guidance lives only in `tools.json`. Acceptable in M5 (both fictional
+  businesses have both files; startup refuses a mismatch); revisit with the per-business
+  configuration screen.
+- **Under `on`, the router runs before the turn and outside its timeout**, so one request's worst
+  case is the router's (embedding plus one fallback call) plus the turn's. Documented in
+  `config.py`; a router timeout of its own is open for shesha.
 - **Model replies are still model text.** A `reply` after a read can misstate a slot or claim a
   booking that never happened. The eval counts false success claims; M7 owns the guard.
 - **New isolation surface.** Six tables, every read path (the read tools, the proposal checks)
