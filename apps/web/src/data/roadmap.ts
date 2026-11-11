@@ -12,7 +12,7 @@ export interface Milestone {
   pending?: string;
 }
 
-export const currentMilestone = "M5";
+export const currentMilestone = "M6";
 
 /** Teammates who review every milestone; shown as always active. */
 export const reviewers: string[] = ["maya-tech-lead"];
@@ -57,6 +57,7 @@ export const milestones: Milestone[] = [
     title: "MCP tools + agent",
     summary: "Bookings with confirmation and idempotency",
     owners: ["leo-agents"],
+    pending: "H1, scenarios and live runs pending",
   },
   {
     id: "M6",
