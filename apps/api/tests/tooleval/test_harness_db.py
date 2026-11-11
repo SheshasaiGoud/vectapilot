@@ -238,7 +238,9 @@ def test_the_harness_counts_from_the_database_and_confirms_only_a_match(
 
         info = read_run(folder)
         lines = {line.id: line for line in read_results(folder)}
-        assert (info.status, info.dry_run, info.routing, code) == ("complete", True, "none", 1)
+        # H2 is written (2026-11-11), so the real metrics render the summary and the run exits 0.
+        assert (info.status, info.dry_run, info.routing, code) == ("complete", True, "none", 0)
+        assert (folder / "summary.md").is_file()
         assert folder.name.endswith("-fake-agent-dev")
         assert folder.parent.parent.parent == repo.root / "evals" / "reports" / "tmp"
 
