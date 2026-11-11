@@ -1,5 +1,6 @@
 # Lint, type-check and test every pull request and every push to main.
-# Branch protection on main requires both jobs to pass before a PR can merge.
+# Branch protection on main requires api, api image and web; mcp is not required until shesha
+# changes the setting (rule 1).
 name: CI
 
 on:
@@ -81,6 +82,67 @@ jobs:
       # Same script as `make coverage` (ADR 0006): gateway/ combined >= 95.00 %, branches >= 95 %.
       - name: Gateway coverage gate
         run: uv run python scripts/coverage_gate.py
+
+  # The MCP server (M5 PR 5, ADR 0016 decision 8): its own uv project and lock in
+  # packages/mcp_server/, so the MCP SDK never enters the API's lock or image. Same database and
+  # gates as the `api` job. Making this check required on `main` is a GitHub settings change:
+  # shesha's explicit yes (rule 1).
+  mcp:
+    name: mcp (lint, types, tests)
+    runs-on: ubuntu-24.04
+    # The suite starts the server as a child process over stdio: a hang there (a stuck connect, a
+    # pipe deadlock) must not hold a runner for GitHub's default 360 minutes. About 2-3 minutes
+    # is expected; 15 is generous.
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/mcp_server
+    services:
+      postgres:
+        # The `api` job's image, pinned by the same digest (ADR 0009); bump both together.
+        image: pgvector/pgvector:pg18@sha256:2358fcba361ed2233a5ed81b5fe4ca779ccb304120ce531a3bf51c0ed7e2bc11
+        env:
+          POSTGRES_USER: vectapilot
+          POSTGRES_PASSWORD: vectapilot-ci # throwaway database that lives only inside this job
+          POSTGRES_DB: vectapilot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U vectapilot"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # As the `api` job: the server and the tests log in as vectapilot_app, migrations run as the
+      # owner. No Redis service: the MCP server never connects to it, but the API's Settings
+      # require a URL, so this one names a port nothing listens on.
+      VECTAPILOT_ENVIRONMENT: ci
+      VECTAPILOT_DATABASE_URL: postgresql+asyncpg://vectapilot_app:vectapilot-app-ci@localhost:5432/vectapilot
+      VECTAPILOT_MIGRATION_DATABASE_URL: postgresql+asyncpg://vectapilot:vectapilot-ci@localhost:5432/vectapilot
+      VECTAPILOT_REDIS_URL: redis://localhost:1/0
+      RUN_INTEGRATION: "1"
+    steps:
+      - uses: actions/checkout@v7
+
+      # The `api` job's pinned setup-uv; the cache is keyed on this project's own lock.
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.12.24" # same as local development
+          working-directory: packages/mcp_server
+          enable-cache: true
+
+      - run: uv sync --locked
+      - run: uv run ruff format --check .
+      - run: uv run ruff check .
+      - run: uv run mypy
+      # The API package is installed here by path, with its alembic and provisioning command,
+      # so the same migrations and the same app-role login as the `api` job, from this project.
+      - name: Apply database migrations
+        run: uv run alembic -c ../../apps/api/alembic.ini upgrade head
+      - name: Give the app role its login
+        run: uv run vectapilot-db-provision
+      - name: Tests
+        run: uv run pytest --junit-xml="$RUNNER_TEMP/pytest.xml"
+      # Fail if no test under tests/integration/ passed or any was skipped (a skip looks green).
+      - name: Integration gate (database tests ran)
+        run: uv run python scripts/integration_gate.py "$RUNNER_TEMP/pytest.xml"
 
   api-image:
     name: api image (docker build)

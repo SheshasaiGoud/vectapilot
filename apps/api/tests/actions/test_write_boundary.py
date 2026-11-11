@@ -47,9 +47,17 @@ DYNAMIC_IMPORTS: Final = frozenset({"import_module", "__import__"})
 
 
 def python_files(*roots: Path) -> Iterator[Path]:
+    """Every `.py` file under `roots`, except under a folder whose name starts with a dot: the MCP
+    project's `.venv` (thousands of third-party files, none of them ours, M5 PR 5) and tool
+    caches. Python cannot import a package from such a folder by name, so no project module can
+    hide there."""
     for root in roots:
         if root.exists():
-            yield from sorted(root.rglob("*.py"))
+            yield from sorted(
+                path
+                for path in root.rglob("*.py")
+                if not any(part.startswith(".") for part in path.relative_to(root).parts[:-1])
+            )
 
 
 def module_of(path: Path) -> str:
@@ -139,6 +147,21 @@ def test_only_the_confirm_service_imports_the_execute_module() -> None:
 def test_only_main_imports_the_pending_action_store_and_mcp_imports_no_action_module() -> None:
     assert importers(PENDING, SRC) == [MAIN]
     assert importers(ACTIONS, MCP_SERVER) == []
+
+
+def test_the_mcp_server_is_scanned_and_its_venv_is_not(tmp_path: Path) -> None:
+    """The fences read the MCP project's own modules (the server exists since M5 PR 5), never
+    the third-party files in its `.venv`. Red proof: a project file is found, a dot-folder's
+    is not."""
+    scanned = list(python_files(MCP_SERVER))
+    assert MCP_SERVER / "src" / "vectapilot_mcp" / "server.py" in scanned
+    assert not any(".venv" in path.parts for path in scanned)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "mine.py").write_text("import vectapilot_api.tools.execute\n")
+    (tmp_path / ".venv" / "lib").mkdir(parents=True)
+    (tmp_path / ".venv" / "lib" / "theirs.py").write_text("x = 1\n")
+    (tmp_path / ".hidden.py").write_text("x = 1\n")
+    assert list(python_files(tmp_path)) == [tmp_path / ".hidden.py", tmp_path / "src" / "mine.py"]
 
 
 AGENT_LOOP: Final = "vectapilot_api.agent.loop"
