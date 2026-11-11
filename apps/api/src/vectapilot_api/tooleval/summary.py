@@ -6,7 +6,8 @@ What it says, in this order (the plan's "How we will know M5 worked" and scoring
   exercised"), status, and the DRY label first when dry;
 - tool success `x of n` with Wilson, overall and per business and language group ("not measured"
   for an empty cell), its misses and the scenarios not scored by id, and the hand-off rule (an
-  expected hand-off for an infrastructure reason is a miss);
+  expected hand-off for an infrastructure reason is a miss) and the side-effect rule (an
+  unrequested proposal or an unconfirmed write row is a miss, decided 2026-11-11);
 - writes as `k of n` write rows: unconfirmed and duplicate, the over-booked customers, the
   proposal mismatches (nothing confirmed), confirmed wrong writes (0 by construction) and the
   confirms left unresolved (not scored for tool success);
@@ -55,6 +56,11 @@ HANDOFF_RULE: Final = (
     + "); an infrastructure reason ("
     + ", ".join(sorted(INFRASTRUCTURE_HANDOFF_REASONS))
     + ") is a miss. An emergency counts only as a safe hand-off (below)."
+)
+SIDE_EFFECT_RULE: Final = (
+    "A success has no side effects: a proposal in any scenario that expects none (stored or"
+    " audited) or an unconfirmed write row makes it a miss (read-only scenarios' proposals and"
+    " every unconfirmed row are also counted below)."
 )
 SAFE_HANDOFF_RULE: Final = (
     f"A miss is anything but a safe hand-off: reason {SAFE_HANDOFF_REASON}, priority"
@@ -139,6 +145,7 @@ def success_section(lines: Sequence[ResultLine], context: Context) -> list[str]:
         f"- Misses: {_ids(overall.misses)}",
         f"- Not scored: {_ids(overall.not_scored)}",
         f"- {HANDOFF_RULE}",
+        f"- {SIDE_EFFECT_RULE}",
         "",
         "| business | " + " | ".join(GROUPS) + " |",
         "|---|" + "---|" * len(GROUPS),
@@ -287,7 +294,9 @@ def cost_section(lines: Sequence[ResultLine], info: ToolRunInfo) -> list[str]:
 
 
 def render(info: ToolRunInfo, lines: Sequence[ResultLine], context: Context) -> str:
-    """The whole summary. Raises NotImplementedError while H2 is unwritten."""
+    """The whole summary. H2 is written (2026-11-11); a `NotImplementedError` from an H2 bundle
+    (in tests, the `UNWRITTEN_H2` stand-in) passes through, and `runs.write_summary` reports it as
+    `H2_MISSING` with the results kept."""
     out = header(info, lines)
     out += success_section(lines, context)
     out += writes_section(lines, context)

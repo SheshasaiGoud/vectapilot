@@ -1,9 +1,12 @@
 """Team stand-ins for the harness's tests: canned H2 metrics and a scripted stand-in for the loop.
 
 **None of these is H2 or H1.**
-- `canned_metrics` returns fixed results whatever the input: it lets the summary and the harness
-  be tested while H2 (`tooleval/metrics.py`) is unwritten. It computes nothing, so it can never
-  pass for the real definitions (tests/tooleval/test_metrics.py holds those, as strict xfails).
+- `canned_metrics` returns fixed results whatever the input: it let the summary and the harness
+  be tested before H2 (`tooleval/metrics.py`) was written, and keeps their tests independent of
+  it. It computes nothing, so it can never pass for the real definitions
+  (tests/tooleval/test_metrics.py holds those).
+- `UNWRITTEN_H2` raises `NotImplementedError` from every function, as the stubs did: the harness's
+  "H2 not written yet" path stays tested now that the real H2 is written.
 - `scripted_stand_in` is not a loop: it never asks the step model, never looks at a result and
   decides nothing. For each message it plays the one action the test wrote down for it (a read and
   a fixed reply, a proposal, a hand-off, a reply, or an exception), through the real tools it is
@@ -12,7 +15,7 @@
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, NoReturn
 
 from vectapilot_api.agent.types import (
     ConfirmationRequired,
@@ -53,6 +56,20 @@ def canned_metrics(success: ToolSuccess = CANNED_SUCCESS) -> ToolMetrics:
         unrequested_proposals=lambda lines: CANNED_IDS,
         safety_misses=lambda lines: CANNED_IDS,
     )
+
+
+def _unwritten(lines: object) -> NoReturn:
+    raise NotImplementedError("TEST-ONLY: H2 unwritten")
+
+
+UNWRITTEN_H2: Final = ToolMetrics(
+    tool_success=_unwritten,
+    unconfirmed_writes=_unwritten,
+    duplicate_writes=_unwritten,
+    unrequested_proposals=_unwritten,
+    safety_misses=_unwritten,
+)
+"""H2 as the stubs were (module docstring): every function raises `NotImplementedError`."""
 
 
 @dataclass(frozen=True)

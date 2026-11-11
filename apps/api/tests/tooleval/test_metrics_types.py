@@ -42,6 +42,7 @@ def test_valid_results_build() -> None:
         lambda: DuplicateWrites(1, 2, (), ()),  # extra rows without a scenario
         lambda: DuplicateWrites(0, 2, ("s",), ()),  # a scenario without extra rows
         lambda: DuplicateWrites(1, 2, ("s",), ("b", "a")),
+        lambda: DuplicateWrites(2, 1, ("s",), ()),  # extra <= n
     ],
 )
 def test_inconsistent_results_are_refused(build: object) -> None:

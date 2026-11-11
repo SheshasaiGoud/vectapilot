@@ -231,7 +231,9 @@ Planned: `scripts/`.
   `answer/prompt.py`, the gateway's code or output path, or `POST /v1/answer` (M3's window);
   `intents/policy.py` unchanged (M4). Health businesses fail closed on `/v1/agent` until M4's
   router is live, so the loop is measured through the harness. shesha writes H1, the loop
-  (`[HAND-WRITE]`); Claude writes H2 at shesha's request (D5 (b)). Nothing is built yet.
+  (`[HAND-WRITE]`); Claude writes H2 at shesha's request (D5 (b)). Merged: PR 1–6 (#60, #61,
+  #62, #63, #64, #65). H2 (tool-call metrics, `m5/tool-metrics`) written by Claude at shesha's
+  request, 2026-11-11, in review; explain-back due. H1 still open (shesha), then PR 7 close-out.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from tests.intenteval.harness_helpers import FakeRepo
-from tests.tooleval.fakes import CANNED_SUCCESS, canned_metrics
+from tests.tooleval.fakes import CANNED_SUCCESS, UNWRITTEN_H2, canned_metrics
 from tests.tooleval.helpers import frozen_on_split, parsed, scenario
 from tests.tooleval.results import result
 from tests.tooleval.runjson import tool_run_info
@@ -306,13 +306,20 @@ def test_without_h2_no_summary_is_written_and_the_results_are_kept(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     info = tool_run_info("t")
-    assert write_summary(tmp_path, info, LINES, Io(), None) is False
+    # A local stand-in for H2 unwritten (not the real functions), so this stays green now H2 is.
+    assert write_summary(tmp_path, info, LINES, Io(metrics=UNWRITTEN_H2), None) is False
     assert H2_MISSING in capsys.readouterr().out
     assert not (tmp_path / "summary.md").exists()
 
     stand_in = Io(metrics=canned_metrics(CANNED_SUCCESS))
     assert write_summary(tmp_path, info, LINES, stand_in, None) is True
     assert (tmp_path / "summary.md").read_text("utf-8").startswith("# tool_calls run t")
+
+    # The real H2 (2026-11-11) renders too, and states the side-effect rule.
+    assert write_summary(tmp_path, info, LINES, Io(), None) is True
+    text = (tmp_path / "summary.md").read_text("utf-8")
+    assert text.startswith("# tool_calls run t")
+    assert "A success has no side effects: a proposal in any scenario that expects none" in text
 
 
 def test_summarize_refuses_a_folder_whose_results_do_not_match_run_json(tmp_path: Path) -> None:
