@@ -1,0 +1,16 @@
+{
+  "business_id": "paws-and-co",
+  "synthetic": true,
+  "business_type": "veterinary",
+  "retention_days": 30,
+  "kinds": [
+    {
+      "kind": "vaccination_record",
+      "date_formats": ["DD/MM/YYYY", "D MMMM YYYY", "D MMM YYYY"],
+      "enum_values": [
+        {"field": "species", "values": ["dog", "cat", "rabbit"]}
+      ],
+      "extra_always_review": []
+    }
+  ]
+}

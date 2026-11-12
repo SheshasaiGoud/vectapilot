@@ -60,6 +60,7 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "tools_config_dir": None,
     "action_lifetime_seconds": 900,
     "corpus_dir": None,
+    "extraction_config_dir": None,
     "agent_llm_attempt_timeout_seconds": 6.0,
     "agent_llm_deadline_seconds": 8.0,
     "agent_max_steps": 4,

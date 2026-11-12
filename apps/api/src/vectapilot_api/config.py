@@ -200,7 +200,19 @@ class Settings(BaseSettings):
     bind mount under compose). Required with `tools_config_dir` (M5 PR 4): every business with
     tools needs its corpus manifest, whose `business_type` must equal its `tools.json`'s, so a
     typo in either can never switch W11 off for a clinic (`agent/profiles.py`). Only each
-    manifest's business type is read, never a document."""
+    manifest's business type is read, never a document. Required with `extraction_config_dir`
+    too (M6 PR 1), for the same check against each extraction business file."""
+
+    # ── Document extraction (M6, ADR 0017 decision 2) ──
+    extraction_config_dir: Path | None = None
+    """`VECTAPILOT_EXTRACTION_CONFIG_DIR`: the folder of extraction templates per business type
+    and one file per business (`data/extraction/` in the repository; a read-only bind mount under
+    compose). When set, `create_app` reads, validates and compiles the whole folder before it
+    serves anything (`extraction.files.load_extraction_dir`), and any invalid file, a business
+    type that differs from the corpus manifest's, a business file that loosens its template (E5),
+    a date-format set mixing day-first and month-first, or a kind enabled without
+    `synthetic: true` stops startup. Optional in PR 1; PR 3's route needs it. Needs
+    `corpus_dir`."""
 
     # ── The agent (M5 PR 4, ADR 0016 decisions 4, 5, 7) ──
     # SAFETY BOUNDS [proposal], not latency targets: estimates, never measurements. The agent has
@@ -321,6 +333,11 @@ class Settings(BaseSettings):
             problems.append("rag_candidate_k must be >= rag_context_k")
         problems += self._embedding_problems()
         problems += self._agent_problems()
+        if self.extraction_config_dir is not None and self.corpus_dir is None:
+            problems.append(
+                "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with extraction_config_dir: each"
+                " business's type is checked in both"
+            )
         if problems:
             raise ValueError("; ".join(problems))
         return self

@@ -23,6 +23,10 @@ x-api-environment: &api-environment
   # startup refuses a business whose tools.json and corpus manifest name different business
   # types. Only each manifest's business_type is read, never a document.
   VECTAPILOT_CORPUS_DIR: /app/data/sample
+  # M6 PR 1 (ADR 0017 decision 2): the extraction templates per business type and one file per
+  # business, mounted read-only below. The API validates and compiles the whole folder at
+  # startup; each business's type is checked against its corpus manifest.
+  VECTAPILOT_EXTRACTION_CONFIG_DIR: /app/data/extraction
 
 services:
   postgres:
@@ -79,6 +83,9 @@ services:
     volumes:
       - ../data/sandbox:/app/data/sandbox:ro
       - ../data/sample:/app/data/sample:ro
+      # M6 PR 1: takes effect when the api container is next recreated (`make up`); a recreate
+      # keeps the database volume, it is not a reset.
+      - ../data/extraction:/app/data/extraction:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

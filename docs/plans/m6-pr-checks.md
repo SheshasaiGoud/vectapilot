@@ -405,6 +405,13 @@ The options below stay as the record of what was weighed.
   dev. **Recommendation: (b).** **Decided: (b).** shesha writes ≥ 24 synthetic documents; M6's
   live spend ceiling is $1.00 in total.
 
+
+## Decided 2026-11-12 (shesha, M6 PR 1 review)
+1. **Every identifier field is always reviewed, enforced in code.** A template whose
+   identifier field (a policy number, an ID) is missing from `always_review` is refused at
+   load, so no template can drop it from review (zara-safety's finding). A mistyped
+   identifier is a silent error that is hard to spot later.
+
 ## Risks
 - **Small n.** About 12 test documents, 6 per business: 0 of 12 still allows about 24 %, 0 of 6
   about 39 %; field-level bootstraps over documents undercover.

@@ -1,0 +1,64 @@
+{
+  "business_type": "human_healthcare",
+  "kind": "referral_letter",
+  "version": 1,
+  "title": "Referral letter",
+  "description": "A letter in which a doctor refers a patient to this clinic. Only the administrative details below are extracted, never anything about the patient's health or the reason for the referral.",
+  "date_formats": ["DD/MM/YYYY", "DD-MM-YYYY", "DD.MM.YYYY", "MM/DD/YYYY", "YYYY-MM-DD", "D MMMM YYYY", "D MMM YYYY", "MMMM D, YYYY"],
+  "fields": [
+    {
+      "name": "patient_name",
+      "type": "text",
+      "category": "identity",
+      "description": "The full name of the person being referred, as printed.",
+      "labels": ["Patient name", "Name of patient", "Patient"],
+      "rules": ["required", "name"],
+      "max_length": 80
+    },
+    {
+      "name": "date_of_birth",
+      "type": "date",
+      "category": "identity",
+      "description": "The date of birth of the person being referred.",
+      "labels": ["Date of birth", "DOB", "Born"],
+      "rules": ["required"]
+    },
+    {
+      "name": "referring_doctor",
+      "type": "text",
+      "category": "administrative",
+      "description": "The name of the doctor who wrote and signed the referral, as printed.",
+      "labels": ["Referring doctor", "Referred by", "Doctor"],
+      "rules": ["required", "name"],
+      "max_length": 80
+    },
+    {
+      "name": "referral_date",
+      "type": "date",
+      "category": "administrative",
+      "description": "The date on which the referral letter was written.",
+      "labels": ["Referral date", "Date of referral", "Dated"],
+      "rules": ["required"]
+    },
+    {
+      "name": "insurer",
+      "type": "text",
+      "category": "administrative",
+      "description": "The name of the insurance company the letter names for this person, if any.",
+      "labels": ["Insurer", "Insurance company", "Insured with"],
+      "rules": ["name"],
+      "max_length": 80
+    },
+    {
+      "name": "policy_number",
+      "type": "identifier",
+      "category": "administrative",
+      "description": "The insurance policy number the letter gives for this person, if any, as written.",
+      "labels": ["Policy number", "Policy no"],
+      "pattern": "^[A-Z0-9][A-Z0-9/\\-]{3,23}$",
+      "max_length": 24
+    }
+  ],
+  "always_review": ["policy_number"],
+  "cross_rules": []
+}
