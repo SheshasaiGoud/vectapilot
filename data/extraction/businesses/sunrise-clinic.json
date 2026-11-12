@@ -1,0 +1,14 @@
+{
+  "business_id": "sunrise-clinic",
+  "synthetic": true,
+  "business_type": "human_healthcare",
+  "retention_days": 30,
+  "kinds": [
+    {
+      "kind": "referral_letter",
+      "date_formats": ["DD/MM/YYYY", "D MMMM YYYY", "D MMM YYYY"],
+      "enum_values": [],
+      "extra_always_review": []
+    }
+  ]
+}

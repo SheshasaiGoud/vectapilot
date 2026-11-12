@@ -1,0 +1,90 @@
+{
+  "business_type": "veterinary",
+  "kind": "vaccination_record",
+  "version": 1,
+  "title": "Vaccination record",
+  "description": "A pet's vaccination record or certificate for one vaccination. Only the details below are extracted, never any other note about the pet's health.",
+  "date_formats": ["DD/MM/YYYY", "DD-MM-YYYY", "DD.MM.YYYY", "MM/DD/YYYY", "YYYY-MM-DD", "D MMMM YYYY", "D MMM YYYY", "MMMM D, YYYY"],
+  "fields": [
+    {
+      "name": "pet_name",
+      "type": "text",
+      "category": "identity",
+      "description": "The pet's name, as printed.",
+      "labels": ["Pet name", "Name of pet", "Pet's name"],
+      "rules": ["required", "name"],
+      "max_length": 60
+    },
+    {
+      "name": "species",
+      "type": "enum",
+      "category": "identity",
+      "description": "What kind of animal the pet is.",
+      "labels": ["Species", "Animal"],
+      "rules": ["required"],
+      "values": [
+        {"id": "dog", "synonyms": ["Dog", "Canine"]},
+        {"id": "cat", "synonyms": ["Cat", "Feline"]},
+        {"id": "rabbit", "synonyms": ["Rabbit"]},
+        {"id": "guinea_pig", "synonyms": ["Guinea pig"]},
+        {"id": "hamster", "synonyms": ["Hamster"]},
+        {"id": "bird", "synonyms": ["Bird"]}
+      ]
+    },
+    {
+      "name": "owner_name",
+      "type": "text",
+      "category": "identity",
+      "description": "The full name of the pet's owner, as printed.",
+      "labels": ["Owner name", "Owner", "Pet owner"],
+      "rules": ["required", "name"],
+      "max_length": 80
+    },
+    {
+      "name": "vaccine",
+      "type": "enum",
+      "category": "administrative",
+      "description": "Which vaccine the record says was given.",
+      "labels": ["Vaccine", "Vaccine given"],
+      "rules": ["required"],
+      "values": [
+        {"id": "rabies", "synonyms": ["Rabies", "Anti-rabies"]},
+        {"id": "dhppi", "synonyms": ["DHPPi", "DHPP", "DA2PP"]},
+        {"id": "leptospirosis", "synonyms": ["Leptospirosis", "Lepto"]},
+        {"id": "kennel_cough", "synonyms": ["Kennel cough", "Bordetella"]},
+        {"id": "fvrcp", "synonyms": ["FVRCP"]},
+        {"id": "felv", "synonyms": ["FeLV"]},
+        {"id": "rhd", "synonyms": ["RHD", "RHDV2"]},
+        {"id": "myxomatosis", "synonyms": ["Myxomatosis", "Myxo"]}
+      ]
+    },
+    {
+      "name": "date_given",
+      "type": "date",
+      "category": "administrative",
+      "description": "The date on which this vaccine was given.",
+      "labels": ["Date given", "Date of vaccination", "Given on"],
+      "rules": ["required"]
+    },
+    {
+      "name": "valid_until",
+      "type": "date",
+      "category": "administrative",
+      "description": "The date until which this vaccination is valid, or when the next one is due, if the record gives it.",
+      "labels": ["Valid until", "Next due", "Due date"]
+    },
+    {
+      "name": "issuing_clinic",
+      "type": "text",
+      "category": "administrative",
+      "description": "The name of the clinic that gave the vaccine and issued the record, as printed.",
+      "labels": ["Issuing clinic", "Issued by", "Clinic"],
+      "rules": ["name"],
+      "max_length": 100
+    }
+  ],
+  "always_review": [],
+  "cross_rules": [
+    {"rule": "after", "field": "valid_until", "other": "date_given"}
+  ]
+}

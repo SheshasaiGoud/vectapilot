@@ -30,6 +30,7 @@ from vectapilot_api.db import Database, create_api_engine
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.factory import build_embedder
 from vectapilot_api.embeddings.runner import EmbeddingRunner, batch_deadline_s
+from vectapilot_api.extraction.files import load_extraction_dir
 from vectapilot_api.gateway.catalog import load_catalog
 from vectapilot_api.gateway.gateway import build_gateway
 from vectapilot_api.gateway.providers.base import Provider
@@ -128,6 +129,14 @@ def create_app(
         if settings.corpus_dir is None:  # pragma: no cover (Settings refuses it)
             raise ValueError("corpus_dir is required with tools_config_dir")
         corpus_types = business_types(tools, settings.corpus_dir)
+    # Fail fast (ADR 0017 decision 2, M6 PR 1): with an extraction folder, every template must
+    # compile and every business file must match its corpus manifest's type and only tighten its
+    # template (E5), or the app stops here (ExtractionConfigError). Settings requires corpus_dir.
+    extraction = None
+    if settings.extraction_config_dir is not None:
+        if settings.corpus_dir is None:  # pragma: no cover (Settings refuses it)
+            raise ValueError("corpus_dir is required with extraction_config_dir")
+        extraction = load_extraction_dir(settings.extraction_config_dir, settings.corpus_dir)
     # Fail fast (D7 (a)): `agent_router = on` needs a live M4 model for the API's embedding model
     # (RouterModelError); Settings requires the folder's setting when it is on.
     router_model = None
@@ -217,6 +226,7 @@ def create_app(
     app.state.settings = settings
     app.state.catalog = catalog
     app.state.tools = tools
+    app.state.extraction = extraction
     app.include_router(health_router)
     app.include_router(kb_router)
     app.include_router(search_router)
