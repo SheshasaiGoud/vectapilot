@@ -44,6 +44,22 @@ class DropQueryString(logging.Filter):
         return True
 
 
+UNTRUSTED_PARSER_LOGGERS: tuple[str, ...] = ("pypdf",)
+"""Loggers of libraries that parse uploaded files. pypdf's warnings quote bytes of the file (a
+duplicated dictionary key, an unknown encoding name), so a hostile PDF could write into our logs
+(M6 E9; ingestion's PDFs in M2 too). Decided by shesha, 2026-11-13: silenced here, centrally."""
+SILENT_LEVEL = logging.CRITICAL + 1
+"""Above every level these libraries log at: every record is dropped before any handler."""
+
+
+def silence_untrusted_parsers() -> None:
+    """Drop every record of `UNTRUSTED_PARSER_LOGGERS`. Their child loggers set no level of their
+    own, so they inherit this one. Idempotent; called by `configure_logging` at startup and by the
+    modules that parse uploads, so it holds whatever the entry point."""
+    for name in UNTRUSTED_PARSER_LOGGERS:
+        logging.getLogger(name).setLevel(SILENT_LEVEL)
+
+
 def configure_logging(level: str) -> None:
     """Send every log line — ours and uvicorn's — to stdout as JSON."""
     handler = logging.StreamHandler(sys.stdout)
@@ -56,6 +72,7 @@ def configure_logging(level: str) -> None:
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.propagate = True
+    silence_untrusted_parsers()
     access = logging.getLogger("uvicorn.access")
     if not any(isinstance(f, DropQueryString) for f in access.filters):  # one per process
         access.addFilter(DropQueryString())

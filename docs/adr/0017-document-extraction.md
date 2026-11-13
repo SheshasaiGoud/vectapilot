@@ -136,8 +136,14 @@ values; code decides what is trusted. Each part:
   in the document under the right label can still be quoted: rule 5 limits what it can do (a
   value in review or, at `high`, an accepted value), not whether the model reads it.
 - **Known gap: hidden text layers.** pypdf reads invisible, white and off-page text. A hidden
-  copy that conflicts with a visible one goes to review; a single hidden copy is not detected in
-  M6.
+  copy that conflicts with a visible one goes to review wherever it sits on a line; a single
+  hidden copy is not detected in M6.
+- **Known gap: text pypdf cannot read on a page that has text.** A page without text that paints
+  anything (outlined glyphs, a font pypdf cannot map) and any annotation that may draw (a stamp
+  holding a scanned card) count as an image page (E4). Part of a value outlined into vector paths
+  on a page that also has readable text is not detected in M6.
+- **Known gap: a value wrapped onto the next line.** `value_cut` checks only the quote's own line,
+  so a value cut at a line break (the rest printed on the next line) is not caught in M6.
 - **Extracted values and quotes are untrusted data for every consumer:** escaped in any UI,
   inside a boundary block in any prompt, never an instruction, never an action argument without
   M5's confirmation.
