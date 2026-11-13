@@ -336,12 +336,15 @@ async def test_the_extraction_record_holds_counts_never_values(
         "by_level",
         "by_reason",
         "routing_invariant",
+        "withheld",
+        "unverified",
         "signal_errors",
         "signal_error_types",
         "duration_ms",
     }
     assert record["by_status"] == {"accepted": 5, "review": 1}
     assert record["routing_invariant"] == 1  # the stand-in accepted the always-review identifier
+    assert (record["withheld"], record["unverified"]) == (0, 0)
     assert (record["signal_errors"], record["signal_error_types"]) == (0, [])
     for value, _ in REFERRAL_ANSWER.values():
         assert value.casefold() not in json.dumps(record).casefold()

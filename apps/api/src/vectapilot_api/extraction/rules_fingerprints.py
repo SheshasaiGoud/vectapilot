@@ -21,6 +21,8 @@ RULES_FILES: Final = ("signals.py", "routing.py", "invariants.py")
 
 EXTRACTION_RULES_FINGERPRINTS: Final[Mapping[str, str]] = {
     "extraction-rules.1": "2ffaa3c976b8183d9e954aa9b0e8056bd9e30c4ac564a45b84cebda465888b5b",
+    # M6 PR 3 review: `plain` drops control characters (NUL never reaches a stored value).
+    "extraction-rules.2": "5c2bed12e0aa73ab3febe241c55b58a2b925c4647b942be56f3c63ed1f9b528d",
 }
 
 

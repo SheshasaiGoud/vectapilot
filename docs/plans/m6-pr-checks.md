@@ -420,6 +420,21 @@ The options below stay as the record of what was weighed.
    `pypdf` record; `configure_logging` calls it at startup, so ingestion (M2) and extraction (M6)
    are covered whatever the entry point, and `extraction/text.py` calls it again on import.
 
+
+## Decided 2026-11-13 (shesha, M6 PR 3 review)
+1. **No quote, no value, in storage and in the response** (zara-safety's major #2). A field's
+   value is stored and returned only when E2 verified it: the quote was found in the document,
+   the value is in its quote, and the quote was not cut short with it (`value_cut`, E2's
+   runs-to-its-end check). Otherwise the field keeps its status and reasons but has no value,
+   level, page or span, in the API response and in `extraction_fields`. Team code after the
+   invariant check (`service.verified`, `service._outcome`), counted in the `extraction` record
+   (`unverified`). Migration 0007 mirrors it: a value is stored only with its page and a page
+   only with its value (`(page IS NULL) = (value IS NULL)`). Tests: an invented quote, a real
+   quote with another value, a value cut short, and a verified value (in review) still stored,
+   each in the service, the route and the database; eight mutants of the condition, all caught.
+2. **`READ_WORKERS` stays 1 for M6.** One reading thread per app; revisit with M9's subprocess
+   hard kill ("Risks": a slow or hostile PDF).
+
 ## Risks
 - **Small n.** About 12 test documents, 6 per business: 0 of 12 still allows about 24 %, 0 of 6
   about 39 %; field-level bootstraps over documents undercover.
@@ -431,6 +446,10 @@ The options below stay as the record of what was weighed.
   `small` cap** (1024 tokens, thinking included) may truncate: counted, fixed after M3's window.
 - **Planted text that is really in the document** can be quoted; labels, shared and conflicting
   values narrow it, the `injection` documents count it, M7 guards further.
+- **A slow or hostile PDF** (PR 3 review): pypdf runs in the app's one reading thread, so the
+  event loop stays free and the 40 s limit answers with a 503, but a read that is cut off keeps
+  that thread until pypdf returns (minutes for a crafted content stream), and later uploads wait
+  for it. A hard kill (a subprocess) is M9 work, before M8 opens the route.
 - **Privacy:** live runs send synthetic text to the provider (up to 2 years if flagged, ADR
   0007); Q4c and Q7 are open. **Disk and spend:** 9.1 GiB free; the $10/month workspace is shared.
 - **Debt:** M4 and M5 H1, eight explain-backs, M2 questions, M4's ≥ 160 rows and M5's ≥ 40

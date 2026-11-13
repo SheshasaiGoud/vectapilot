@@ -349,7 +349,8 @@ def test_every_stub_dependency_names_a_read_path_and_every_pending_stub_is_used(
     assert runs("text_search") == {"text_search", *hybrid}
     assert runs("rrf_fuse") == hybrid
     # M5 PR 4: the agent loop runs on no read path; the write path that waits for it is named.
-    assert NEEDED_OUTSIDE_READ_PATHS.keys() == {"run_turn"}
+    # M6 PR 3: H1's routing runs on no read path; its write path fails closed, so is not marked.
+    assert NEEDED_OUTSIDE_READ_PATHS.keys() == {"run_turn", "route_fields"}
     assert {"POST /v1/agent": {"run_turn"}} == WRITE_NEEDS_HAND_WRITE
     assert WRITE_PATHS.keys() >= WRITE_NEEDS_HAND_WRITE.keys()
 

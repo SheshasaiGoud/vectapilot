@@ -1,16 +1,17 @@
 """H1 tests: `route_fields`, review routing per field (guide: docs/learning/m6-routing.md).
 
 `route_fields` is [HAND-WRITE]: shesha writes it (decided D7 (b)). Until then it raises
-NotImplementedError, so the whole module is marked `xfail(strict=True, raises=NotImplementedError)`:
+NotImplementedError, so every test here is marked `xfail(strict=True, raises=NotImplementedError)`
+through the one switch `PENDING_HAND_WRITE` in tests/canary/read_paths.py (the same switch the
+route's H1 test in tests/extraction/test_route.py waits for; moved there by M6 PR 3):
 
 - not implemented yet          → "xfailed" (expected);
 - implemented, wrong decision  → a normal failure (only NotImplementedError counts as expected);
 - implemented, right decision  → "XPASS(strict)", a failure on purpose: that is your signal.
 
-When no test here is xfailed any more, delete the `pytestmark` statement below and run again:
-every test must then simply pass. Do not edit a test to make it pass; change the code. (PR 3's
-route will run `route_fields` too; from then on this switch moves to `PENDING_HAND_WRITE` in
-tests/canary/read_paths.py, as M5's `run_turn` did.)
+When no test here is xfailed any more, remove "route_fields" from `PENDING_HAND_WRITE` and run
+the full check: every test must then simply pass. Do not edit a test to make it pass; change the
+code.
 
 How to read a case: the policy below is made up and small enough to check by hand. `ok(name)` is
 a value whose every check passed (it would be `high`); keyword arguments change one signal at a
@@ -25,6 +26,7 @@ from typing import Any, Final
 
 import pytest
 
+from tests.canary.read_paths import pending_hand_write
 from vectapilot_api.extraction.routing import (
     CHECK_FAILURES,
     FAILURES,
@@ -40,11 +42,7 @@ from vectapilot_api.extraction.routing import (
     route_fields,
 )
 
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    raises=NotImplementedError,
-    reason="H1: shesha writes route_fields — see docs/learning/m6-routing.md",
-)
+pytestmark = pending_hand_write("route_fields")
 
 POLICY: Final = ReviewPolicy(
     fields=("name", "born", "insurer", "policy"),

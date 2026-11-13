@@ -6,8 +6,9 @@ The model proposes `{value, quote, unsure}` per field (`extractor.py`). Nothing 
 configuration and records **facts** (`routing.FieldSignals`). H1's `route_fields` turns facts into
 decisions; `invariants.py` checks those decisions against the same facts.
 
-**E2 · No quote, no value.** Both sides are compared in `canon` form: NFKC, case-folded,
-whitespace collapsed (as `config.fold`), with typographic apostrophes and dashes made plain.
+**E2 · No quote, no value.** Both sides are compared in `canon` form: control characters dropped
+(`extraction-rules.2`), NFKC, case-folded, whitespace collapsed (as `config.fold`), with
+typographic apostrophes and dashes made plain.
 - *Quote found:* the quote is inside one page's text. A quote that runs across two pages never
   matches, because each page is searched on its own. `page` is the first page that holds it,
   `quote_hits` how often it occurs in the whole document.
@@ -94,7 +95,7 @@ from vectapilot_api.extraction.config import (
 from vectapilot_api.extraction.routing import DocumentSignals, FieldSignals, Reason
 from vectapilot_api.extraction.text import DocumentText
 
-EXTRACTION_RULES_VERSION: Final = "extraction-rules.1"
+EXTRACTION_RULES_VERSION: Final = "extraction-rules.2"
 """Bump with any change to `signals.py`, `routing.py` or `invariants.py`, and add the new
 version's fingerprint to `rules_fingerprints.py` (tests/extraction/test_rules_version.py)."""
 
@@ -122,9 +123,20 @@ SWAPPABLE: Final = frozenset({DateOrder.DAY_FIRST, DateOrder.MONTH_FIRST})
 # ── Text forms ─────────────────────────────────────────────────────────────────────────────────
 
 
+_CONTROLS: Final = dict.fromkeys(
+    code for code in (*range(0x00, 0x20), 0x7F, *range(0x80, 0xA0)) if not chr(code).isspace()
+)
+"""The control characters that are not whitespace (C0, DEL, C1), dropped by `plain` on both
+sides of every comparison: page text loses NUL already (`text.normalize`), and Postgres refuses
+NUL in a stored value. Whitespace controls (tab, line ends, U+001C-U+001F, U+0085) collapse."""
+
+
 def plain(text: str) -> str:
-    """NFKC, whitespace collapsed, typographic apostrophes and dashes made plain; case kept."""
-    return " ".join(unicodedata.normalize("NFKC", text).split()).translate(_TYPOGRAPHIC)
+    """Controls dropped (`_CONTROLS`), NFKC, whitespace collapsed, typographic apostrophes and
+    dashes made plain; case kept. NFKC may lengthen a value (U+FDFA is 18 characters): the
+    service withholds a value longer than its field's bound (`service.withhold`)."""
+    folded = unicodedata.normalize("NFKC", text.translate(_CONTROLS))
+    return " ".join(folded.split()).translate(_TYPOGRAPHIC)
 
 
 def canon(text: str) -> str:
