@@ -20,6 +20,9 @@ jobs:
   api:
     name: api (lint, types, tests)
     runs-on: ubuntu-24.04
+    # A hanging test (a mutation check of M6 PR 3 hit two) must not hold a runner for GitHub's
+    # default 360 minutes. About 4 minutes is expected; 20 is generous (shesha, 2026-11-13).
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: apps/api
