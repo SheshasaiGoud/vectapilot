@@ -134,6 +134,14 @@ clause (RLS, and the confirm statements' own `business_id = :business_id` on the
 connection), never because the token differs."""
 
 
+BAIT_EXTRACTION_ID: Final = uuid5(NAMESPACE_URL, "vectapilot-canary-extraction")
+"""The extraction id every planted business holds (M6 PR 3, migration 0007), shared on purpose
+like the sandbox bait ids: the database draws an extraction's id and the app role cannot choose
+one, so the owner plants it (`test_leakage.plant`). Its one field's value and span are the
+business's own canary, so a path that reads an extraction by id without its business clause shows
+the other canary."""
+
+
 def bait_action_id(business_id: str) -> UUID:
     """The id of `business_id`'s planted, confirmable `book` action (`test_leakage.plant`): derived
     from the business id, so a write path can name it without reading the database. A planted
@@ -512,13 +520,18 @@ paths)."""
 
 NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {
     "run_turn": "M5 H1's tests, the fake-provider turns and the POST /v1/agent write path",
+    "route_fields": "M6 H1's tests and the POST /v1/extractions routing test",
 }
 """[HAND-WRITE] stubs that no read path runs, but other tests wait for through this same
 switch: stub → who waits. M3 H2's `rrf_fuse` left in M3 PR 4, when the hybrid read paths came,
 which run it. M5 H1's `run_turn` runs on no read path (the agent's reads are the tool paths,
-checked without the loop); `write_paths.WRITE_NEEDS_HAND_WRITE` names the write path."""
+checked without the loop); `write_paths.WRITE_NEEDS_HAND_WRITE` names the write path. M6 H1's
+`route_fields` runs on no read path either: its own tests (tests/extraction/test_routing.py) and
+the route's H1 test (tests/extraction/test_route.py) wait for it. The `POST /v1/extractions` write
+path runs it too but is not marked: the stub fails closed into a stored all-review extraction, so
+the write it checks happens either way (`write_paths.py`)."""
 
-PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"run_turn"})
+PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"run_turn", "route_fields"})
 """[HAND-WRITE] stubs still raising NotImplementedError, one switch each. Remove a name once
 every test that runs it shows XPASS(strict) (guide: docs/learning/m3-hybrid.md §1):
 
@@ -526,6 +539,9 @@ every test that runs it shows XPASS(strict) (guide: docs/learning/m3-hybrid.md �
   own tests (tests/agent/test_loop.py), the fake-provider turns through the real step model and
   tools (tests/agent/test_turns_db.py) and the `POST /v1/agent` write path
   (`write_paths.WRITE_NEEDS_HAND_WRITE`).
+- "route_fields" (M6 H1, review routing per field, shesha's; guide: docs/learning/m6-routing.md
+  §1): its own tests (tests/extraction/test_routing.py) and the route's H1 test
+  (tests/extraction/test_route.py), moved to this switch by M6 PR 3 when the route came.
 - M3 H1 "text_search" and M3 H2 "rrf_fuse" were removed on 2026-10-28 (both
   written by Claude at shesha's request, for the deadline), so their own tests, the `text_search`
   and hybrid read paths, the owner-connection checks and PR 4/5's real-leg tests are plain tests.

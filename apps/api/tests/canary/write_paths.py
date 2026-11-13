@@ -26,6 +26,14 @@ it while `run_turn` is in `PENDING_HAND_WRITE` (`surface_pending_loop`): the can
 the strict xfail `pending_hand_writes` makes (`write_path_params`), and it runs for real the moment
 the stub's name is removed. The planted business is served as a `retail` business: W11 hands a
 health business off before any tool, so a clinic could never reach the write.
+
+**M6 PR 3's `POST /v1/extractions`** needs the business's extraction file: `served_with_extraction`
+writes the committed templates and a copy of Paws & Co's file under the planted id into a
+temporary folder, with a matching corpus manifest, and serves the real app from it (as
+`VECTAPILOT_EXTRACTION_CONFIG_DIR` would), its model the scripted fake (E11). It runs M6 H1's
+`route_fields`, but is not marked: while the stub raises, the service fails closed into an
+all-review extraction (`internal_error`) that is still stored, so the write this check needs (an
+extraction and its fields) happens either way, and the path is checked now, not after H1.
 """
 
 import json
@@ -50,6 +58,10 @@ from tests.canary.read_paths import (
     bait_tools,
     pending_hand_writes,
 )
+from tests.extraction.fakes import vaccination
+from tests.extraction.served import PATH as EXTRACTIONS
+from tests.extraction.served import PDF, extraction_folder
+from tests.extraction.standins import VACCINATION_ANSWER, VACCINATION_LINES, pdf, reply
 from tests.tools.helpers import write_corpus
 from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import Settings
@@ -231,9 +243,46 @@ def propose_through_the_agent(client: TestClient, business_id: str | None) -> ht
     return response
 
 
+EXTRACTION_DOCUMENT: Final = pdf(list(VACCINATION_LINES))
+"""A made-up vaccination record (synthetic; its notes line holds PR 2's document canary, never a
+planted business's)."""
+
+
+@contextmanager
+def served_with_extraction(business_id: str) -> Iterator[TestClient]:
+    """The real app, as the app role, with an extraction file for `business_id` (Paws & Co's
+    settings) and the model scripted with a right answer (the fake provider, E11)."""
+    with tempfile.TemporaryDirectory() as directory:
+        folder, corpus = extraction_folder(Path(directory), {business_id: "paws-and-co"})
+        settings = Settings(extraction_config_dir=folder, corpus_dir=corpus)
+        provider = FakeProvider([reply(vaccination(), dict(VACCINATION_ANSWER))])
+        with TestClient(create_app(settings, extraction_provider=provider)) as client:
+            yield client
+
+
+def post_extraction(client: TestClient, business_id: str | None) -> httpx2.Response:
+    return client.post(
+        EXTRACTIONS,
+        content=EXTRACTION_DOCUMENT,
+        params={"kind": "vaccination_record"},
+        headers=_headers(business_id, **{"Content-Type": PDF}),
+    )
+
+
+def extract_a_document(client: TestClient, business_id: str | None) -> httpx2.Response:
+    """`POST /v1/extractions` (M6 PR 3): stores one extraction and its fields, in one
+    transaction, for the actor (module docstring). The other business holds the bait extraction
+    under the same id (`read_paths.BAIT_EXTRACTION_ID`)."""
+    if business_id is None:
+        return post_extraction(client, None)
+    with served_with_extraction(business_id) as served:
+        return post_extraction(served, business_id)
+
+
 WRITE_PATHS: Final[dict[str, WritePath]] = {
     "POST /v1/agent": propose_through_the_agent,
     "POST /v1/agent/actions/{id}/confirm": confirm_the_planted_action,
+    "POST /v1/extractions": extract_a_document,
     "POST /v1/kb/documents": ingest_a_document,
     "POST /v1/kb/documents (approve a new version)": approve_a_new_version,
     "POST /v1/kb/reindex": reindex,

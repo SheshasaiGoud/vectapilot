@@ -381,11 +381,14 @@ async def test_the_app_role_is_safe_and_owns_nothing(
         "sandbox_tickets",
         "tool_audit",
     }
+    # Migration 0007's tables: SELECT on the table, INSERT on named columns only, never UPDATE or
+    # DELETE (only the owner's purge deletes, E10).
+    extraction = {"extractions", "extraction_fields"}
     assert {tuple(row) for row in grants} == (
         {("businesses", "SELECT"), ("llm_calls", "SELECT"), ("llm_calls", "INSERT")}
         | {("documents", privilege) for privilege in write}
         | {("chunks", privilege) for privilege in write}
-        | {(table, "SELECT") for table in sandbox}
+        | {(table, "SELECT") for table in sandbox | extraction}
     )
     assert can_create is False
 

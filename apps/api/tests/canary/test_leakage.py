@@ -10,10 +10,10 @@ transaction (Postgres DDL is transactional) and assert the same check turns red.
 none of this ran, or when any of it is an xfail other than a pending [HAND-WRITE] stub's
 (scripts/canary_gate.py).
 
-RLS alone would hide a statement that forgot its own `business_id` clause, so the search legs and
-the retire on approve also run on the owner's connection, where RLS never applies (M3 PR 3, "The
-business clause itself" below); the search legs with `MAX_K` hits and with one, so a clause applied
-only after the `LIMIT` shows too.
+RLS alone would hide a statement that forgot its own `business_id` clause, so the search legs, the
+retire on approve and the purge of expired extractions (M6 PR 3) also run on the owner's
+connection, where RLS never applies (M3 PR 3, "The business clause itself" below); the search legs
+with `MAX_K` hits and with one, so a clause applied only after the `LIMIT` shows too.
 
 As tests/test_rls.py: the owner (VECTAPILOT_MIGRATION_DATABASE_URL) is the bootstrap superuser
 locally and in CI; it seeds the registry and breaks things on purpose. Everything checked for
@@ -50,6 +50,7 @@ from tests.canary.read_paths import (
     BAIT_BOOKING_ID,
     BAIT_CONFIRM_TOKEN,
     BAIT_CUSTOMER,
+    BAIT_EXTRACTION_ID,
     BAIT_ORDER_ID,
     BAIT_SERVICE,
     BAIT_SLOT_IDS,
@@ -77,6 +78,8 @@ from vectapilot_api.db import APP_ROLE, Database, business_transaction, create_a
 from vectapilot_api.embeddings.base import EmbeddingSpec
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.fake import fake_vector
+from vectapilot_api.extraction import purge as extraction_purge
+from vectapilot_api.extraction.cli import purge_with_owner
 from vectapilot_api.ingestion.language_map import text_search_config
 from vectapilot_api.ingestion.types import SourceType
 from vectapilot_api.kb import store as kb_store
@@ -103,6 +106,8 @@ SANDBOX_TABLES: Final = {
     "tool_audit",
 }
 """Migration 0006's tables (M5 PR 1, ADR 0016 decision 6): the catalog must find them too."""
+EXTRACTION_TABLES: Final = {"extractions", "extraction_fields"}
+"""Migration 0007's tables (M6 PR 3, ADR 0017 decision 6): the catalog must find them too."""
 
 VECTOR: Final = "[" + ",".join(["0"] * 1023 + ["1"]) + "]"
 PLANT_LANGUAGE: Final = "en"
@@ -190,6 +195,20 @@ OWNER_PLANT: Final = (
         " VALUES (:action_id, :b, 'book', jsonb_build_object('slot_id', CAST(:free_slot AS text)),"
         " :customer, :token_sha256, 'pending', now() + interval '15 minutes')"
     ),
+    # M6 PR 3: the extraction bait (read_paths.BAIT_EXTRACTION_ID), the same id in every business,
+    # its one field's value and span the business's canary. Only the owner may choose an id.
+    text(
+        "INSERT INTO extractions (business_id, id, kind, template_version, prompt_version,"
+        " rules_version, status, file_sha256, pages, image_pages, trace_id, retention_days)"
+        " VALUES (:b, :extraction_id, 'canary', 1, 'extract-fields.1', 'extraction-rules.1',"
+        " 'needs_review', repeat('f', 64), 1, '{}', repeat('a', 32), 30)"
+    ),
+    text(
+        "INSERT INTO extraction_fields (business_id, extraction_id, field, status, level,"
+        " reasons, value, span, page)"
+        " VALUES (:b, :extraction_id, 'canary', 'review', 'medium', ARRAY['unsure'],"
+        " to_jsonb(CAST(:canary AS text)), :canary, 1)"
+    ),
 )
 APP_PLANT: Final = (
     text(
@@ -203,6 +222,21 @@ APP_PLANT: Final = (
         " SELECT :b, 'book', 'write', 'propose', 'proposed', 1, id FROM pending_actions"
         " WHERE business_id = :b"
     ),
+    # M6 PR 3: an extraction and its field as the route stores them, through the app role's
+    # column grants (migration 0007): the database draws the id and sets both times.
+    text(
+        "INSERT INTO extractions (business_id, kind, template_version, prompt_version,"
+        " rules_version, status, file_sha256, pages, image_pages, trace_id, retention_days)"
+        " VALUES (:b, 'canary_app', 1, 'extract-fields.1', 'extraction-rules.1', 'needs_review',"
+        " repeat('f', 64), 1, '{}', repeat('b', 32), 30)"
+    ),
+    text(
+        "INSERT INTO extraction_fields (business_id, extraction_id, field, status, level,"
+        " reasons, value, span, page)"
+        " SELECT :b, id, 'canary', 'review', 'medium', ARRAY['unsure'],"
+        " to_jsonb(CAST(:canary AS text)), :canary, 1"
+        " FROM extractions WHERE business_id = :b AND kind = 'canary_app'"
+    ),
 )
 UPROOT: Final = (
     text("DELETE FROM tool_audit WHERE business_id = :b"),
@@ -211,6 +245,7 @@ UPROOT: Final = (
     text("DELETE FROM sandbox_orders WHERE business_id = :b"),
     text("DELETE FROM pending_actions WHERE business_id = :b"),
     text("DELETE FROM sandbox_slots WHERE business_id = :b"),
+    text("DELETE FROM extractions WHERE business_id = :b"),  # fields go with their extraction
     text("DELETE FROM llm_calls WHERE business_id = :b"),
     text("DELETE FROM documents WHERE business_id = :b"),  # chunks go with their document
     text("DELETE FROM businesses WHERE business_id = :b"),
@@ -293,6 +328,7 @@ async def plant(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Planted:
         "customer": BAIT_CUSTOMER,
         "action_id": bait_action_id(planted.business_id),
         "token_sha256": hashlib.sha256(BAIT_CONFIRM_TOKEN.encode()).hexdigest(),
+        "extraction_id": BAIT_EXTRACTION_ID,
     }
     async with business_transaction(owner, planted.business_id) as connection:
         await connection.execute(text("INSERT INTO businesses (business_id) VALUES (:b)"), params)
@@ -429,6 +465,79 @@ async def test_the_sandboxs_composite_foreign_keys_are_read_and_pair_the_busines
         "sandbox_bookings_one_active_per_slot": "(status = 'active'::text)",
         "sandbox_bookings_retired_once": "(retired_by_action_id IS NOT NULL)",
     }
+
+
+async def test_the_catalog_finds_the_extraction_tables_with_forced_rls(
+    owner_engine: AsyncEngine,
+) -> None:
+    # M6 PR 3 (migration 0007): both are business tables, so every check below covers them.
+    async with owner_engine.connect() as connection:
+        relations = {r.name: r for r in await load_relations(connection)}
+
+    assert set(relations) >= EXTRACTION_TABLES, sorted(relations)
+    for table in EXTRACTION_TABLES:
+        assert (relations[table].kind, relations[table].rls_enabled) == ("r", True), table
+        assert relations[table].rls_forced, table
+
+
+async def test_the_extraction_tables_keys_are_read_and_pair_the_business(
+    owner_engine: AsyncEngine,
+) -> None:
+    # The positive control for the key and foreign-key checks on 0007: they must see its keys,
+    # or they would pass by not looking at them.
+    async with owner_engine.connect() as connection:
+        keys = [k for k in await load_foreign_keys(connection) if k.table in EXTRACTION_TABLES]
+        indexes = [k for k in await load_key_indexes(connection) if k.table in EXTRACTION_TABLES]
+        tables = await business_tables(connection)
+
+    composite = {
+        (k.table, k.columns, k.referenced_table, k.referenced_columns)
+        for k in keys
+        if k.referenced_table != "businesses"
+    }
+    assert composite == {
+        (
+            "extraction_fields",
+            ("business_id", "extraction_id"),
+            "extractions",
+            ("business_id", "id"),
+        )
+    }
+    assert {(k.table, k.columns) for k in indexes} == {
+        ("extractions", ("business_id", "id")),
+        ("extraction_fields", ("business_id", "extraction_id", "field")),
+    }
+    assert checks.foreign_key_problems(keys, tables) == []
+    assert checks.key_problems(indexes) == []
+
+
+EXTRACTION_BY_ID: Final = text(
+    "SELECT e.business_id, f.value #>> '{}' AS value, f.span"
+    " FROM extractions e JOIN extraction_fields f"
+    " ON f.business_id = e.business_id AND f.extraction_id = e.id"
+    " WHERE e.id = :id ORDER BY 1"
+)
+
+
+async def test_the_same_extraction_id_in_both_businesses_is_invisible_across_them(
+    planted: tuple[Planted, Planted], owner_engine: AsyncEngine, fresh_engine: AsyncEngine
+) -> None:
+    # M6 PR 3: both businesses hold BAIT_EXTRACTION_ID, each with its own canary. The bait is
+    # real: on the owner's connection (no RLS) the id names both rows.
+    a, b = planted
+    params = {"id": BAIT_EXTRACTION_ID}
+    async with owner_engine.connect() as connection:
+        both = (await connection.execute(EXTRACTION_BY_ID, params)).all()
+    assert [tuple(row) for row in both] == sorted(
+        (business.business_id, business.canary, business.canary) for business in planted
+    )
+
+    for mine, other in ((a, b), (b, a)):
+        async with business_transaction(fresh_engine, mine.business_id) as connection:
+            rows = (await connection.execute(EXTRACTION_BY_ID, params)).all()
+        assert [tuple(row) for row in rows] == [(mine.business_id, mine.canary, mine.canary)]
+        shown = {"extraction by id": "\n".join(" ".join(map(str, row)) for row in rows)}
+        assert checks.canary_leaks(shown, mine, other) == []
 
 
 async def test_red_proof_a_foreign_key_on_the_action_id_alone_is_caught(
@@ -902,6 +1011,100 @@ async def test_red_proof_a_retire_without_its_business_clause_is_caught(
 
     assert retired == "1"  # reported as a's retire, but it was b's version 1
     assert await sql_on_every_business_table(fresh_engine, b) != b_before
+
+
+# ── M6 PR 3: the purge of expired extractions, on the owner's connection ─────────────────────
+# The purge (`extraction/purge.py`) runs as the owner, the bootstrap superuser here, so RLS never
+# applies: only its own `business_id = :business_id` keeps the other business's expired rows. Both
+# businesses get an expired extraction (its field holding their canary) next to the planted ones,
+# which are unexpired. The app role cannot see an expired row (migration 0007's restrictive
+# `hidden_at_expiry`), so the other business is compared on the owner's connection, every table,
+# by its business clause.
+
+PLANT_EXPIRED: Final = (
+    text(
+        "INSERT INTO extractions (business_id, kind, template_version, prompt_version,"
+        " rules_version, status, file_sha256, pages, image_pages, trace_id, retention_days,"
+        " created_at) VALUES (:b, 'canary_expired', 1, 'extract-fields.1', 'extraction-rules.1',"
+        " 'needs_review', repeat('e', 64), 1, '{}', repeat('c', 32), 30,"
+        " now() - interval '31 days')"
+    ),
+    text(
+        "INSERT INTO extraction_fields (business_id, extraction_id, field, status, level,"
+        " reasons, value, span, page) SELECT :b, id, 'canary', 'review', 'medium',"
+        " ARRAY['unsure'], to_jsonb(CAST(:canary AS text)), :canary, 1"
+        " FROM extractions WHERE business_id = :b AND kind = 'canary_expired'"
+    ),
+)
+EXPIRED_OF: Final = text(
+    "SELECT count(*) FROM extractions WHERE business_id = :b AND expires_at < now()"
+)
+
+
+async def plant_expired(owner: AsyncEngine, me: Planted) -> None:
+    async with business_transaction(owner, me.business_id) as connection:
+        for statement in PLANT_EXPIRED:
+            await connection.execute(statement, {"b": me.business_id, "canary": me.canary})
+
+
+async def rows_as_the_owner(connection: AsyncConnection, me: Planted) -> dict[str, str]:
+    """Each business table's rows of `me`, read with the business clause on a connection that
+    skips RLS and the expiry policy (the owner's), every row as JSON, sorted."""
+    outputs: dict[str, str] = {}
+    for table in await business_tables(connection):
+        result = await connection.execute(
+            text(f"SELECT row_to_json(t)::text FROM {table} AS t WHERE business_id = :b"),  # noqa: S608
+            {"b": me.business_id},
+        )
+        outputs[table] = "\n".join(sorted(row[0] for row in result))
+    return outputs
+
+
+async def test_the_purge_deletes_only_the_businesss_own_expired_rows_where_rls_cannot_help(
+    owner_engine: AsyncEngine, fresh_engine: AsyncEngine, planted: tuple[Planted, Planted]
+) -> None:
+    a, b = planted
+    for business in planted:
+        await plant_expired(owner_engine, business)
+    async with owner_engine.connect() as connection:
+        assert await owner_is_superuser(connection), "needs an owner that skips RLS"
+        b_before = await rows_as_the_owner(connection, b)
+        b_expired = await connection.scalar(EXPIRED_OF, {"b": b.business_id})
+    a_visible = await sql_on_every_business_table(fresh_engine, a)
+
+    purged = await purge_with_owner(owner_url(), a.business_id)  # the command's own path
+
+    async with owner_engine.connect() as connection:
+        b_after = await rows_as_the_owner(connection, b)
+        a_expired = await connection.scalar(EXPIRED_OF, {"b": a.business_id})
+    assert purged == 1 and a_expired == 0  # the positive control: a's expired row went
+    assert b_expired == 1  # b's expired extraction was there to lose
+    assert b_after == b_before  # every table, b's expired extraction and field included
+    assert await sql_on_every_business_table(fresh_engine, a) == a_visible  # a's live rows stay
+
+
+async def test_red_proof_a_purge_without_its_business_clause_is_caught_as_the_owner(
+    owner_engine: AsyncEngine, planted: tuple[Planted, Planted], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    a, b = planted
+    clause = "business_id = :business_id AND "
+    statement = str(extraction_purge.PURGE)
+    assert clause in statement, "the purge's business clause changed: update this proof"
+    monkeypatch.setattr(extraction_purge, "PURGE", text(statement.replace(clause, "")))
+    for business in planted:
+        await plant_expired(owner_engine, business)
+    async with rolled_back(owner_engine) as connection:
+        before = await rows_as_the_owner(connection, b)
+        b_expired = await connection.scalar(EXPIRED_OF, {"b": b.business_id})
+        await connection.execute(
+            text("SELECT set_config('app.business_id', :b, true)"), {"b": a.business_id}
+        )
+        await extraction_purge.purge_expired(connection, a.business_id)
+        after = await rows_as_the_owner(connection, b)
+        b_expired_after = await connection.scalar(EXPIRED_OF, {"b": b.business_id})
+
+    assert (b_expired, b_expired_after) == (1, 0)  # b's expired extraction was deleted too...
+    assert after != before  # ...and the owner-connection comparison sees it
 
 
 # ── Writes through the API: never another business's rows, never without a business ────────

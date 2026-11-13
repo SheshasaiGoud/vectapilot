@@ -11,9 +11,13 @@ import asyncio
 import dataclasses
 import inspect
 import logging
+import threading
+import time
+from collections.abc import Callable, Mapping
 from typing import Any, Final
 
 import pytest
+from pydantic import BaseModel
 
 from tests.extraction.fakes import (
     CANARY,
@@ -44,12 +48,17 @@ from vectapilot_api.extraction import routing
 from vectapilot_api.extraction import service as service_module
 from vectapilot_api.extraction.config import DateFormat, KindConfig
 from vectapilot_api.extraction.extractor import FieldExtractor, Proposal, build_extraction_gateway
+from vectapilot_api.extraction.invariants import CheckedDecision
 from vectapilot_api.extraction.routing import (
+    DocumentSignals,
     DocumentStatus,
+    ExtractionDecision,
+    FieldDecision,
     FieldSignals,
     FieldStatus,
     Level,
     Reason,
+    ReviewPolicy,
 )
 from vectapilot_api.extraction.service import (
     EXTRACTION,
@@ -57,9 +66,20 @@ from vectapilot_api.extraction.service import (
     ExtractionOutcome,
     ExtractionService,
     Route,
+    UnstorableValue,
     failure_of,
+    page_reader,
+    storable,
 )
-from vectapilot_api.extraction.text import DocumentRefused, DocumentText, RefusalReason
+from vectapilot_api.extraction.signals import SignalReport, compute_signals
+from vectapilot_api.extraction.text import (
+    DocumentRefused,
+    DocumentText,
+    OcrEngine,
+    RefusalReason,
+    TextLimits,
+    read_pages,
+)
 from vectapilot_api.gateway.errors import (
     DeadlineExceeded,
     GatewayError,
@@ -118,7 +138,7 @@ async def test_a_right_answer_is_accepted_except_the_always_review_identifier() 
     assert outcome.sha256 is not None and len(outcome.sha256) == 64
     assert (outcome.prompt_version, outcome.rules_version) == (
         "extract-fields.1",
-        "extraction-rules.1",
+        "extraction-rules.2",
     )
 
 
@@ -232,7 +252,8 @@ async def test_a_value_cut_short_with_its_quote_goes_to_review(
     outcome = await referral_run(with_changes(REFERRAL_ANSWER, **{field: (value, quote)}))
     assert_review(outcome, field)
     assert signals_of(outcome, field).codes == {Reason.VALUE_CUT}
-    assert outcome.field_of(field).level is Level.LOW
+    result = outcome.field_of(field)  # E2 did not verify it: no value (decided 2026-11-13)
+    assert (result.level, result.value, result.span, result.page) == (None, None, None, None)
 
 
 async def test_a_cut_iso_date_goes_to_review() -> None:
@@ -260,6 +281,140 @@ async def test_two_fields_on_one_row_both_stay_accepted() -> None:
     outcome = await referral_run(None, *lines)
     assert {"patient_name", "insurer"} <= accepted(outcome)
     assert outcome.field_of("patient_name").level is Level.HIGH
+
+
+# ── E2: no quote, no value (decided 2026-11-13, shesha, M6 PR 3 review) ──────────────────────
+
+NOT_VERIFIED: Final[Mapping[str, Proposed]] = {
+    "an invented quote": ("Priya Shah", "Patient name: Priya Shah"),
+    "a real quote with another value": ("Priya Rao", "Patient name: Asha Rao"),
+    "a value cut short": ("Asha", "Patient name: Asha"),  # printed: Asha Rao
+}
+"""A patient name E2 does not verify, one per check: each would otherwise be stored."""
+
+
+def no_value(outcome: ExtractionOutcome, name: str) -> tuple[object, ...]:
+    result = outcome.field_of(name)
+    return (result.level, result.value, result.span, result.page)
+
+
+@pytest.mark.parametrize("proposed", NOT_VERIFIED.values(), ids=NOT_VERIFIED.keys())
+async def test_a_value_e2_did_not_verify_stays_in_review_without_a_value(
+    proposed: Proposed, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    outcome = await referral_run(with_changes(REFERRAL_ANSWER, patient_name=proposed))
+
+    result = outcome.field_of("patient_name")
+    assert not service_module.verified(signals_of(outcome, "patient_name"))
+    # The stand-in accepted it, the invariant check moved it (low): status and reasons stay.
+    assert (result.status, result.reasons) == (
+        FieldStatus.REVIEW,
+        frozenset({Reason.ROUTING_INVARIANT}),
+    )
+    assert no_value(outcome, "patient_name") == (None, None, None, None)
+    assert (outcome.unverified, outcome.withheld, outcome.failure) == (("patient_name",), (), None)
+    assert accepted(outcome) == set(REFERRAL_ANSWER) - {"patient_name", "policy_number"}
+    assert storable(outcome)
+    [record] = extraction_records(caplog)
+    assert (record["unverified"], record["by_level"]["none"]) == (1, 1)
+
+
+def review_every_value(doc: DocumentSignals, policy: ReviewPolicy) -> ExtractionDecision:
+    """Not H1: every value in review, `low` with `unsure` whatever its signals say; every missing
+    value absent. The invariant check lets each through (a value in review with a level)."""
+    with_value = {signals.name for signals in doc.fields if signals.has_value}
+    return ExtractionDecision.of(
+        [
+            FieldDecision(name, FieldStatus.REVIEW, Level.LOW, frozenset({Reason.UNSURE}))
+            if name in with_value
+            else FieldDecision(name, FieldStatus.ABSENT)
+            for name in policy.fields
+        ]
+    )
+
+
+async def test_routings_own_status_and_reasons_stay_when_the_value_is_dropped() -> None:
+    fields = with_changes(REFERRAL_ANSWER, patient_name=NOT_VERIFIED["an invented quote"])
+    data = pdf(list(REFERRAL_LINES))
+    outcome, _ = await run(data, reply(referral(), fields), route=review_every_value)
+
+    patient = outcome.field_of("patient_name")
+    assert outcome.corrected == ()  # the decision is routing's own, unchanged by the check
+    assert (patient.status, patient.reasons) == (FieldStatus.REVIEW, frozenset({Reason.UNSURE}))
+    assert no_value(outcome, "patient_name") == (None, None, None, None)
+    assert no_value(outcome, "insurer") == (
+        Level.LOW,
+        "Lotus Health Mutual",
+        "Insurer: Lotus Health Mutual",
+        1,
+    )
+
+
+async def test_a_verified_value_in_review_is_still_stored_with_its_level_and_place() -> None:
+    unsure = ("Asha Rao", "Patient name: Asha Rao", True)
+    outcome = await referral_run(with_changes(REFERRAL_ANSWER, patient_name=unsure))
+
+    assert service_module.verified(signals_of(outcome, "patient_name"))
+    assert outcome.field_of("patient_name").status is FieldStatus.REVIEW  # unsure: never accepted
+    assert no_value(outcome, "patient_name") == (
+        Level.LOW,
+        "Asha Rao",
+        "Patient name: Asha Rao",
+        1,
+    )
+    assert outcome.unverified == ()
+
+
+VERIFIED: Final = FieldSignals(
+    "patient_name", has_value=True, quote_found=True, value_in_quote=True
+)
+
+
+@pytest.mark.parametrize(
+    ("signals", "expected"),
+    [
+        pytest.param(VERIFIED, True, id="all three checks pass"),
+        pytest.param(
+            dataclasses.replace(
+                VERIFIED,
+                codes=frozenset({Reason.BAD_DATE, Reason.QUOTE_TOO_LONG}),
+                unsure=True,
+                label_in_quote=False,
+                shared_value=True,
+            ),
+            True,
+            id="other signals lower the level, never the value",
+        ),
+        pytest.param(dataclasses.replace(VERIFIED, quote_found=False), False, id="no quote"),
+        pytest.param(
+            dataclasses.replace(VERIFIED, value_in_quote=False), False, id="not in the quote"
+        ),
+        pytest.param(
+            dataclasses.replace(VERIFIED, codes=frozenset({Reason.VALUE_CUT})), False, id="cut"
+        ),
+        pytest.param(None, False, id="no signals"),
+    ],
+)
+def test_verified_is_e2s_three_checks_and_nothing_else(
+    signals: FieldSignals | None, expected: bool
+) -> None:
+    assert service_module.verified(signals) is expected
+
+
+async def test_an_unverified_accepted_value_fails_closed_if_the_invariant_check_slips(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A guardrail does not trust the check it guards: with `enforce` letting the stand-in's
+    # accepted invented value through, the value is still never stored (E3: all review).
+    monkeypatch.setattr(
+        service_module, "enforce", lambda decision, doc, policy: CheckedDecision(decision)
+    )
+    fields = with_changes(REFERRAL_ANSWER, patient_name=NOT_VERIFIED["an invented quote"])
+    outcome = await referral_run(fields)
+
+    assert (outcome.failure, outcome.error) == (Reason.INTERNAL_ERROR, "ValueError")
+    assert all(r.value is None and r.level is None for r in outcome.fields)
 
 
 # ── E7: instruction-like text ─────────────────────────────────────────────────────────────────
@@ -445,6 +600,178 @@ async def test_one_bad_date_and_one_long_quote_leave_the_other_fields_accepted()
     outcome = await referral_run(fields, *lines)
     assert_review(outcome, "date_of_birth", "insurer")
     assert accepted(outcome) == {"patient_name", "referring_doctor", "referral_date"}
+
+
+# ── Every outcome fits its columns (migration 0007; M6 PR 3 review) ───────────────────────────
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param("\ufdfa" * 30, id="30 characters NFKC makes 540"),
+        pytest.param("Asha " + "R" * 76, id="81 characters, one past the field's 80"),
+    ],
+)
+async def test_a_value_longer_than_its_field_after_nfkc_is_withheld_in_review(value: str) -> None:
+    # The output model let it through (at most twice the bound, before NFKC); the stored row must
+    # still fit, or the upload would be a 503 and lost (E3).
+    fields = with_changes(REFERRAL_ANSWER, patient_name=(value, "nowhere in the document"))
+    outcome = await referral_run(fields)
+
+    result = outcome.field_of("patient_name")
+    assert (result.status, result.level, result.value, result.span, result.page) == (
+        FieldStatus.REVIEW,
+        None,
+        None,
+        None,
+        None,
+    )
+    # The stand-in accepted it; the invariant check moved it (low), then the value was withheld.
+    assert result.reasons == frozenset({Reason.ROUTING_INVARIANT, Reason.TOO_LONG})
+    assert outcome.withheld == ("patient_name",) and outcome.failure is None
+    assert accepted(outcome) == set(REFERRAL_ANSWER) - {"patient_name", "policy_number"}
+    assert storable(outcome) and outcome.status is DocumentStatus.NEEDS_REVIEW
+
+
+async def test_control_characters_never_reach_a_value_or_span() -> None:
+    # Postgres refuses NUL; `plain` drops controls on both sides, so the quote is still found.
+    fields = with_changes(
+        REFERRAL_ANSWER, patient_name=("Asha\x00 Rao\x01", "Patient name:\x00 Asha\x9f Rao")
+    )
+    outcome = await referral_run(fields)
+
+    result = outcome.field_of("patient_name")
+    assert (result.status, result.value, result.span) == (
+        FieldStatus.ACCEPTED,
+        "Asha Rao",
+        "Patient name: Asha Rao",
+    )
+    assert storable(outcome) and outcome.withheld == ()
+
+
+def tampered(
+    field: str, value: str
+) -> Callable[[KindConfig, DocumentText, BaseModel], SignalReport]:
+    """The real signals, then one field's stored value replaced after its checks passed, as a bug
+    could: E2 drops any value its quote does not hold (decided 2026-11-13) and Pydantic refuses a
+    lone surrogate, so no check foresees one, and only `storable` catches it."""
+    real = compute_signals
+
+    def compute(kind: KindConfig, document: DocumentText, answer: BaseModel) -> SignalReport:
+        report = real(kind, document, answer)
+        evidence = dict(report.evidence)
+        evidence[field] = dataclasses.replace(evidence[field], value=value)
+        return dataclasses.replace(report, evidence=evidence)
+
+    return compute
+
+
+async def test_an_outcome_that_still_does_not_fit_fails_closed_into_review(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(service_module, "compute_signals", tampered("patient_name", "Asha \ud800"))
+    outcome = await referral_run()
+
+    assert (outcome.status, outcome.failure, outcome.error) == (
+        DocumentStatus.NEEDS_REVIEW,
+        Reason.INTERNAL_ERROR,
+        UnstorableValue.__name__,
+    )
+    assert all(
+        (r.status, r.level, r.reasons, r.value, r.span, r.page)
+        == (FieldStatus.REVIEW, None, frozenset({Reason.INTERNAL_ERROR}), None, None, None)
+        for r in outcome.fields
+    )
+    assert storable(outcome) and outcome.result is not None  # the call's cost is kept (PR 4)
+    [record] = extraction_records(caplog)
+    assert (record["failure"], record["error"]) == ("internal_error", "UnstorableValue")
+
+
+# ── Pages are read off the event loop (M6 PR 3 review) ────────────────────────────────────────
+
+
+class BlockedReads:
+    """`read_pages` held in its thread until `release` is set; counts reads and the peak running
+    at once."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.started = 0
+        self.running = 0
+        self.peak = 0
+        self._lock = threading.Lock()
+        self._real = read_pages
+
+    def __call__(self, data: bytes, *, limits: TextLimits, ocr: OcrEngine) -> DocumentText:
+        with self._lock:
+            self.started += 1
+            self.running += 1
+            self.peak = max(self.peak, self.running)
+        try:
+            self.release.wait(timeout=5)  # bounded: a broken test never hangs the run
+            return self._real(data, limits=limits, ocr=ocr)
+        finally:
+            with self._lock:
+                self.running -= 1
+
+
+async def test_pages_are_read_off_the_loop_one_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    reads = BlockedReads()
+    monkeypatch.setattr(service_module, "read_pages", reads)
+    kind = referral()
+    script = [reply(kind, dict(REFERRAL_ANSWER)) for _ in range(2)]
+    async with (
+        page_reader() as reader,
+        build_extraction_gateway(SETTINGS, provider=FakeProvider(script)) as gateway,
+    ):
+        service = ExtractionService(FieldExtractor(gateway), route=accept_everything, reader=reader)
+        tasks = [
+            asyncio.create_task(
+                service.extract(kind, REFERRAL_PDF, business_id=kind.business_id, trace_id=TRACE)
+            )
+            for _ in range(2)
+        ]
+        started = time.monotonic()
+        await asyncio.sleep(0.05)  # the loop runs while a read is blocked in its thread
+        waited = time.monotonic() - started
+        blocked = (reads.started, any(task.done() for task in tasks))
+        reads.release.set()
+        outcomes = await asyncio.gather(*tasks)
+
+    assert waited < 1.0  # on the loop, the blocked read would have held it for 5 s
+    assert blocked == (1, False)  # the second read waits for the app's one reading thread
+    assert reads.peak == 1 and reads.started == 2
+    assert all(outcome.failure is None for outcome in outcomes)
+
+
+async def test_a_cancelled_extraction_drops_its_queued_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def no_model(
+        kind: KindConfig, document: DocumentText, *, business_id: str, trace_id: str
+    ) -> Proposal:
+        raise RuntimeError("no model in this test")  # the first extraction ends all-review
+
+    reads = BlockedReads()
+    monkeypatch.setattr(service_module, "read_pages", reads)
+    kind = referral()
+    async with page_reader() as reader:
+        service = ExtractionService(no_model, route=accept_everything, reader=reader)
+        first, second = (
+            asyncio.create_task(
+                service.extract(kind, REFERRAL_PDF, business_id=kind.business_id, trace_id=TRACE)
+            )
+            for _ in range(2)
+        )
+        await asyncio.sleep(0.05)
+        second.cancel()  # its read is still queued behind the first
+        with pytest.raises(asyncio.CancelledError):
+            await second
+        reads.release.set()
+        await first
+
+    assert reads.started == 1  # the cancelled extraction's read never ran
 
 
 # ── E12: refused, never cut ───────────────────────────────────────────────────────────────────

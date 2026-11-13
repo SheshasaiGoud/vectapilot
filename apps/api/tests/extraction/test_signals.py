@@ -6,6 +6,7 @@ letter: day-first dates plus named months; Paws & Co's vaccination record: dog, 
 """
 
 import dataclasses
+import unicodedata
 from collections.abc import Mapping
 from types import SimpleNamespace
 from typing import Any
@@ -41,6 +42,7 @@ from vectapilot_api.extraction.signals import (
     label_readings,
     name_allowed,
     parse_date,
+    plain,
     quote_facts,
     stored_span,
     token_runs,
@@ -91,7 +93,7 @@ def is_clean(signals: FieldSignals) -> bool:
 
 
 def test_the_rules_version_is_named() -> None:
-    assert EXTRACTION_RULES_VERSION == "extraction-rules.1"
+    assert EXTRACTION_RULES_VERSION == "extraction-rules.2"
 
 
 # ── The right answer ───────────────────────────────────────────────────────────────────────────
@@ -314,6 +316,29 @@ def test_a_typographic_apostrophe_still_matches_a_label() -> None:
     page = f"Pet{chr(0x2019)}s name: Biscuit"  # a typographic apostrophe
     report = signals_for({"pet_name": ("Biscuit", page)}, page, kind=vaccination())
     assert of(report, "pet_name").label_in_quote
+
+
+@pytest.mark.parametrize(
+    ("given", "expected"),
+    [
+        pytest.param("Asha\x00Rao", "AshaRao", id="NUL"),
+        pytest.param("Asha\x01 \x7f Rao\x9f", "Asha Rao", id="C0, DEL and C1 between words"),
+        pytest.param("Asha\tRao\x85\x1cIyer", "Asha Rao Iyer", id="whitespace controls collapse"),
+        pytest.param("e\x00\u0301", "\u00e9", id="dropped before NFKC composes"),
+    ],
+)
+def test_plain_drops_control_characters_that_are_not_whitespace(given: str, expected: str) -> None:
+    # extraction-rules.2: Postgres refuses NUL in a stored value, and both sides drop the same.
+    assert plain(given) == expected
+    assert not any(unicodedata.category(c) == "Cc" for c in plain(given))
+
+
+def test_a_quote_with_a_control_character_still_matches_its_page() -> None:
+    page = "Patient name: Asha Rao"
+    report = signals_for({"patient_name": ("Asha\x00 Rao", "Patient\x00 name: Asha Rao")}, page)
+    signals = of(report, "patient_name")
+    assert signals.quote_found and signals.value_in_quote and signals.label_in_quote
+    assert report.evidence["patient_name"].value == "Asha Rao"
 
 
 # ── Reason codes ───────────────────────────────────────────────────────────────────────────────

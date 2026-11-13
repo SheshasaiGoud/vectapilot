@@ -30,10 +30,15 @@ from vectapilot_api.db import Database, create_api_engine
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.factory import build_embedder
 from vectapilot_api.embeddings.runner import EmbeddingRunner, batch_deadline_s
+from vectapilot_api.extraction.extractor import FieldExtractor, build_extraction_gateway
 from vectapilot_api.extraction.files import load_extraction_dir
+from vectapilot_api.extraction.router import router as extraction_router
+from vectapilot_api.extraction.service import ExtractionService, page_reader
+from vectapilot_api.extraction.store import PostgresExtractionStore
 from vectapilot_api.gateway.catalog import load_catalog
 from vectapilot_api.gateway.gateway import build_gateway
 from vectapilot_api.gateway.providers.base import Provider
+from vectapilot_api.gateway.providers.fake import FakeProvider
 from vectapilot_api.health import router as health_router
 from vectapilot_api.intents.fallback import LLMIntentFallback
 from vectapilot_api.kb.errors import install_error_handlers
@@ -89,6 +94,7 @@ def create_app(
     *,
     llm_provider: Provider | None = None,
     agent_provider: Provider | None = None,
+    extraction_provider: FakeProvider | None = None,
 ) -> FastAPI:
     """Build the app. A factory (not a module-level `app`) so tests can pass their own settings.
 
@@ -98,11 +104,20 @@ def create_app(
     `agent_provider` does the same for the agent's own gateway (M5 PR 4, `agent/llm.py`); an
     unscripted agent step is a hand-off (`agent_error`), never a 500.
 
+    `extraction_provider` scripts `POST /v1/extractions`' model (M6 PR 3). It is always a
+    `FakeProvider`, whatever Settings say (E11, decided D3 (a)): in M6 the route never reaches a
+    paid model, and anything else is a TypeError. Without it the fake has an empty script, so the
+    model step fails and the extraction is stored all-review (fail closed, E3).
+
     Every paid provider in Settings (`llm_provider`, `embeddings_provider`) needs
     `api_allow_paid_llm` (ADR 0006 Exposure, 2026-10-22 and D9 2026-10-23), injected provider or
     not: the rule reads Settings only.
     """
     settings = settings or Settings()  # values come from the environment
+    # E11 (M6 PR 3): the extraction route's model is the fake provider, never one Settings name.
+    if extraction_provider is not None and not isinstance(extraction_provider, FakeProvider):
+        raise TypeError("the extraction route's provider is a FakeProvider in M6 (E11)")
+    extraction_fake = FakeProvider() if extraction_provider is None else extraction_provider
     configure_logging(settings.log_level)
     # Fail fast (ADR 0006, amended 2026-10-22 and 2026-10-23): until M7 adds budgets, every answer
     # and every search is an uncapped paid call, so a paid provider without the opt-in stops the
@@ -190,6 +205,8 @@ def create_app(
         async with (
             build_gateway(settings, provider=llm_provider) as gateway,
             build_agent_gateway(settings, provider=agent_provider) as agent_gateway,
+            build_extraction_gateway(settings, provider=extraction_fake) as extraction_gateway,
+            page_reader() as extraction_reader,
         ):
             app.state.answer_service = AnswerService(
                 search, gateway, RagConfig.from_settings(settings)
@@ -211,6 +228,14 @@ def create_app(
                 router_timeout_s=settings.agent_router_timeout_seconds,
                 router_artifact=None if router_model is None else router_model.artifact_sha256,
             )
+            # M6 PR 3: `POST /v1/extractions` (ADR 0017 decisions 3-6) on the extraction's own
+            # gateway (the fake provider, E11), with H1's `route_fields` (fail closed until it is
+            # written) and the store under RLS. PDFs are read in the app's own reading thread, so
+            # a slow one never blocks the event loop.
+            app.state.extraction_service = ExtractionService(
+                FieldExtractor(extraction_gateway), reader=extraction_reader
+            )
+            app.state.extraction_store = PostgresExtractionStore(database)
             logger.info(
                 "startup", extra={"environment": settings.environment, "version": __version__}
             )
@@ -233,6 +258,7 @@ def create_app(
     app.include_router(answer_router)
     app.include_router(actions_router)
     app.include_router(agent_router)
+    app.include_router(extraction_router)
     install_error_handlers(app)
     return app
 
