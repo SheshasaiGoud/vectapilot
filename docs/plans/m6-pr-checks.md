@@ -213,9 +213,11 @@ Measure:  PR 5 close-out (after H1, H2, the freeze and M2 step 11's Anthropic ke
   on its own `LLMGateway`, `cache=None`, attempt 15 s ≤ deadline 30 s [proposal].
 - **`extraction/signals.py`** (team code, never raises): E2's checks, `page`, `quote_hits`,
   `label_in_quote`, `shared_value` (another field has the same value or quote),
-  `conflicting_values` (a label starts two lines with different text after it), `label_present`,
-  `date_ambiguous`, `image_on_page`, `unsure`, and reason codes `bad_date`, `bad_pattern`,
-  `bad_enum`, `too_long`, `name_charset`, `quote_too_long`, `rule_failed`; the stored span [D6];
+  `conflicting_values` (two places where a label reads as a label give different text after
+  it, wherever on a line each sits), `label_present`, `date_ambiguous`, `image_on_page`,
+  `unsure`, and reason codes `bad_date`, `bad_pattern`, `bad_enum`, `too_long`, `name_charset`,
+  `quote_too_long`, `rule_failed`, `value_cut` (the quote stops before its line's text does;
+  added in review); the stored span [D6];
   `EXTRACTION_RULES_VERSION`. **`invariants.py`:** E3's check. **`service.py`:** text → call →
   signals → `route_fields` (H1) → invariants; failures and the catch-all build all-review itself.
 - **Fake-provider tests**, each ending in `review` or `low`, never an accepted wrong value or a
@@ -411,6 +413,12 @@ The options below stay as the record of what was weighed.
    identifier field (a policy number, an ID) is missing from `always_review` is refused at
    load, so no template can drop it from review (zara-safety's finding). A mistyped
    identifier is a silent error that is hard to spot later.
+
+
+## Decided 2026-11-13 (shesha, M6 PR 2 review)
+1. **pypdf's log lines are silenced centrally.** `log.silence_untrusted_parsers` drops every
+   `pypdf` record; `configure_logging` calls it at startup, so ingestion (M2) and extraction (M6)
+   are covered whatever the entry point, and `extraction/text.py` calls it again on import.
 
 ## Risks
 - **Small n.** About 12 test documents, 6 per business: 0 of 12 still allows about 24 %, 0 of 6

@@ -162,3 +162,24 @@ def test_drop_query_string_leaves_other_records_alone(args: tuple[object, ...] |
 
     assert DropQueryString().filter(record) is True
     assert record.args == args
+
+
+def test_configure_logging_silences_pypdf_for_the_whole_app() -> None:
+    """Decided by shesha, 2026-11-13: pypdf's warnings quote bytes of an uploaded file, so they are
+    silenced centrally at startup, for ingestion (M2) and extraction (M6) alike, whatever has been
+    imported. Checked in a fresh interpreter, so no earlier import of extraction can hide a gap."""
+    code = (
+        "import logging\n"
+        "from vectapilot_api.log import configure_logging\n"
+        "assert logging.getLogger('pypdf._reader').getEffectiveLevel() <= logging.WARNING\n"
+        "configure_logging('INFO')\n"
+        "assert logging.getLogger('pypdf._reader').getEffectiveLevel() > logging.CRITICAL\n"
+        "assert logging.getLogger('pypdf').getEffectiveLevel() > logging.CRITICAL\n"
+    )
+    import subprocess
+
+    # Our own interpreter and fixed arguments, no shell (S603: the arguments are ours).
+    done = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", code], capture_output=True, text=True, check=False
+    )
+    assert done.returncode == 0, done.stderr
