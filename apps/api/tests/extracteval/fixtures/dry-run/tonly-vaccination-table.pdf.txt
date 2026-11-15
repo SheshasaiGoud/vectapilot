@@ -1,0 +1,13 @@
+=== page 1 ===
+TEST-ONLY vaccination record with a table, made up for the dry run
+{row=2} Pet name:
+{row=3} Species:
+{row=4} Vaccine:
+{x=150 row=2} Mochi
+{x=150 row=3} Cat
+{x=150 row=4} FVRCP
+Date given: 12 May 2026
+Valid until: 12 May 2027
+Issuing clinic: Hollowbrook Vet Clinic
+=== page 2 image ===
+TEST-ONLY attached scan, made up for the dry run

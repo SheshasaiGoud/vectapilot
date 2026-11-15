@@ -1,0 +1,9 @@
+=== page 1 ===
+TEST-ONLY vaccination record, made up for the dry run
+Pet name: Biscuit
+Species: Dog
+Owner name: Ravi Tellan
+Vaccine: Rabies
+Date given: 3 March 2026
+Valid until: 3 March 2027
+Issuing clinic: Hollowbrook Vet Clinic

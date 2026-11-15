@@ -76,6 +76,10 @@ From the repository root (`make` lists everything):
 - `make coverage` — tests under coverage, then the gateway gate (combined and branch-only ≥ 95 %, ADR 0006)
 - `make tool-check` · `make tool-dry-run` — M5 tool-call eval (`python -m vectapilot_api.tooleval
   check|report|freeze|run|summarize|label-sheet`; `run --live` is shesha's alone)
+- `make extract-check` · `make extract-dry-run` — M6 extraction eval (`python -m
+  vectapilot_api.extracteval check|report|freeze|run|summarize`; `run --live` is shesha's alone).
+  Agents run only `check` and `report --counts`, and read misses from `results.jsonl` and
+  `summary.md`: never `documents/`, `gold.jsonl`, `values.jsonl` or the full `report`
 - `make mcp-check` · `make mcp-test-integration` (stack up, migrations at head) · `make mcp-lock`
   (re-lock `packages/mcp_server`; run it in any PR that changes `apps/api`'s dependencies)
 - `make llm-demo` — the M1 measurement CLI as a dry run (fake provider, $0) into the git-ignored
@@ -247,7 +251,9 @@ Planned: `scripts/`.
   only with file bytes never stored, short quote spans and rows hidden at expiry, shesha writes H1
   (field routing) and Claude H2 (metrics), ≥ 24 shesha-written documents and $1.00. Built at $0
   inside M3's window (own prompt version `extract-fields.1`; the route uses the fake provider).
-  Nothing built yet.
+  Merged: #68 plan · #69 PR 1 configuration · #70 PR 2 core + H1 scaffold · #71 PR 3 store,
+  `POST /v1/extractions` and purge. PR 4 (eval dataset v0.1 with 24 empty slots, `extracteval`
+  harness, H2 scaffold) in review. Next: H2 (Claude), PR 5 close-out (shesha).
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

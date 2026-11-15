@@ -1,0 +1,51 @@
+{
+  "dataset": "doc_extraction",
+  "version": "v0.1",
+  "created": "2026-11-13",
+  "synthetic": true,
+  "authored_by": "Documents and gold values: shesha (and friends), human-written, none yet (D8 (b)). Slots, schema, checks and harness: Claude (noah-evals), M6 PR 4",
+  "stage": "collecting",
+  "corpus": "data/sample",
+  "extraction": "data/extraction",
+  "businesses": [
+    "sunrise-clinic",
+    "paws-and-co"
+  ],
+  "requirements": {
+    "min_documents": 24,
+    "min_per_business": 12,
+    "min_tag_per_business": {
+      "absent": 3,
+      "confusable": 3,
+      "injection": 2,
+      "image_page": 2,
+      "table": 1
+    }
+  },
+  "slots": [
+    {"id": "sunrise-01", "business_id": "sunrise-clinic", "tags": ["absent"], "split": "dev"},
+    {"id": "sunrise-02", "business_id": "sunrise-clinic", "tags": ["absent"], "split": "test"},
+    {"id": "sunrise-03", "business_id": "sunrise-clinic", "tags": ["absent"], "split": "dev"},
+    {"id": "sunrise-04", "business_id": "sunrise-clinic", "tags": ["confusable"], "split": "test"},
+    {"id": "sunrise-05", "business_id": "sunrise-clinic", "tags": ["confusable"], "split": "dev"},
+    {"id": "sunrise-06", "business_id": "sunrise-clinic", "tags": ["confusable"], "split": "test"},
+    {"id": "sunrise-07", "business_id": "sunrise-clinic", "tags": ["injection"], "split": "dev"},
+    {"id": "sunrise-08", "business_id": "sunrise-clinic", "tags": ["injection"], "split": "test"},
+    {"id": "sunrise-09", "business_id": "sunrise-clinic", "tags": ["image_page"], "split": "dev"},
+    {"id": "sunrise-10", "business_id": "sunrise-clinic", "tags": ["image_page"], "split": "test"},
+    {"id": "sunrise-11", "business_id": "sunrise-clinic", "tags": ["table"], "split": "dev"},
+    {"id": "sunrise-12", "business_id": "sunrise-clinic", "tags": ["table"], "split": "test"},
+    {"id": "paws-01", "business_id": "paws-and-co", "tags": ["absent"], "split": "test"},
+    {"id": "paws-02", "business_id": "paws-and-co", "tags": ["absent"], "split": "dev"},
+    {"id": "paws-03", "business_id": "paws-and-co", "tags": ["absent"], "split": "test"},
+    {"id": "paws-04", "business_id": "paws-and-co", "tags": ["confusable"], "split": "dev"},
+    {"id": "paws-05", "business_id": "paws-and-co", "tags": ["confusable"], "split": "test"},
+    {"id": "paws-06", "business_id": "paws-and-co", "tags": ["confusable"], "split": "dev"},
+    {"id": "paws-07", "business_id": "paws-and-co", "tags": ["injection"], "split": "test"},
+    {"id": "paws-08", "business_id": "paws-and-co", "tags": ["injection"], "split": "dev"},
+    {"id": "paws-09", "business_id": "paws-and-co", "tags": ["image_page"], "split": "test"},
+    {"id": "paws-10", "business_id": "paws-and-co", "tags": ["image_page"], "split": "dev"},
+    {"id": "paws-11", "business_id": "paws-and-co", "tags": ["table"], "split": "test"},
+    {"id": "paws-12", "business_id": "paws-and-co", "tags": ["table"], "split": "dev"}
+  ]
+}

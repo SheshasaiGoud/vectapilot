@@ -1,0 +1,51 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>
+endobj
+5 0 obj
+<< /Length 447 >>
+stream
+BT /F1 12 Tf 1 0 0 1 72 720 Tm (TEST-ONLY vaccination record with a table, made up for the dry run) Tj 1 0 0 1 72 692 Tm (Pet name:) Tj 1 0 0 1 72 678 Tm (Species:) Tj 1 0 0 1 72 664 Tm (Vaccine:) Tj 1 0 0 1 222 692 Tm (Mochi) Tj 1 0 0 1 222 678 Tm (Cat) Tj 1 0 0 1 222 664 Tm (FVRCP) Tj 1 0 0 1 72 650 Tm (Date given: 12 May 2026) Tj 1 0 0 1 72 636 Tm (Valid until: 12 May 2027) Tj 1 0 0 1 72 622 Tm (Issuing clinic: Hollowbrook Vet Clinic) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 8 0 R >> >> /Contents 7 0 R >>
+endobj
+7 0 obj
+<< /Length 120 >>
+stream
+q 48 0 0 48 480 724 cm /Im1 Do Q BT /F1 12 Tf 1 0 0 1 72 720 Tm (TEST-ONLY attached scan, made up for the dry run) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /XObject /Subtype /Image /Width 1 /Height 1 /ColorSpace /DeviceGray /BitsPerComponent 8 /Length 1 >>
+stream
+Ä
+endstream
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000000350 00000 n 
+0000000848 00000 n 
+0000001000 00000 n 
+0000001171 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+1315
+%%EOF
