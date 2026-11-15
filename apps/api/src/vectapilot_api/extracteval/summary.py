@@ -5,7 +5,7 @@ through H2 (`metrics.py`), rewritten each time `summarize` runs.
 chosen here and handed to H2's five functions (the plan's "correctness by level, accepted
 precision and review recall come from the harness calling them on subsets"):
 - per business: all five on that business's fields;
-- per level (`high`, `medium`, `low`, and "no value proposed"): `field_accuracy` on the scored
+- per level (`high`, `medium`, `low`, and "no level"): `field_accuracy` on the scored
   fields **as routed** (`routed_fields`: each field's level after routing and the invariant
   check, and whether its proposal was the gold, before "no quote, no value" dropped an
   unverified value), so a guess H1 marked `low` is counted as a wrong `low`, never as a correct
@@ -286,8 +286,13 @@ LEVELS_LABEL: Final = (
     'Correctness by level (levels as routed, before "no quote, no value"): each field at the'
     " level routing and the invariant check gave its proposal, scored on that proposal, so a"
     " dropped guess counts as a wrong value at its own level. Ordinal levels from checks in code,"
-    " never probabilities: the claim is k of n per level."
+    ' never probabilities: the claim is k of n per level. "No level" holds the fields with no'
+    " value proposed and every field of a document that failed (E3: stored as review without"
+    " signals, so without a routed level even where the model had proposed values), scored on"
+    ' the stored value; "Also by id" names those documents.'
 )
+
+NO_LEVEL_ROW: Final = "no level (no value proposed, or an E3 failure)"
 
 
 def accuracy_section(
@@ -318,7 +323,7 @@ def accuracy_section(
         subset = [item for item in as_routed if item.level == level]
         out.append(_accuracy_row(level, metrics.field_accuracy(subset)))
     no_level = [item for item in as_routed if item.level is None]
-    out.append(_accuracy_row("no level (no value proposed)", metrics.field_accuracy(no_level)))
+    out.append(_accuracy_row(NO_LEVEL_ROW, metrics.field_accuracy(no_level)))
     out += ["", "Per field:", "", "| business / field | correct |", "|---|---|"]
     names = sorted({(item.business_id, item.field) for item in fields})
     for business_id, name in names:

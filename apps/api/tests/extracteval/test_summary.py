@@ -29,6 +29,7 @@ from vectapilot_api.extracteval.runinfo import DRY_LABEL, DocumentLine, FieldLin
 from vectapilot_api.extracteval.summary import (
     INCONSISTENT,
     LEVELS_LABEL,
+    NO_LEVEL_ROW,
     Context,
     field_interval,
     identity_holds,
@@ -282,7 +283,7 @@ def test_correctness_by_level_scores_a_dropped_guess_as_wrong_at_its_routed_leve
     level_rows = [c for c in calls if c and {f.key for f in c} == {"b/born", "b/name", "f/name"}]
     assert level_rows == []
     assert LEVELS_LABEL in text
-    assert "| no level (no value proposed) |" in text
+    assert f"| {NO_LEVEL_ROW} |" in text
 
 
 def test_an_inconsistent_h2_opens_the_summary_with_a_warning() -> None:

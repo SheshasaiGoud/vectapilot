@@ -13,16 +13,19 @@ The rules behind every function are the plan's "Scoring rules"
 ([`m6-pr-checks.md`](../plans/m6-pr-checks.md)) and the dataset's README
 ([`evals/datasets/doc_extraction/v0.1/README.md`](../../evals/datasets/doc_extraction/v0.1/README.md)).
 
-> **Status (2026-11-15, M6 PR 4 scaffold).** The five bodies raise `NotImplementedError`; their
-> 27 tests are strict xfails with hand-counted fixtures. Claude writes them later, on
-> `m6/extraction-metrics`, at shesha's request (D7 (b)); the explain-back (§6) is shesha's. Every
-> field below is made up to explain a rule; **no number in this guide is a result.**
+> **Status (2026-11-15, H2 written).** The five bodies were written by Claude on 2026-11-15 at
+> shesha's request (D7 (b)), on `m6/extraction-metrics`, for shesha's review. The 27 hand-counted
+> tests turned from strict xfails into passes without a fixture changing, and the xfail mark is
+> gone; `tests/extracteval/test_metrics_h2.py` adds a dry harness run with these five (consistent
+> summary, `summarize` agrees), the review-recall identity on seeded random inputs, and the edge
+> cases. The explain-back (§7) is shesha's and part of acceptance. Every field below is made up
+> to explain a rule; **no number in this guide is a result.**
 
 ## Your task
 
 | | Write the bodies of | So that these pass | Size | Time-box | Branch | Who |
 |---|---|---|---|---|---|---|
-| **H2** | `field_accuracy`, `silent_errors`, `review_rate`, `review_precision`, `straight_through` in [`extracteval/metrics.py`](../../apps/api/src/vectapilot_api/extracteval/metrics.py) | [`tests/extracteval/test_metrics.py`](../../apps/api/tests/extracteval/test_metrics.py): 27 strict xfails | about 60 lines (estimate) | 1 h (decided) | `m6/extraction-metrics` | Claude at shesha's request (D7 (b)) |
+| **H2** | `field_accuracy`, `silent_errors`, `review_rate`, `review_precision`, `straight_through` in [`extracteval/metrics.py`](../../apps/api/src/vectapilot_api/extracteval/metrics.py) | [`tests/extracteval/test_metrics.py`](../../apps/api/tests/extracteval/test_metrics.py): 27 hand-counted tests (strict xfails until 2026-11-15) | about 60 lines (estimate) | 1 h (decided) | `m6/extraction-metrics` | Claude at shesha's request (D7 (b)) |
 
 - **The docstrings are the spec.** Each function states its contract; the tests are that
   contract made executable, with section headings named after this guide's sections.
@@ -39,8 +42,9 @@ The rules behind every function are the plan's "Scoring rules"
 - **Not your job:** the comparison (`compare.py`), choosing subsets (per business, per level,
   accepted precision, review recall: `summary.py` calls your functions on filtered fields), the
   bootstrap for field-level intervals (`summary.field_interval`), and the "also by id" lists.
-- **When the tests pass:** delete `pytestmark` in `test_metrics.py`, run `make check`. Change the
-  code, never a fixture: every expected value was counted by hand before any code existed.
+- **When the tests pass:** delete `pytestmark` in `test_metrics.py` (done 2026-11-15), run
+  `make check`. Change the code, never a fixture: every expected value was counted by hand before
+  any code existed.
 
 ## 1. Field accuracy
 
@@ -67,9 +71,9 @@ different value". It is the most dangerous kind, because a single hidden copy is
 M6 (ADR 0017), and the tests pin it (`test_an_accepted_value_with_a_null_gold_is_silent`).
 
 A field in `review` is never silent, however wrong: a person sees it. Two counts:
-- **fields**, `k of n` over every scored field (proposal: n is all scored fields, so it reads
-  next to field accuracy; the plan says "fields `k of n`" without naming n. If shesha prefers n
-  = accepted plus absent fields, that is one changed line and one recounted fixture);
+- **fields**, `k of n` over every scored field (decided 2026-11-15 (shesha): n is all scored
+  fields, the field-accuracy base, so it reads next to field accuracy; accepted precision already
+  gives the view over accepted fields);
 - **documents** with at least one, `x of n` scored documents, with Wilson. This is the headline:
   "0 of 12 test documents with a silent error" still allows a rate up to about 24 % (the Wilson
   upper bound, arithmetic: z²/(n + z²) with z = 1.96), and 0 of 6 per business about 39 %. **The

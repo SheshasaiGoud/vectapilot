@@ -3,7 +3,7 @@
 - `canned_metrics` returns fixed results whatever the input: it lets the summary and the harness
   be tested before H2 (`extracteval/metrics.py`) is written, and keeps their tests independent of
   it. It computes nothing, so it can never pass for the real definitions
-  (tests/extracteval/test_metrics.py holds those, as strict xfails until H2 is written).
+  (tests/extracteval/test_metrics.py holds those; H2 was written 2026-11-15).
 - `consistent_metrics` is `canned_metrics` with nothing silent and every scored field it is given
   "in review": review recall's misses (none) are then exactly the silent errors (none) whatever
   the input, so a run can end with exit 0. It never reads a status, a level or `correct`, so it

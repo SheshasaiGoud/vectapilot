@@ -1,16 +1,18 @@
 """H2 (M6) — the extraction metric functions. [HAND-WRITE] (decided D7 (b), 2026-11-11: "shesha
-writes H1 `route_fields`; Claude writes H2 at shesha's request"), on its own branch
-`m6/extraction-metrics`, reviewed by shesha; the explain-back is shesha's and part of acceptance.
+writes H1 `route_fields`; Claude writes H2 at shesha's request"). Written by Claude at shesha's
+request on 2026-11-15, on its own branch `m6/extraction-metrics`, reviewed by shesha; the
+explain-back (guide §7) is shesha's and part of acceptance.
 
 Guide: docs/learning/m6-metrics.md · Tests: tests/extracteval/test_metrics.py (hand-counted
-fixtures, strict xfails until the bodies are written) and tests/extracteval/test_metrics_types.py
-(the types below, passing now).
+fixtures, counted before the bodies existed), tests/extracteval/test_metrics_h2.py (the harness
+end to end with these five, the review-recall identity on seeded inputs, the edge cases) and
+tests/extracteval/test_metrics_types.py (the types below).
 
 **Built by the team and tested:** the input (`ScoredField`, one per (document, field), filled by
 the harness from `results.jsonl`), the result types (`Accuracy`, `FieldCount`, `DocumentCount`,
 `SilentErrors`, `ReviewPrecision`), each of which checks itself when built, and the bundle the
 harness calls them through (`ExtractMetrics`, `H2_EXTRACT_METRICS`; the harness's own tests pass
-stand-ins). **H2 is the five bodies at the end of this file.**
+stand-ins). **H2 is the five functions at the end of this file.**
 
 The scoring rules they follow (docs/plans/m6-pr-checks.md, "Scoring rules"; the README of
 `evals/datasets/doc_extraction/v0.1/`):
@@ -29,11 +31,12 @@ This module never imports `vectapilot_api.extraction` (tested): `correct` arrive
 eval's own comparison (`compare.py`), and statuses and levels as plain strings.
 """
 
+from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from vectapilot_api.evalrun.intervals import WilsonInterval
+from vectapilot_api.evalrun.intervals import WilsonInterval, wilson_interval
 
 ACCEPTED: Final = "accepted"
 REVIEW: Final = "review"
@@ -216,6 +219,29 @@ class ReviewPrecision:
 # ── H2: the five functions ([HAND-WRITE], D7 (b)) ─────────────────────────────────────────────
 
 
+def _scored(fields: Sequence[ScoredField]) -> list[ScoredField]:
+    """The fields inside every n: those of scored documents."""
+    return [item for item in fields if item.scored]
+
+
+def _documents(fields: Sequence[ScoredField], hits: set[str]) -> DocumentCount:
+    """`x of n` scored documents: n the scored documents of `fields` (each id once), x those in
+    `hits`, with the Wilson interval (None when n is 0)."""
+    scored = {item.document for item in _scored(fields)}
+    found = tuple(sorted(scored & hits))
+    interval = wilson_interval(len(found), len(scored)) if scored else None
+    return DocumentCount(x=len(found), n=len(scored), documents=found, interval=interval)
+
+
+def _is_silent(item: ScoredField) -> bool:
+    """A wrong field nobody will look at (`silent_errors`' contract); `item` is scored."""
+    if item.status == ACCEPTED:
+        return not item.correct
+    if item.status == ABSENT:
+        return not item.gold_null
+    return False  # review: a person looks at it
+
+
 def field_accuracy(fields: Sequence[ScoredField]) -> Accuracy:
     """Field accuracy over `fields` (guide §1).
 
@@ -225,10 +251,13 @@ def field_accuracy(fields: Sequence[ScoredField]) -> Accuracy:
     - `correct` counts those with `correct` True; `wrong` names the others by `key`, sorted.
     - `not_scored` names each document with a field that is not scored, once, sorted.
     - An empty input is `Accuracy(0, 0, (), ())`.
-
-    TODO (H2): write the body.
     """
-    raise NotImplementedError("H2 (M6): field_accuracy (guide: docs/learning/m6-metrics.md)")
+    scored = _scored(fields)
+    wrong = tuple(sorted(item.key for item in scored if not item.correct))
+    not_scored = tuple(sorted({item.document for item in fields if not item.scored}))
+    return Accuracy(
+        correct=len(scored) - len(wrong), n=len(scored), wrong=wrong, not_scored=not_scored
+    )
 
 
 def silent_errors(fields: Sequence[ScoredField]) -> SilentErrors:
@@ -239,14 +268,19 @@ def silent_errors(fields: Sequence[ScoredField]) -> SilentErrors:
       its status is `absent` and its gold has a value (`gold_null` False). An accepted value
       whose gold is null (invented, hidden-only or planted) is not correct, so it is silent too.
       A field in `review` is never one: a person looks at it.
-    - `fields`: k silent fields of n scored fields, the k by key, sorted.
+    - `fields`: k silent fields of n scored fields (all of them, the field-accuracy base:
+      decided 2026-11-15, shesha), the k by key, sorted.
     - `documents`: x of n scored documents (each document id once) with at least one silent
       field, the x ids sorted, and `wilson_interval(x, n)` (`evalrun/intervals.py`, 95 %), None
       when n is 0.
-
-    TODO (H2): write the body.
     """
-    raise NotImplementedError("H2 (M6): silent_errors (guide: docs/learning/m6-metrics.md)")
+    scored = _scored(fields)
+    silent = [item for item in scored if _is_silent(item)]
+    keys = tuple(sorted(item.key for item in silent))
+    return SilentErrors(
+        fields=FieldCount(k=len(keys), n=len(scored), fields=keys),
+        documents=_documents(fields, {item.document for item in silent}),
+    )
 
 
 def review_rate(fields: Sequence[ScoredField]) -> FieldCount:
@@ -255,10 +289,10 @@ def review_rate(fields: Sequence[ScoredField]) -> FieldCount:
     Contract: k is the scored fields whose status is `review`, n all scored fields; the k by
     key, sorted. (The harness also calls it on the fields that are not correct: that k of n is
     review recall, and the n - k are its misses.)
-
-    TODO (H2): write the body.
     """
-    raise NotImplementedError("H2 (M6): review_rate (guide: docs/learning/m6-metrics.md)")
+    scored = _scored(fields)
+    keys = tuple(sorted(item.key for item in scored if item.status == REVIEW))
+    return FieldCount(k=len(keys), n=len(scored), fields=keys)
 
 
 def review_precision(fields: Sequence[ScoredField]) -> ReviewPrecision:
@@ -271,10 +305,20 @@ def review_precision(fields: Sequence[ScoredField]) -> ReviewPrecision:
       reasons (a field with two reasons counts under both), as `(reason, count)` sorted by
       reason, reasons with no field left out; `null_gold` those whose gold is null too (the
       document does not give the field, so the review was not needed).
-
-    TODO (H2): write the body.
     """
-    raise NotImplementedError("H2 (M6): review_precision (guide: docs/learning/m6-metrics.md)")
+    reviewed = [item for item in _scored(fields) if item.status == REVIEW]
+    with_value = [item for item in reviewed if item.has_value]
+    without_value = [item for item in reviewed if not item.has_value]
+    wrong = tuple(sorted(item.key for item in with_value if not item.correct))
+    reasons = Counter(reason for item in without_value for reason in item.reasons)
+    return ReviewPrecision(
+        wrong=len(wrong),
+        n=len(with_value),
+        fields=wrong,
+        without_value=len(without_value),
+        by_reason=tuple(sorted(reasons.items())),
+        null_gold=sum(1 for item in without_value if item.gold_null),
+    )
 
 
 def straight_through(fields: Sequence[ScoredField]) -> DocumentCount:
@@ -284,10 +328,12 @@ def straight_through(fields: Sequence[ScoredField]) -> DocumentCount:
     when its `document_status` is `complete` and every one of its fields in `fields` is correct.
     `documents` names the x straight-through ids, sorted; `interval` is
     `wilson_interval(x, n)` (95 %), None when n is 0.
-
-    TODO (H2): write the body.
     """
-    raise NotImplementedError("H2 (M6): straight_through (guide: docs/learning/m6-metrics.md)")
+    scored = _scored(fields)
+    blocked = {
+        item.document for item in scored if item.document_status != COMPLETE or not item.correct
+    }
+    return _documents(fields, {item.document for item in scored} - blocked)
 
 
 # ── How the harness calls H2 ─────────────────────────────────────────────────────────────────
@@ -313,5 +359,5 @@ H2_EXTRACT_METRICS: Final = ExtractMetrics(
     review_precision=review_precision,
     straight_through=straight_through,
 )
-"""H2 as written (stubs until then). While any function raises `NotImplementedError`, the harness
-writes no summary and says so; the results are kept (`runs.write_summary`)."""
+"""H2 as written (2026-11-15). The harness still handles a bundle whose functions raise
+`NotImplementedError` (no summary, results kept: `runs.write_summary`; tested with a stand-in)."""

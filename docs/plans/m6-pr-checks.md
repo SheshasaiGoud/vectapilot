@@ -316,6 +316,8 @@ acceptance.
 ## H2 — `m6/extraction-metrics` (`[HAND-WRITE]`, [D7]; time-box 1 h) · S
 The five functions from PR 4's scaffold, exact counts with ids, Wilson from `evalrun/` on
 documents. The explain-back is part of acceptance.
+- **Written** 2026-11-15 by Claude at shesha's request (D7 (b)), on `m6/extraction-metrics`;
+  shesha's review and explain-back are due.
 
 ## PR 5 — `m6/close-out` (shesha's live steps; ananya, noah and maya help)
 Agents never pass `--live`, never run test and never see a key [carried ADR 0007]. Agents read

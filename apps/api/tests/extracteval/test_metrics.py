@@ -1,26 +1,18 @@
 """H2 tests: the extraction metric functions (guide: docs/learning/m6-metrics.md).
 
-The five functions in `extracteval/metrics.py` are [HAND-WRITE] (D7 (b): Claude writes H2 at
-shesha's request). Until then they raise NotImplementedError, so the whole module is marked
-`xfail(strict=True, raises=NotImplementedError)`:
-
-- not implemented yet          → "xfailed" (expected);
-- implemented, wrong answer    → a normal failure (only NotImplementedError counts as expected);
-- implemented, right answer    → "XPASS(strict)", a failure on purpose: that is the signal.
-
-When no test here is xfailed any more, delete the `pytestmark` statement below and run again:
-every test must then simply pass. Change the code, never a fixture: every expected value here was
-worked out by hand (the comments show the counting), before any code existed. Each expected
-result is built before the call, and the result types check themselves when built
-(test_metrics_types.py), so an impossible expectation fails even while the stubs stand.
+The five functions in `extracteval/metrics.py` are [HAND-WRITE] (D7 (b): written by Claude at
+shesha's request, 2026-11-15). Before the bodies were written these tests were strict xfails;
+all 27 turned into XPASS(strict) with the bodies, and the module-wide xfail mark was then
+removed, so every test here simply passes. Change the code, never a fixture: every expected
+value here was worked out by hand (the comments show the counting), before any code existed.
+Each expected result is built before the call, and the result types check themselves when built
+(test_metrics_types.py), so an impossible expectation failed even while the stubs stood.
 
 Every field below is made up; no number here is a result.
 """
 
 from collections.abc import Sequence
 from typing import Any, Final
-
-import pytest
 
 from vectapilot_api.evalrun.intervals import wilson_interval
 from vectapilot_api.extracteval.metrics import (
@@ -35,12 +27,6 @@ from vectapilot_api.extracteval.metrics import (
     review_rate,
     silent_errors,
     straight_through,
-)
-
-pytestmark = pytest.mark.xfail(
-    strict=True,
-    raises=NotImplementedError,
-    reason="H2 (M6): extracteval/metrics.py — see docs/learning/m6-metrics.md",
 )
 
 S, P = "sunrise-clinic", "paws-and-co"

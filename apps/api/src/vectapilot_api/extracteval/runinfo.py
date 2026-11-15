@@ -296,19 +296,33 @@ def read_run(folder: Path) -> ExtractRunInfo:
 
 
 def read_results(folder: Path) -> tuple[DocumentLine, ...]:
-    """`results.jsonl` (blank lines skipped). Raises `DatasetError` naming the line, never it."""
+    """`results.jsonl` (blank lines skipped). Raises `DatasetError` naming the line, never it.
+
+    A document id may appear once: H2 counts one line per document, so a repeated id (a
+    hand-edited or corrupt file; `run` cannot write one, dataset ids are unique) would be counted
+    twice, silently where its fields are correct. Refused, naming the id (a validated slug) and
+    both lines (M6 H2 review, kenji-ml).
+    """
     path = folder / RESULTS_FILE
     if not path.is_file():
         raise DatasetError(f"{folder.name} has no {RESULTS_FILE}")
     lines: list[DocumentLine] = []
+    first_line: dict[str, int] = {}
     for number, text in enumerate(path.read_text("utf-8").splitlines(), start=1):
         if not text.strip():
             continue
         try:
-            lines.append(DocumentLine.model_validate_json(text))
+            line = DocumentLine.model_validate_json(text)
         except ValidationError as error:
             detail = describe_validation_error(error, "(line)")
             raise DatasetError(f"{RESULTS_FILE} line {number} is not valid: {detail}") from None
+        if line.id in first_line:
+            raise DatasetError(
+                f"{RESULTS_FILE} line {number} repeats document {line.id}"
+                f" (first on line {first_line[line.id]})"
+            )
+        first_line[line.id] = number
+        lines.append(line)
     return tuple(lines)
 
 
