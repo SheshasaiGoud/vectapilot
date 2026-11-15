@@ -9,7 +9,7 @@ LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapi
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check mcp-check mcp-test-integration mcp-lock llm-demo eval-check eval-dry-run intent-check intent-dry-run tool-check tool-dry-run
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check mcp-check mcp-test-integration mcp-lock llm-demo eval-check eval-dry-run intent-check intent-dry-run tool-check tool-dry-run extract-check extract-dry-run
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -126,3 +126,18 @@ tool-dry-run: ## Dry run of the tool-call harness on dev: scripted fake model, n
 	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_EMBEDDINGS_PROVIDER=fake \
 		VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" VECTAPILOT_MIGRATION_DATABASE_URL="$(LOCAL_OWNER_URL)" \
 		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run python -m vectapilot_api.tooleval run --split dev
+
+# ── Extraction eval (M6 PR 4) ───────────────────────────────────────────────────────────
+# Reads evals/datasets/doc_extraction/v0.1, the extraction configuration in data/extraction and
+# the business manifests in data/sample; no model, no network, no database, writes nothing.
+# `report` without --counts prints every gold row beside its page text (synthetic, this terminal).
+extract-check: ## Check the doc_extraction dataset for its stage, then print its slots and counts
+	$(API) uv run python -m vectapilot_api.extracteval check && uv run python -m vectapilot_api.extracteval report --counts
+
+# The extraction core on the dry run's fixture documents (apps/api/tests/extracteval/fixtures/dry-run,
+# never the dataset), answered by a scripted fake model: $0, no network, no database (the URLs only
+# satisfy Settings). Writes into the git-ignored evals/reports/tmp/. Until H1 (route_fields) is
+# written the run stops after its first document; until H2 is, it writes no summary.
+extract-dry-run: ## Dry run of the extraction harness on dev: fixture documents, scripted fake model, $0
+	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" \
+		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run python -m vectapilot_api.extracteval run --split dev

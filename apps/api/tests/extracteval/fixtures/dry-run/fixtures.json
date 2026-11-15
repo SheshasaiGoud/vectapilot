@@ -1,0 +1,302 @@
+{
+  "synthetic": true,
+  "note": "TEST-ONLY fixtures for the extraction harness's dry run (M6 PR 4), made up by the team: never the dataset, never an example for the writers' brief, never a result. Each document's script is what the fake model answers. tonly-referral-swap's script swaps the two dates and leaves the printed insurer out; tonly-referral-truncated's reply is cut off (max_tokens); tonly-vaccination-planted's gold disagrees with its page on purpose (issuing_clinic), so the plumbing has a wrong value to count.",
+  "documents": [
+    {
+      "id": "tonly-referral-plain",
+      "business_id": "sunrise-clinic",
+      "kind": "referral_letter",
+      "tags": [],
+      "gold": {
+        "patient_name": "Ilsa Corvane",
+        "date_of_birth": "1990-03-14",
+        "referring_doctor": "Dr Tomas Brell",
+        "referral_date": "2026-11-02",
+        "insurer": "Larkfield Mutual",
+        "policy_number": "LFM-204117"
+      },
+      "script": [
+        {
+          "answer": {
+            "patient_name": {
+              "value": "Ilsa Corvane",
+              "quote": "Patient name: Ilsa Corvane",
+              "unsure": false
+            },
+            "date_of_birth": {
+              "value": "14/03/1990",
+              "quote": "Date of birth: 14/03/1990",
+              "unsure": false
+            },
+            "referring_doctor": {
+              "value": "Dr Tomas Brell",
+              "quote": "Referring doctor: Dr Tomas Brell",
+              "unsure": false
+            },
+            "referral_date": {
+              "value": "2 November 2026",
+              "quote": "Referral date: 2 November 2026",
+              "unsure": false
+            },
+            "insurer": {
+              "value": "Larkfield Mutual",
+              "quote": "Insurer: Larkfield Mutual",
+              "unsure": false
+            },
+            "policy_number": {
+              "value": "LFM-204117",
+              "quote": "Policy number: LFM-204117",
+              "unsure": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tonly-referral-swap",
+      "business_id": "sunrise-clinic",
+      "kind": "referral_letter",
+      "tags": [
+        "confusable"
+      ],
+      "gold": {
+        "patient_name": "Noor Halvesen",
+        "date_of_birth": "1985-08-21",
+        "referring_doctor": "Dr Anke Morrow",
+        "referral_date": "2026-10-05",
+        "insurer": "Brightwell Health",
+        "policy_number": "BWH/2026/0711"
+      },
+      "script": [
+        {
+          "answer": {
+            "patient_name": {
+              "value": "Noor Halvesen",
+              "quote": "Patient name: Noor Halvesen",
+              "unsure": false
+            },
+            "date_of_birth": {
+              "value": "5 October 2026",
+              "quote": "Referral date: 5 October 2026",
+              "unsure": false
+            },
+            "referring_doctor": {
+              "value": "Dr Anke Morrow",
+              "quote": "Referring doctor: Dr Anke Morrow",
+              "unsure": false
+            },
+            "referral_date": {
+              "value": "21/08/1985",
+              "quote": "Date of birth: 21/08/1985",
+              "unsure": false
+            },
+            "insurer": {
+              "value": null,
+              "quote": null,
+              "unsure": false
+            },
+            "policy_number": {
+              "value": "BWH/2026/0711",
+              "quote": "Policy no: BWH/2026/0711",
+              "unsure": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tonly-referral-truncated",
+      "business_id": "sunrise-clinic",
+      "kind": "referral_letter",
+      "tags": [],
+      "gold": {
+        "patient_name": "Ines Calloway",
+        "date_of_birth": "1978-02-02",
+        "referring_doctor": "Dr Pavel Ostrin",
+        "referral_date": "2026-09-09",
+        "insurer": "Larkfield Mutual",
+        "policy_number": "LFM-310552"
+      },
+      "script": [
+        {
+          "raw": "{\"patient_name\": {\"value\": ",
+          "stop_reason": "max_tokens"
+        }
+      ]
+    },
+    {
+      "id": "tonly-vaccination-plain",
+      "business_id": "paws-and-co",
+      "kind": "vaccination_record",
+      "tags": [],
+      "gold": {
+        "pet_name": "Biscuit",
+        "species": "dog",
+        "owner_name": "Ravi Tellan",
+        "vaccine": "rabies",
+        "date_given": "2026-03-03",
+        "valid_until": "2027-03-03",
+        "issuing_clinic": "Hollowbrook Vet Clinic"
+      },
+      "script": [
+        {
+          "answer": {
+            "pet_name": {
+              "value": "Biscuit",
+              "quote": "Pet name: Biscuit",
+              "unsure": false
+            },
+            "species": {
+              "value": "Dog",
+              "quote": "Species: Dog",
+              "unsure": false
+            },
+            "owner_name": {
+              "value": "Ravi Tellan",
+              "quote": "Owner name: Ravi Tellan",
+              "unsure": false
+            },
+            "vaccine": {
+              "value": "Rabies",
+              "quote": "Vaccine: Rabies",
+              "unsure": false
+            },
+            "date_given": {
+              "value": "3 March 2026",
+              "quote": "Date given: 3 March 2026",
+              "unsure": false
+            },
+            "valid_until": {
+              "value": "3 March 2027",
+              "quote": "Valid until: 3 March 2027",
+              "unsure": false
+            },
+            "issuing_clinic": {
+              "value": "Hollowbrook Vet Clinic",
+              "quote": "Issuing clinic: Hollowbrook Vet Clinic",
+              "unsure": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tonly-vaccination-table",
+      "business_id": "paws-and-co",
+      "kind": "vaccination_record",
+      "tags": [
+        "absent",
+        "image_page",
+        "table"
+      ],
+      "gold": {
+        "pet_name": "Mochi",
+        "species": "cat",
+        "owner_name": null,
+        "vaccine": "fvrcp",
+        "date_given": "2026-05-12",
+        "valid_until": "2027-05-12",
+        "issuing_clinic": "Hollowbrook Vet Clinic"
+      },
+      "script": [
+        {
+          "answer": {
+            "pet_name": {
+              "value": "Mochi",
+              "quote": "Mochi",
+              "unsure": false
+            },
+            "species": {
+              "value": "Cat",
+              "quote": "Cat",
+              "unsure": false
+            },
+            "owner_name": {
+              "value": null,
+              "quote": null,
+              "unsure": false
+            },
+            "vaccine": {
+              "value": "FVRCP",
+              "quote": "FVRCP",
+              "unsure": false
+            },
+            "date_given": {
+              "value": "12 May 2026",
+              "quote": "Date given: 12 May 2026",
+              "unsure": false
+            },
+            "valid_until": {
+              "value": "12 May 2027",
+              "quote": "Valid until: 12 May 2027",
+              "unsure": false
+            },
+            "issuing_clinic": {
+              "value": "Hollowbrook Vet Clinic",
+              "quote": "Issuing clinic: Hollowbrook Vet Clinic",
+              "unsure": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "tonly-vaccination-planted",
+      "business_id": "paws-and-co",
+      "kind": "vaccination_record",
+      "tags": [
+        "injection"
+      ],
+      "gold": {
+        "pet_name": "Pepper",
+        "species": "rabbit",
+        "owner_name": "Dana Wellmore",
+        "vaccine": "rhd",
+        "date_given": "2026-06-20",
+        "valid_until": "2027-06-20",
+        "issuing_clinic": "Fernside Vet Clinic"
+      },
+      "script": [
+        {
+          "answer": {
+            "pet_name": {
+              "value": "Pepper",
+              "quote": "Pet name: Pepper",
+              "unsure": false
+            },
+            "species": {
+              "value": "Rabbit",
+              "quote": "Species: Rabbit",
+              "unsure": false
+            },
+            "owner_name": {
+              "value": "Dana Wellmore",
+              "quote": "Owner name: Dana Wellmore",
+              "unsure": false
+            },
+            "vaccine": {
+              "value": "RHD",
+              "quote": "Vaccine: RHD",
+              "unsure": false
+            },
+            "date_given": {
+              "value": "20 June 2026",
+              "quote": "Date given: 20 June 2026",
+              "unsure": false
+            },
+            "valid_until": {
+              "value": "20 June 2027",
+              "quote": "Valid until: 20 June 2027",
+              "unsure": false
+            },
+            "issuing_clinic": {
+              "value": "Hollowbrook Vet Clinic",
+              "quote": "Issuing clinic: Hollowbrook Vet Clinic",
+              "unsure": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

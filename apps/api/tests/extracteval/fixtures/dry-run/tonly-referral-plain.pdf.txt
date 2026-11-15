@@ -1,0 +1,8 @@
+=== page 1 ===
+TEST-ONLY referral letter, made up for the dry run
+Patient name: Ilsa Corvane
+Date of birth: 14/03/1990
+Referring doctor: Dr Tomas Brell
+Referral date: 2 November 2026
+Insurer: Larkfield Mutual
+Policy number: LFM-204117

@@ -151,6 +151,12 @@ class FieldResult:
     span: str | None = dataclasses.field(default=None, repr=False)
     page: int | None = None
     quote_hits: int = 0
+    routed_level: Level | None = None
+    """The level routing gave the field's proposed value, after the invariant check and before
+    a value is withheld or dropped (`withhold`, `drop_unverified`, which clear `level`). Not
+    stored or returned: PR 4's eval checks correctness per level with it, so a field H1 marked
+    `low` is still counted as `low` once "no quote, no value" has dropped its value (M6 PR 4
+    review, ananya-rag)."""
 
 
 @dataclass(frozen=True)
@@ -434,6 +440,7 @@ class ExtractionService:
         withheld: list[str] = []
         unverified: list[str] = []
         for decided in decision.fields:
+            routed_level = decided.level  # as routed and checked, before withholding or dropping
             found = evidence.get(decided.field) or FieldEvidence(decided.field)
             if found.value is not None and len(found.value) > bounds.get(decided.field, 0):
                 decided = withhold(decided)  # the value is longer than its field allows
@@ -454,6 +461,7 @@ class ExtractionService:
                     span=found.span,
                     page=found.page,
                     quote_hits=found.quote_hits,
+                    routed_level=routed_level,
                 )
             )
         return ExtractionOutcome(

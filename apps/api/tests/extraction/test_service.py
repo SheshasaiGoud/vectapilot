@@ -313,6 +313,8 @@ async def test_a_value_e2_did_not_verify_stays_in_review_without_a_value(
         frozenset({Reason.ROUTING_INVARIANT}),
     )
     assert no_value(outcome, "patient_name") == (None, None, None, None)
+    # The level as routed and checked survives the drop, for PR 4's correctness per level only.
+    assert result.routed_level is Level.LOW
     assert (outcome.unverified, outcome.withheld, outcome.failure) == (("patient_name",), (), None)
     assert accepted(outcome) == set(REFERRAL_ANSWER) - {"patient_name", "policy_number"}
     assert storable(outcome)
@@ -343,6 +345,7 @@ async def test_routings_own_status_and_reasons_stay_when_the_value_is_dropped() 
     assert outcome.corrected == ()  # the decision is routing's own, unchanged by the check
     assert (patient.status, patient.reasons) == (FieldStatus.REVIEW, frozenset({Reason.UNSURE}))
     assert no_value(outcome, "patient_name") == (None, None, None, None)
+    assert patient.routed_level is Level.LOW  # routing's own level, kept apart from `level`
     assert no_value(outcome, "insurer") == (
         Level.LOW,
         "Lotus Health Mutual",
@@ -364,6 +367,18 @@ async def test_a_verified_value_in_review_is_still_stored_with_its_level_and_pla
         1,
     )
     assert outcome.unverified == ()
+
+
+async def test_the_routed_level_is_the_stored_level_whenever_the_value_is_kept() -> None:
+    unsure = ("Asha Rao", "Patient name: Asha Rao", True)
+    outcome = await referral_run(with_changes(REFERRAL_ANSWER, patient_name=unsure, insurer=None))
+
+    for result in outcome.fields:
+        if result.value is not None:
+            assert result.routed_level is result.level is not None, result.field
+    # No value proposed: no level, as routed or stored.
+    insurer = outcome.field_of("insurer")
+    assert (insurer.level, insurer.routed_level) == (None, None)
 
 
 VERIFIED: Final = FieldSignals(
@@ -628,6 +643,7 @@ async def test_a_value_longer_than_its_field_after_nfkc_is_withheld_in_review(va
     )
     # The stand-in accepted it; the invariant check moved it (low), then the value was withheld.
     assert result.reasons == frozenset({Reason.ROUTING_INVARIANT, Reason.TOO_LONG})
+    assert result.routed_level is Level.LOW  # the checked level, before the value was withheld
     assert outcome.withheld == ("patient_name",) and outcome.failure is None
     assert accepted(outcome) == set(REFERRAL_ANSWER) - {"patient_name", "policy_number"}
     assert storable(outcome) and outcome.status is DocumentStatus.NEEDS_REVIEW
@@ -850,6 +866,7 @@ async def test_a_failed_call_stores_every_field_in_review_with_its_reason(
             frozenset({failure}),
         )
         assert (result.value, result.span, result.page) == (None, None, None)
+        assert result.routed_level is None  # E3: nothing was routed
     assert outcome.sha256 is not None and outcome.pages == 1
 
 

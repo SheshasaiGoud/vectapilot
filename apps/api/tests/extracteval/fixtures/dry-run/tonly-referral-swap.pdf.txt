@@ -1,0 +1,8 @@
+=== page 1 ===
+TEST-ONLY referral letter, made up for the dry run
+Referral date: 5 October 2026
+Patient name: Noor Halvesen
+Date of birth: 21/08/1985
+Referring doctor: Dr Anke Morrow
+Insurer: Brightwell Health
+Policy no: BWH/2026/0711

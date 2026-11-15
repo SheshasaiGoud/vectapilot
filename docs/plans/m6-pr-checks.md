@@ -110,8 +110,10 @@ business near 39 % (arithmetic, not results): honest outcomes, reported as count
   scored", by id. Every count says "n scored, m not scored".
 - **Correct value.** Gold is canonical (ISO dates, enum ids, identifiers as written).
   `extracteval`'s own comparison: exact for dates, enums and identifiers (whitespace trimmed);
-  whitespace collapsed and case-folded for text; both null is correct. It never imports
-  `vectapilot_api.extraction` (tested).
+  for text, whitespace collapsed, case-folded and punctuation at either end dropped on both sides
+  (E2's own "quote minus its label and punctuation", so `Ltd.` and `Ltd` agree; inner punctuation
+  counts; amended 2026-11-15 in PR 4's review, before any document); both null is correct. It
+  never imports `vectapilot_api.extraction` (tested).
 - **Field accuracy:** correct of all scored fields, whatever the status. Also per field, per
   business, **per level** (ordinal levels checked here, not calibrated probabilities) and over
   accepted fields (**accepted precision**).
@@ -316,7 +318,10 @@ The five functions from PR 4's scaffold, exact counts with ids, Wilson from `eva
 documents. The explain-back is part of acceptance.
 
 ## PR 5 — `m6/close-out` (shesha's live steps; ananya, noah and maya help)
-Agents never pass `--live`, never run test and never see a key [carried ADR 0007]. Each run ≤
+Agents never pass `--live`, never run test and never see a key [carried ADR 0007]. Agents read
+misses only from `results.jsonl` and `summary.md` (ids, levels, reasons); they never open
+`documents/`, `gold.jsonl`, `values.jsonl` or `report` without `--counts` (`injection` lines are
+written to talk to whoever reads them; zara's PR 4 review): shesha reads values. Each run ≤
 $1.00, counted towards D8; commit each folder on `m6/close-out` before the next run; an
 interrupted run without run.json gets a `recorded-spend.json` (otherwise it counts at $1.00).
 1. **Documents:** shesha writes them into their slots; `check` and `report` (every gold row
@@ -434,6 +439,23 @@ The options below stay as the record of what was weighed.
    each in the service, the route and the database; eight mutants of the condition, all caught.
 2. **`READ_WORKERS` stays 1 for M6.** One reading thread per app; revisit with M9's subprocess
    hard kill ("Risks": a slow or hostile PDF).
+
+## Decided 2026-11-15 (shesha, M6 PR 4 review)
+1. **Gold-writing rules, as recommended** (README, "Canonical values"): a text value is everything
+   printed after its label, titles included (`Dr. ...`); punctuation at either end of a text value
+   does not count, inner punctuation does ("Correct value" above); numbers and dates are written
+   without dashes (`/` or `.`), since the personal-data screen reads a run of 9 or more digits,
+   spaces and dashes as a phone number; on a page with an image, only the image itself and
+   `hidden` lines give `null`, typed text keeps its gold.
+2. **Silent errors are counted out of all scored fields** (the field-accuracy base); accepted
+   precision already gives the view over accepted fields.
+3. **The 24 slots stay as fixed** (D8): every slot carries a stress tag, so review rate and
+   straight-through are measured on stress documents only, and the summary says so. No clean slots.
+4. **As recommended by the reviews, applied in PR 4:** the PDF writer stays in `tests/` (as M2);
+   freeze needs every slot filled; `freeze.json` pins documents, gold rows and slots, while the
+   extraction configuration's hashes live in each run's fingerprint; agents read misses only from
+   `results.jsonl` and `summary.md` (PR 5 above); `check` refuses a PDF holding text its source
+   does not and screens the PDF's own text; `report` fences document text as untrusted.
 
 ## Risks
 - **Small n.** About 12 test documents, 6 per business: 0 of 12 still allows about 24 %, 0 of 6
