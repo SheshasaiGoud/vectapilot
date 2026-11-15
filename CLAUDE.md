@@ -252,8 +252,10 @@ Planned: `scripts/`.
   (field routing) and Claude H2 (metrics), ≥ 24 shesha-written documents and $1.00. Built at $0
   inside M3's window (own prompt version `extract-fields.1`; the route uses the fake provider).
   Merged: #68 plan · #69 PR 1 configuration · #70 PR 2 core + H1 scaffold · #71 PR 3 store,
-  `POST /v1/extractions` and purge. PR 4 (eval dataset v0.1 with 24 empty slots, `extracteval`
-  harness, H2 scaffold) in review. Next: H2 (Claude), PR 5 close-out (shesha).
+  `POST /v1/extractions` and purge · #72 PR 4 (eval dataset v0.1 with 24 empty slots,
+  `extracteval` harness, H2 scaffold). H2 (metrics, written by Claude at shesha's request,
+  2026-11-15) in review; explain-back due. Next: shesha's H1 route_fields, the 24 documents,
+  PR 5 close-out.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

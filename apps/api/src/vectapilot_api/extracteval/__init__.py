@@ -19,7 +19,7 @@ The harness (`run`, `summarize`; no database: the core runs in-process):
 - `dryrun` — the dry run's fixture documents from `tests/` and its scripted model
 - `runs` — `run` and `summarize`: the folder, run.json, results.jsonl, values.jsonl
 - `compare` — the eval's own comparison of a value with its gold (imports nothing of the core)
-- `metrics` — H2 (`[HAND-WRITE]`, D7 (b)): five metric functions, stubs until written
+- `metrics` — H2 (`[HAND-WRITE]`, D7 (b)): five metric functions, written 2026-11-15
 - `summary` — summary.md through H2, the subsets and intervals around it
 - `runinfo` (folder names and the run files) and `spend` (M6's live runs against D8's $1.00)
 

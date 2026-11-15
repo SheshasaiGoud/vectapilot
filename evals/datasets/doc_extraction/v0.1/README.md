@@ -39,8 +39,9 @@ applies them:
   business, **per level** (ordinal levels checked here, not calibrated probabilities) and over
   accepted fields (**accepted precision**).
 - **Silent errors** (target 0; they judge the routing): an `accepted` field that is not correct,
-  or an `absent` field whose gold has a value. Fields `k of n`; documents with at least one,
-  `x of n` with Wilson, overall and per business. The claim is the count.
+  or an `absent` field whose gold has a value. Fields `k of n` (n: every scored field, decided
+  2026-11-15); documents with at least one, `x of n` with Wilson, overall and per business. The
+  claim is the count.
 - **Review recall:** wrong-or-missing fields routed to `review`, of all wrong-or-missing fields,
   misses by id. **Review rate:** fields in `review` of all fields (staff work).
 - **Review precision:** reviewed fields with a value that is not correct, of reviewed fields with

@@ -123,6 +123,17 @@ def test_results_round_trip_and_name_a_bad_line_never_its_text(tmp_path: Path) -
     assert read_results(tmp_path) == (line,)
 
 
+def test_a_repeated_document_id_is_refused_naming_it(tmp_path: Path) -> None:
+    # H2 counts one line per document: a repeat would double-count, silently when correct.
+    line = DocumentLine.model_validate(document())
+    (tmp_path / RESULTS_FILE).write_text(json_line(line) + "\n" + json_line(line), "utf-8")
+    with pytest.raises(DatasetError) as repeated:
+        read_results(tmp_path)
+    assert str(repeated.value) == (
+        f"{RESULTS_FILE} line 3 repeats document {line.id} (first on line 1)"
+    )
+
+
 def test_a_dropped_value_keeps_its_routed_level_and_its_proposals_score() -> None:
     # "No quote, no value" cleared the stored level and value; the routed level stays apart.
     dropped = field(
