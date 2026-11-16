@@ -12,7 +12,7 @@ export interface Milestone {
   pending?: string;
 }
 
-export const currentMilestone = "M6";
+export const currentMilestone = "M7";
 
 /** Teammates who review every milestone; shown as always active. */
 export const reviewers: string[] = ["maya-tech-lead"];
@@ -64,6 +64,7 @@ export const milestones: Milestone[] = [
     title: "Document extraction",
     summary: "OCR fallback, schemas, per-field confidence",
     owners: ["ananya-rag"],
+    pending: "H1, documents and live runs pending",
   },
   {
     id: "M7",
