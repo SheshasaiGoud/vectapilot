@@ -159,6 +159,7 @@ Planned: `scripts/`.
 - [ADR 0015](docs/adr/0015-intent-router.md) — intent router (accepted 2026-11-05): one platform intent set with a route map per closed business type, L2 logistic regression on voyage-4 query embeddings scored without an ML library, temperature scaling, a safety floor before the threshold, a fail-closed `small` LLM fallback that may only tighten, test once per mode, measured offline against LLM-only routing
 - [ADR 0016](docs/adr/0016-tools-and-agent-loop.md) — tools and the agent loop (accepted 2026-11-10, D1–D8 decided as recommended): a typed tool core per business, a loop that can read and propose but never write, writes as pending actions executed once by a confirm call with a token no model sees, idempotency in Postgres, a sandbox under RLS, structured output instead of native tool use (M3's window), no tools before a safety step for health businesses (fail closed while M4's router is off), an MCP adapter in its own project that cannot confirm
 - [ADR 0017](docs/adr/0017-document-extraction.md) — document extraction (accepted 2026-11-11, reviewed by ananya-rag, zara-safety and noah-evals, D1–D8 decided as recommended): schemas per business type from configuration compiled into shape-only Pydantic models, one structured `small` call with a verbatim quote per field, confidence as levels from checks in code (quote, value and field label), per-field review routing that fails closed behind a team invariant check, an OCR seam without an engine, file bytes never stored, rows hidden at expiry and purged by hand
+- [ADR 0018](docs/adr/0018-guardrails.md) — guardrails (accepted 2026-11-16, reviewed by zara-safety, noah-evals, diego-backend and leo-agents, D1–D8 decided as recommended): a red-flag screen first that needs neither Redis, the budget nor the model; guards that only tighten and fail closed into a hand-off; one shared text fold and term matcher over per-business-type term files that can only tighten; standard-library PII masking before any provider; Redis limits and budgets with business-scoped keys; guards at the routes and `create_app`, never inside a measured service; a frozen synthetic red-team suite gated in CI
 
 ## Current status
 - **Next steps for shesha, M1–M4 in one ordered checklist** (commands, caps, rules, what runs in
@@ -253,9 +254,22 @@ Planned: `scripts/`.
   inside M3's window (own prompt version `extract-fields.1`; the route uses the fake provider).
   Merged: #68 plan · #69 PR 1 configuration · #70 PR 2 core + H1 scaffold · #71 PR 3 store,
   `POST /v1/extractions` and purge · #72 PR 4 (eval dataset v0.1 with 24 empty slots,
-  `extracteval` harness, H2 scaffold). H2 (metrics, written by Claude at shesha's request,
-  2026-11-15) in review; explain-back due. Next: shesha's H1 route_fields, the 24 documents,
-  PR 5 close-out.
+  `extracteval` harness, H2 scaffold) · #73 H2 (metrics, written by Claude at shesha's request,
+  2026-11-15; explain-back due).
+- **M6 remaining, shesha only:** H1 (`route_fields`, guide `docs/learning/m6-routing.md`), the 24
+  documents into their slots (README of `evals/datasets/doc_extraction/v0.1/`), then PR 5
+  close-out (live runs, $1.00 in total), the note, H1/H2 explain-backs.
+- **M7 (safety: guardrails, masking, red-team suite) — planned and decided 2026-11-16**
+  (`docs/plans/m7-pr-checks.md`, ADR 0018 accepted; drafted from zara-safety's targets; reviewed
+  read-only 2026-11-15 by zara-safety, noah-evals, diego-backend and leo-agents, findings applied).
+  D1–D8 decided by shesha as recommended: standard-library masking (no package), guards on for
+  `/v1/agent`, its confirm route and `/v1/extractions` and built but off on `/v1/answer` and
+  `/v1/kb/search` until M3's window closes (PR 10), everything fails closed with the red-flag
+  screen first and independent of Redis, limits and budgets in Redis, shesha writes H1 (term
+  matcher) and Claude H2 (masking) and H3 (output checks), about 140 agent-drafted synthetic
+  red-team cases frozen before the term files plus a held-out probe, ≤ $1.00 live, a gate script
+  in the existing `api` job. No migration in M7; guards wrap measured services and never edit
+  them (G13).
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
