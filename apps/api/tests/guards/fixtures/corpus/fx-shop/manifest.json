@@ -1,0 +1,25 @@
+{
+  "business_id": "fx-shop",
+  "name": "A fictional test business",
+  "business_type": "ecommerce",
+  "synthetic": true,
+  "created": "2026-11-16",
+  "authored_by": "tests (M7 PR 1)",
+  "languages": [
+    "en"
+  ],
+  "default_language": "en",
+  "sources": [
+    {
+      "file": "faq.md",
+      "format": "markdown",
+      "source_id": "faq",
+      "version": "1",
+      "title": "FAQ",
+      "content_kind": "faq",
+      "language": "en",
+      "status": "approved",
+      "audience": "public"
+    }
+  ]
+}

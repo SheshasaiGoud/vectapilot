@@ -270,6 +270,8 @@ Planned: `scripts/`.
   red-team cases frozen before the term files plus a held-out probe, ≤ $1.00 live, a gate script
   in the existing `api` job. No migration in M7; guards wrap measured services and never edit
   them (G13).
+- **M7 remaining, shesha only:** H1 (`match_terms`, guide `docs/learning/m7-term-matching.md`,
+  time-box 2 h; 58 strict xfails in `tests/guards/test_match.py`), then the explain-backs.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

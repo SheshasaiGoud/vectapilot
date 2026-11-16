@@ -54,6 +54,7 @@ from tests.extraction.standins import (
     with_changes,
 )
 from tests.extraction.test_text import encrypted_pdf
+from tests.guards.helpers import sample_guard_dir, use_answer_key_selftest
 from tests.test_business_header import registry_says
 from vectapilot_api import main
 from vectapilot_api.business import REFUSED_ENVIRONMENT
@@ -120,8 +121,14 @@ def log_text(caplog: pytest.LogCaptureFixture) -> str:
 
 
 @pytest.mark.usefixtures("registered")
-def test_production_refuses_the_route_before_anything_is_read() -> None:
+def test_production_refuses_the_route_before_anything_is_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Production starts a guarded route only with a guard folder (M7 PR 1, G4), self-tested at
+    # startup: on the answer-key stand-in, so this test never depends on H1's progress.
+    use_answer_key_selftest(monkeypatch)
     settings = make_settings(
+        guard_config_dir=sample_guard_dir(tmp_path / "guard"),
         environment="production",
         llm_provider="anthropic",
         anthropic_api_key="not-a-real-key",

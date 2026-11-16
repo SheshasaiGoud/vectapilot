@@ -61,6 +61,26 @@ certificate could read the key and the prompts; `httpx2/_config.py:35-38`), and 
 `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY`, the macOS system proxy) are not refused: they keep
 working."""
 
+GUARD_OFF_ENVIRONMENTS: Final = frozenset({"local", "test", "ci"})
+"""Where `guard_routes = "off"` is allowed (M7 PR 1, D2 (a)): `business.HEADER_ENVIRONMENTS`, the
+environments without customers (a test keeps the two equal; `business` imports this module, so it
+cannot be imported here). Anywhere else, and in any environment added later, it is refused."""
+
+GUARD_ANSWER_NOT_WIRED: Final = (
+    "guard_answer may be 'on' only once M7 PR 8 wires the guards into /v1/answer and"
+    " /v1/kb/search; until then nothing reads it"
+)
+"""Settings' refusal of `guard_answer = "on"` before PR 8 (decided 2026-11-16, shesha): a switch
+that guards nothing must not look switched on. PR 8 removes this rule. Fixed text, field names
+only."""
+
+GUARD_CONFIG_REFUSED: Final = (
+    "guard_config_dir (VECTAPILOT_GUARD_CONFIG_DIR) is required outside local, test and ci when a"
+    " guarded route serves businesses (tools_config_dir or extraction_config_dir set with"
+    " guard_routes 'on', or guard_answer 'on')"
+)
+"""`create_app`'s refusal (M7 PR 1, G4): fixed text, settings names only."""
+
 PROCESS_ENV_ONLY: Final = {
     "anthropic_api_key": "VECTAPILOT_ANTHROPIC_API_KEY",
     "voyage_api_key": "VECTAPILOT_VOYAGE_API_KEY",
@@ -256,6 +276,26 @@ class Settings(BaseSettings):
     and with `agent_turn_timeout_seconds` within `AGENT_ROUTER_TURN_BOUND_SECONDS`. Both are
     checked whatever `agent_router` says, so switching the router on never meets a new refusal."""
 
+    # ── Guards (M7, ADR 0018; D2 (a)) ──
+    guard_routes: Literal["off", "on"] = "on"
+    """`VECTAPILOT_GUARD_ROUTES`: the guards on `/v1/agent`, its confirm route and
+    `/v1/extractions`. `off` only in local, test and ci (`GUARD_OFF_ENVIRONMENTS`), for tests of
+    the unguarded path. Wired into those routes by PR 6 and PR 7: until then it changes nothing."""
+    guard_answer: Literal["off", "on"] = "off"
+    """`VECTAPILOT_GUARD_ANSWER`: the guards on `/v1/answer` and `/v1/kb/search`, off during M3's
+    measurement window (G11). Wired by PR 8 (byte-identical while off); PR 10 turns it on after
+    shesha's last M3 live answer run. Until PR 8, Settings refuses `on` (`GUARD_ANSWER_NOT_WIRED`):
+    nothing reads it yet."""
+    guard_config_dir: Path | None = None
+    """`VECTAPILOT_GUARD_CONFIG_DIR`: the guard folder (`data/safety/` from PR 4; a read-only mount
+    under compose). When set, `create_app` reads and validates it and runs the term self-test
+    (G4, G14) before serving anything; any problem stops startup. Needs `corpus_dir` (each
+    business's type and languages come from its manifest). When it is None but a guarded route
+    serves businesses (`guarded_routes_serve_businesses`), `create_app` refuses to start outside
+    local, test and ci (`require_guard_config`); there, those routes hand off every message
+    (`guards_not_configured`, wired by PR 6-8). Not a Settings rule: the MCP server and every CLI
+    build `Settings()` without it."""
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -338,9 +378,24 @@ class Settings(BaseSettings):
                 "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with extraction_config_dir: each"
                 " business's type is checked in both"
             )
+        problems += self._guard_problems()
         if problems:
             raise ValueError("; ".join(problems))
         return self
+
+    def _guard_problems(self) -> list[str]:
+        """M7 PR 1's fail-fast rules for the guards. Every message names fields, never a value."""
+        problems: list[str] = []
+        if self.guard_routes == "off" and self.environment not in GUARD_OFF_ENVIRONMENTS:
+            problems.append("guard_routes may be 'off' only when environment is local, test or ci")
+        if self.guard_answer == "on":  # until PR 8 (GUARD_ANSWER_NOT_WIRED)
+            problems.append(GUARD_ANSWER_NOT_WIRED)
+        if self.guard_config_dir is not None and self.corpus_dir is None:
+            problems.append(
+                "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with guard_config_dir: each"
+                " business's type and languages come from its corpus manifest"
+            )
+        return problems
 
     def _embedding_problems(self) -> list[str]:
         """ADR 0008's fail-fast rules, as ADR 0006's for the LLM provider. Never a value."""
@@ -425,6 +480,37 @@ class Settings(BaseSettings):
                     "input": None,
                 }
                 for name in paid
+            ],
+            hide_input=True,
+        )
+
+    def guarded_routes_serve_businesses(self) -> bool:
+        """Whether a guarded route serves any business: `/v1/agent` (its confirm route included)
+        with a tool folder or `/v1/extractions` with an extraction folder while `guard_routes` is
+        on, or `/v1/answer` and `/v1/kb/search` while `guard_answer` is on."""
+        configured = self.tools_config_dir is not None or self.extraction_config_dir is not None
+        return (self.guard_routes == "on" and configured) or self.guard_answer == "on"
+
+    def guards_not_configured(self) -> bool:
+        """Whether guarded routes serve businesses without a guard folder: allowed only in local,
+        test and ci, where those routes hand off every message (`guards_not_configured`)."""
+        return self.guarded_routes_serve_businesses() and self.guard_config_dir is None
+
+    def require_guard_config(self) -> None:
+        """The API server's startup rule (M7 PR 1, G4): outside local, test and ci, guarded routes
+        that serve businesses need the guard folder. Like `require_api_paid_provider_opt_in`, only
+        `create_app` calls it (the MCP server and the CLIs build Settings without the folder).
+        Raised as a ValidationError from fixed text."""
+        if not self.guards_not_configured() or self.environment in GUARD_OFF_ENVIRONMENTS:
+            return
+        raise ValidationError.from_exception_data(
+            type(self).__name__,
+            [
+                {
+                    "type": PydanticCustomError("guards_not_configured", GUARD_CONFIG_REFUSED),
+                    "loc": ("guard_config_dir",),
+                    "input": None,
+                }
             ],
             hide_input=True,
         )

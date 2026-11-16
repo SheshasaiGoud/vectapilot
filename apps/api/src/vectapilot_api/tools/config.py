@@ -89,7 +89,11 @@ _VARIATION_SUPPLEMENT: Final = range(0xE0100, 0xE01F0)
 and a run of them carries hidden bytes as tag characters do."""
 
 
-def _invisible(character: str) -> bool:
+def is_invisible(character: str) -> bool:
+    """Whether `character` is text a person cannot see but a model receives: a format,
+    private-use, unassigned or surrogate code point (ZWNJ and ZWJ excepted) or a variation
+    selector 17-256. Public because M7's normaliser (`guards.normalize`, G5) drops exactly these
+    in `clean`, imported rather than restated, so the two can never disagree."""
     if character in _JOINERS:
         return False
     return (
@@ -143,7 +147,7 @@ class ToolsModel(BaseModel):
 def single_line(value: str) -> str:
     """`value` if it is one trimmed line without control or invisible characters; else a
     ValueError. The message stays the one fixed sentence, so no value is echoed."""
-    if _CONTROL.search(value) or value != value.strip() or any(map(_invisible, value)):
+    if _CONTROL.search(value) or value != value.strip() or any(map(is_invisible, value)):
         raise ValueError("text fields are one trimmed line without control or invisible characters")
     return value
 
