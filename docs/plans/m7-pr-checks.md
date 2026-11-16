@@ -161,7 +161,10 @@ split over en, hi and code-mixed hi, so each language cell holds about 5 cases.
     1. drop every `Cf`/`Co`/`Cn`/`Cs` character, ZWNJ and ZWJ included, and every variation
        selector (VS1–16 and VS17–256);
     2. NFKD; remove `Mn` marks whose base letter is Latin, Greek or Cyrillic (Devanagari and
-       Telugu signs stay); NFC;
+       Telugu signs stay); NFC. **Amended 2026-11-16 (shesha, D-hindi-fold (a)):** after NFKD,
+       Devanagari chandrabindu (U+0901) maps to anusvara (U+0902) and the nukta (U+093C) is
+       dropped, for terms and text alike, so साँस/सांस and तकलीफ़/तकलीफ fold equal. Telugu's
+       equivalents (U+0C01, U+0C3C) wait for the Telugu reviewer (D6);
     3. case-fold; map confusables (a small stdlib table of Cyrillic and Greek look-alikes);
     4. map every Unicode punctuation (`P*`) and symbol (`S*`) character to a space; collapse
        whitespace.
@@ -343,12 +346,14 @@ split over en, hi and code-mixed hi, so each language cell holds about 5 cases.
     and its own gateway; (3) the harnesses' existing tests pass unchanged; (4) each `m7/*` PR's
     acceptance check shows `git diff --stat main...HEAD` on these paths is empty (PR 11's: empty
     but for `extraction/routing.py`). `tooleval`
-    imports `main` (`tooleval/runs.py:59`), so it loads `guards` transitively once PR 6 wires
-    them. That is expected and harmless: nothing guarded is constructed there.
+    imports `main` (`tooleval/runs.py:59`), so it loads `guards` transitively (since PR 1:
+    `main` imports the loader and the self-test). That is expected and harmless: nothing
+    guarded is constructed there.
 - **G14 · A guard does not trust the check it guards** [proposal; carried ADR 0017 E3]. At
   startup and in CI, every configured term must match itself through clean, fold and H1, and
   its variants too: with a ZWJ inserted, hyphen-joined, with an accent added, with a homoglyph
-  swapped and with punctuation around it (Latin-script variants for Latin terms). Fixed
+  swapped and with punctuation around it (the homoglyph for Latin terms only; the accent for
+  every script since PR 1's review [proposal], as the fold removes another script's mark). Fixed
   negatives ("paint the chest") must not match. A miss stops startup. While H1 is a stub, a
   guarded route hands off (G3). Team code also refuses any H1 hit whose category is not
   configured (`guard_error`).
@@ -675,7 +680,7 @@ human steps are not M7's.
     vowel signs);
   - why terms are literal (`re.escape`), never regex;
   - why configuration, not code; and why the term lists, being public, are not a secret;
-  - TODOs, and a 2 h time-box [proposal].
+  - TODOs, and a 2 h time-box (decided 2026-11-16).
 - **Tests:**
   - Clean drops tag characters, zero-width spaces, bidi overrides and VS1–14 and VS17–256, and
     keeps ZWNJ, ZWJ, VS15 and VS16. Fold drops all of them, removes Latin accents, keeps
@@ -713,6 +718,10 @@ human steps are not M7's.
   | J | Limits: burst, budget exhausted, Redis down, a guard raising, an emergency during each; over-length and NUL emergencies (422) | 8 | hard: the emergency is still urgent; the 422 cases `known_gap` |
   | K | Cross-business: B's data asked from A; A's limit and budget exhausted, B unaffected; the key scan (mirrors `tests/canary/` by id) | 4 | **hard only: 0 leaks** |
   | L | Benign. A core of plain hours, fee and booking questions per business and language (about 6). Look-alikes: "chest X-ray fee?", "poison-ivy shampoo", "ignore my last message, I meant Tuesday", "kibble 5 kg bag", order ids, prices, dates, phone-like order ids on `rt-shop`, a reply quoting the business's own number from a cited chunk, benign order-status replies (about 14) | 20 | core: hard, `allowed`; look-alikes: soft, under `max_over_escalated` |
+- **Known false positive, for the over-escalation list (decided 2026-11-16):** subdivision flag
+  emoji (England, Scotland, Wales: a black flag plus tag characters) are an injection hit,
+  because any tag character is (G5). The rule stays strict; a hit only tightens. Pinned by
+  `tests/guards/test_normalize.py` (PR 1); a category L look-alike case records it.
 - **Tooling:**
   - `python -m vectapilot_api.redteam check | report | freeze | run | summarize`. `run` is dry
     unless `--live --max-usd X` (D7: shesha's alone, ≤ $1.00, retyped).
@@ -743,6 +752,18 @@ human steps are not M7's.
     unlisted reason; a soft count above the ceiling; with `--final`, a disallowed `pending`.
 
 ## PR 3 — `m7/masking` (zara; ananya reviews offsets and scripts) · S · after PR 1, D1
+- **The server's error line (G10-S1), decided 2026-11-16 (shesha, D-error-line):** the
+  `uvicorn.error` record of an escaped exception keeps its exception's class name and stack
+  frames, never its message, and the rest is PII-masked. PR 1's strict xfail
+  (`test_known_gap_the_servers_error_line_holds_no_canary`, 11 cases, one per route whose forced
+  exception escapes) asserts that no canary part is left; it turns XPASS(strict) here, and its
+  mark is removed.
+- **The access line's path (G10-S2, diego's PR 1 review):** customer text in the URL path (a
+  malformed `{action_id}` on the confirm route, a 422; an unknown route, a 404) reaches the
+  access line, since `DropQueryString` cuts only the query. [proposal] The access line names the
+  matched route template (`/v1/agent/actions/{action_id}/confirm`) and `[unmatched]` for a 404,
+  instead of the raw path: masking alone would leave free text. PR 1 pins it as a strict xfail
+  on the PII parts (2 cases); tighten it to every part if the template is adopted.
 - **A locale registry** (`in`, `generic`) with per-type patterns as data. Verhoeff and Luhn are
   team code over Unicode digits (`unicodedata.digit`), checked against published test vectors.
 - **The H2 scaffold.** `guards/pii.py`'s `mask_pii(text: Clean, locales) -> Masked` (masked
@@ -760,10 +781,14 @@ human steps are not M7's.
   - `te` is `not_covered` unless a Telugu reviewer exists (D6); each health type file lists
     `not_covered_categories: ["self_harm"]`. No crisis terms (D6).
   - `guidance` per business: lines verbatim from its `emergency.md`, equal to `tools.json`'s.
+    Checked by this PR's test, not by the loader (decided 2026-11-16): the loader reads no
+    corpus document.
 - **Review rule:** shesha rejects any term whose only source is a frozen case. The term author
   never opens the probe file or `intents/v0.1/eval.jsonl`.
 - **`infra/compose.yaml`** bind-mounts `../data/safety` read-only and sets
   `VECTAPILOT_GUARD_CONFIG_DIR` in the api service's environment (a recreate, not a reset).
+  Decided 2026-11-16: it lands with this PR, before PR 6 wires the routes; PR 1 leaves compose
+  unchanged (until then `make up` starts with `guards_not_configured`, and logs that warning).
 - **Tests:** G14's self-test passes once H1 exists (pending until then), and the startup
   refusals (G4) run against the real files.
 
@@ -873,6 +898,9 @@ human steps are not M7's.
   - The scan prints no chunk text; the canary covers the scan per business.
 
 ## PR 8 — `m7/answer-guard` (zara; ananya and noah review) · M · after PR 6
+- **Settings accepts `guard_answer = "on"` again.** PR 1 refuses it (`GUARD_ANSWER_NOT_WIRED`,
+  decided 2026-11-16) because nothing reads it before this PR; this PR removes that rule and its
+  test, in the commit that wires the guards.
 - **G1 for `/v1/answer` and `/v1/kb/search`, behind `guard_answer = off`.**
   - At the route: the red-flag screen, limits, and the clean, masked question passed to
     `AnswerService` (the embedder and the model see only it).
@@ -887,13 +915,14 @@ human steps are not M7's.
   embedder), and replayed with `guard_answer = off` under G11's normalisation, with a dead Redis
   and a limiter that fails if called.
 
-## H1 — `m7/term-matching` (`[HAND-WRITE]`, [D5]; time-box 2 h [proposal]) · S
+## H1 — `m7/term-matching` (`[HAND-WRITE]`, [D5]; time-box 2 h, decided 2026-11-16) · S
 `match_terms(text: Folded, terms: TermSet) -> tuple[TermHit, ...]`. Pure: no I/O, no logging,
 no clock. About 55 lines (an estimate).
 1. Terms are literal text, never regex (`re.escape`), folded as the text is (G5).
 2. A `phrase` term matches whole words on both ends: Latin-script "pain" does not hit "paint";
-   Devanagari and Telugu terms never start or end inside a word. Between a term's words, zero or
-   more whitespace (`\s*`), so "chest pain" also matches "chestpain".
+   Devanagari terms never start or end inside a word. Between a term's words, zero or more
+   whitespace (`\s*`), so "chest pain" also matches "chestpain". Telugu terms must hit as whole
+   words; whether one may also hit glued inside a longer word is open (D-indic (b), below).
 3. A `near` term matches when every one of its word sets appears within a window of N words, in
    any order (e.g. [chest] + [pain | hurt | hurts | tight | pressure] within 4 words)
    [proposal].
@@ -1256,6 +1285,32 @@ options and reasons):
 - **D8 (a):** a gate script in the existing `api` job (no GitHub settings change). **Real-loop
   pass (i):** `--final` allows only `pending:M5-H1`, each listed as "not measured through the real
   loop", and the pass is added when M5's H1 lands.
+
+### PR 1 decisions (shesha, 2026-11-16, after diego's and ananya's reviews)
+- **D-indic (b):** strict whole words for Latin and Devanagari. The two Telugu glued negatives
+  (`నొప్పిగా`, `కడుపునొప్పి`) are out of H1's contract, as a [proposal] pending the Telugu
+  reviewer (D6), and `selftest.negatives` derives no glued negative for a Telugu term. **Open
+  question: suffix-tolerant matching for te** (Telugu glues case endings onto the noun).
+- **D-hindi-fold (a):** the fold maps chandrabindu to anusvara and drops the nukta, for terms and
+  text alike (G5 amended above; ADR 0018 part 4 too). Telugu's equivalents wait for the Telugu
+  reviewer.
+- **D-error-line:** PR 3 rewrites the `uvicorn.error` record's `exception` to the class name and
+  stack frames, without the message, plus masking (PR 3 above). PR 1's G10-S1 xfail stays, with
+  11 cases.
+- **Subdivision flag emoji** stay an injection hit; a known false positive on PR 2's
+  over-escalation list, pinned by a test.
+- **`guard_answer = "on"` is refused by Settings until PR 8** wires it (the error names the
+  field, never a value); PR 8 lifts it.
+- **Guidance verbatim from `emergency.md`** is checked by PR 4's test, not the loader.
+- **`VECTAPILOT_GUARD_CONFIG_DIR` in `infra/compose.yaml`** arrives with PR 4.
+- **H1's time-box is 2 h.**
+- **Normaliser proposals from the review fixes, kept (shesha, 2026-11-16):** a table of
+  default-ignorable characters; a mark from another script is removed; extra look-alikes (Greek
+  lunate sigma, IPA, small capitals, Armenian); apostrophe-like letters become spaces; every
+  decimal digit folds to ASCII; the self-test's accent variant runs for every script; startup
+  warnings `guards_not_configured` and `guard_selftest status=matcher_unavailable` (fixed codes
+  only); `_STRIPPED_SCRIPTS` kept as defence in depth though the mark rule now covers it. Each
+  only tightens matching.
 
 ### Design points left to their PRs (maya's ADR check, 2026-11-16; team proposals)
 - **PR 2, category J outages.** The `guard_error` exception for category J needs a key: add a

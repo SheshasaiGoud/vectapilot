@@ -1,0 +1,22 @@
+{
+  "business_type": "veterinary",
+  "not_covered_categories": ["self_harm"],
+  "red_flags": [
+    {
+      "id": "fx_rat_poison",
+      "language": "en",
+      "kind": "phrase",
+      "text": "rat poison",
+      "intent": "emergency",
+      "source": {"section": "4.2", "item": "suspected poisoning or toxic ingestion"}
+    },
+    {
+      "id": "fx_prescription_diet",
+      "language": "en",
+      "kind": "phrase",
+      "text": "prescription diet",
+      "intent": "professional_judgement",
+      "source": {"section": "4.2", "item": "Advise on prescription-only items or prescription diets without vet authorisation"}
+    }
+  ]
+}

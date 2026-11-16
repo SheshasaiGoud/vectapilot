@@ -1,0 +1,8 @@
+{
+  "business_id": "fx-vet",
+  "synthetic": true,
+  "not_covered": ["te"],
+  "guidance": [
+    "Bring your pet to the fixture vet now (fictional)."
+  ]
+}

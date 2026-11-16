@@ -39,8 +39,11 @@ from vectapilot_api.gateway.catalog import load_catalog
 from vectapilot_api.gateway.gateway import build_gateway
 from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.gateway.providers.fake import FakeProvider
+from vectapilot_api.guards.config import load_guard_dir
+from vectapilot_api.guards.selftest import SelftestStatus, run_selftest
 from vectapilot_api.health import router as health_router
 from vectapilot_api.intents.fallback import LLMIntentFallback
+from vectapilot_api.intents.policy import HEALTH_TYPES, BusinessType
 from vectapilot_api.kb.errors import install_error_handlers
 from vectapilot_api.kb.router import router as kb_router
 from vectapilot_api.kb.service import KbService
@@ -53,6 +56,12 @@ from vectapilot_api.tools.executor import TransactionSource
 from vectapilot_api.tools.files import load_tools_dir
 
 logger = logging.getLogger("vectapilot_api")
+GUARDS_NOT_CONFIGURED: Final = "guards_not_configured"
+"""M7 PR 1's startup warning: guarded routes serve businesses without a guard folder (local, test
+and ci only), so they will hand off every message (PR 6-8)."""
+GUARD_SELFTEST: Final = "guard_selftest"
+"""M7 PR 1's startup warning: the term matcher is unavailable (H1 is a stub), so every guarded
+route will hand off (G3, G14)."""
 
 TELEMETRY_OFF: Final[TelemetryConfig] = {
     "tracing": False,
@@ -123,6 +132,10 @@ def create_app(
     # and every search is an uncapped paid call, so a paid provider without the opt-in stops the
     # server here.
     settings.require_api_paid_provider_opt_in()
+    # Fail fast (M7 PR 1, G4): outside local, test and ci, a guarded route that serves businesses
+    # needs the guard folder. In local, test and ci the app starts, and those routes will hand off
+    # every message (`guards_not_configured`, wired by PR 6-8).
+    settings.require_guard_config()
     # Fail fast (ADR 0006): an invalid catalog, or an alias whose model has no price, stops the
     # app here, before it serves anything. The answer's alias must exist too (M2 PR 6).
     catalog = load_catalog()
@@ -152,6 +165,34 @@ def create_app(
         if settings.corpus_dir is None:  # pragma: no cover (Settings refuses it)
             raise ValueError("corpus_dir is required with extraction_config_dir")
         extraction = load_extraction_dir(settings.extraction_config_dir, settings.corpus_dir)
+    # Fail fast (M7 PR 1, G4, G14): with a guard folder, every file must be valid, every business
+    # resolved against its corpus manifest (and the type its guarded route reads), and every term
+    # must pass the self-test, or the app stops here (GuardConfigError). While H1 is a stub the
+    # self-test reports the matcher unavailable and the app starts (the routes hand off, G3).
+    guards = None
+    guard_selftest = None
+    if settings.guard_config_dir is not None:
+        if settings.corpus_dir is None:  # pragma: no cover (Settings refuses it)
+            raise ValueError("corpus_dir is required with guard_config_dir")
+        # The businesses a guarded route serves, with the type that route reads (tools.json, the
+        # extraction business file): a served health business needs a guard file. Both already
+        # match the corpus manifest (`business_types`, `load_extraction_dir` refuse a mismatch
+        # above); the guard loader still takes the union, as defence in depth.
+        served: dict[str, BusinessType] = {
+            business_id: loaded.config.business_type
+            for business_id, loaded in (tools or {}).items()
+        }
+        for business_id, extracted in (extraction.businesses if extraction else {}).items():
+            if extracted.file.business_type in HEALTH_TYPES or business_id not in served:
+                served[business_id] = extracted.file.business_type
+        guards = load_guard_dir(settings.guard_config_dir, settings.corpus_dir, served=served)
+        guard_selftest = run_selftest(guards)
+        if guard_selftest.status is SelftestStatus.MATCHER_UNAVAILABLE:
+            logger.warning(GUARD_SELFTEST, extra={"status": guard_selftest.status.value})
+    # Production refused this above; local, test and ci say why every guarded message will be
+    # handed off [proposal]. Fixed codes only, never a term.
+    if settings.guards_not_configured():
+        logger.warning(GUARDS_NOT_CONFIGURED, extra={"environment": settings.environment})
     # Fail fast (D7 (a)): `agent_router = on` needs a live M4 model for the API's embedding model
     # (RouterModelError); Settings requires the folder's setting when it is on.
     router_model = None
@@ -252,6 +293,8 @@ def create_app(
     app.state.catalog = catalog
     app.state.tools = tools
     app.state.extraction = extraction
+    app.state.guards = guards
+    app.state.guard_selftest = guard_selftest
     app.include_router(health_router)
     app.include_router(kb_router)
     app.include_router(search_router)

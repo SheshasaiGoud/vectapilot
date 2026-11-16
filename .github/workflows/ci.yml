@@ -82,8 +82,9 @@ jobs:
       # or any of it was skipped, read from pytest's own report.
       - name: Canary gate (cross-business isolation suite ran)
         run: uv run python scripts/canary_gate.py "$RUNNER_TEMP/pytest.xml"
-      # Same script as `make coverage` (ADR 0006): gateway/ combined >= 95.00 %, branches >= 95 %.
-      - name: Gateway coverage gate
+      # Same script as `make coverage` (ADR 0006): gateway/ and guards/ (M7), each combined
+      # >= 95.00 % and branches >= 95 %.
+      - name: Coverage gate (gateway, guards)
         run: uv run python scripts/coverage_gate.py
 
   # The MCP server (M5 PR 5, ADR 0016 decision 8): its own uv project and lock in

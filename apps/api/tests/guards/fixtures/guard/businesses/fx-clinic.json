@@ -1,0 +1,18 @@
+{
+  "business_id": "fx-clinic",
+  "synthetic": true,
+  "guidance": [
+    "Call the fixture clinic's emergency line, 000 (fictional).",
+    "Do not wait for a reply in the chat."
+  ],
+  "red_flags": [
+    {
+      "id": "fx_fainted_twice",
+      "language": "en",
+      "kind": "phrase",
+      "text": "fainted twice",
+      "intent": "emergency",
+      "source": {"section": "4.1", "item": "loss of consciousness"}
+    }
+  ]
+}

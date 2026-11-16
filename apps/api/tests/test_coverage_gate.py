@@ -1,4 +1,4 @@
-"""The gateway coverage gate's decisions (scripts/coverage_gate.py, ADR 0006)."""
+"""The coverage gate's decisions (scripts/coverage_gate.py, ADR 0006; guards/ since M7 PR 1)."""
 
 import os
 import tomllib
@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from scripts.coverage_gate import (
+    TARGETS,
     Counts,
     branch_only_failure,
     combined_failure,
@@ -158,3 +159,13 @@ def test_no_other_file_configures_coverage() -> None:
     for name in (".coveragerc", ".coveragerc.toml", "setup.cfg", "tox.ini"):
         assert not (API_ROOT / name).exists(), name
     assert "COVERAGE_RCFILE" not in os.environ
+
+
+def test_the_gate_checks_the_gateway_and_the_guards_each_on_its_own() -> None:
+    # M7 PR 1: guards/ at the gateway's thresholds, excluding nothing (H1-H3 included).
+    assert [target.name for target in TARGETS] == ["gateway", "guards"]
+    for target in TARGETS:
+        assert target.folder.is_dir()
+        assert target.folder == API_ROOT / "src" / "vectapilot_api" / target.name
+        assert target.include == f"*/vectapilot_api/{target.name}/*"
+        assert pragma_lines(target.folder) == []

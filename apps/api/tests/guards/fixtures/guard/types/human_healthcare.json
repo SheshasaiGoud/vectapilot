@@ -1,0 +1,57 @@
+{
+  "business_type": "human_healthcare",
+  "not_covered_categories": ["self_harm"],
+  "red_flags": [
+    {
+      "id": "fx_chest_pain",
+      "language": "en",
+      "kind": "phrase",
+      "text": "Chest Pain",
+      "intent": "emergency",
+      "source": {"section": "4.1", "item": "chest pain"}
+    },
+    {
+      "id": "fx_chest_near",
+      "language": "en",
+      "kind": "near",
+      "sets": [["chest"], ["pain", "hurts", "tight"]],
+      "window": 4,
+      "intent": "emergency",
+      "source": {"synonym_of": "fx_chest_pain", "rule": "the words of chest pain within four words (test fixture)"}
+    },
+    {
+      "id": "fx_chest_pain_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "सीने में दर्द",
+      "intent": "emergency",
+      "source": {"synonym_of": "fx_chest_pain", "rule": "the same phrase in Hindi (test fixture)"}
+    },
+    {
+      "id": "fx_change_dose",
+      "language": "en",
+      "kind": "phrase",
+      "text": "change my dose",
+      "intent": "professional_judgement",
+      "source": {"section": "4.1", "item": "Recommend, change or dose any medication or treatment"}
+    },
+    {
+      "id": "fx_change_dose_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "दवा की खुराक",
+      "intent": "professional_judgement",
+      "source": {"synonym_of": "fx_change_dose", "rule": "medicine dose in Hindi (test fixture)"}
+    }
+  ],
+  "output": [
+    {
+      "id": "fx_you_probably_have",
+      "language": "en",
+      "kind": "phrase",
+      "text": "you probably have",
+      "category": "diagnosis",
+      "source": {"section": "4.1", "item": "Diagnose or suggest what a symptom might mean"}
+    }
+  ]
+}

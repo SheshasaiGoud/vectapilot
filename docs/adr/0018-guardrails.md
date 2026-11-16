@@ -134,8 +134,12 @@ runs first and depends on nothing that can fail. Each part:
    - *Clean* (what the model, the embedder and masking see) drops invisible characters and
      variation selectors but keeps ZWNJ, ZWJ, VS15 and VS16, applies NFC and collapses whitespace.
      *Fold* (what screens and terms see) also drops those, strips Latin, Greek and Cyrillic
-     accents, case-folds, maps confusables and turns punctuation into spaces. Tag characters,
-     VS17–256 and runs of three or more invisible characters are an injection signal.
+     accents, case-folds, maps confusables and turns punctuation into spaces. Devanagari and
+     Telugu signs stay, except that (**amended 2026-11-16 (shesha)**, D-hindi-fold (a)) Devanagari
+     chandrabindu folds to anusvara and the nukta is dropped, for terms and text alike, so the
+     everyday spellings साँस/सांस and तकलीफ़/तकलीफ match; Telugu's equivalents wait for a Telugu
+     reviewer. Tag characters, VS17–256 and runs of three or more invisible characters are an
+     injection signal.
    - One pure matcher (H1, `[HAND-WRITE]`, D5 (b): shesha) serves red-flag, injection
      and output phrases: literal terms, whole words, `\s*` between words, `near` windows; ids and
      categories out, never text. The fold stays team code.

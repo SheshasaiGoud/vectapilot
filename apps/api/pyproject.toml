@@ -98,8 +98,9 @@ markers = ["integration: needs real Postgres and Redis (set RUN_INTEGRATION=1)"]
 xfail_strict = true
 filterwarnings = ["error"]
 
-# Coverage gate for gateway/ (ADR 0006): `make coverage` runs scripts/coverage_gate.py, which holds
-# the thresholds. tests/test_coverage_gate.py pins these settings, so change both together.
+# Coverage gate for gateway/ and guards/ (ADR 0006): `make coverage` runs scripts/coverage_gate.py,
+# which holds the thresholds. tests/test_coverage_gate.py pins these settings, so change both
+# together.
 [tool.coverage.run]
 branch = true # measure both ways of every `if`/loop, not only the lines
 # Measure the whole package, so a module that no test imports shows up at 0 % instead of missing.
