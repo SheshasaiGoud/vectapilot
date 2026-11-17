@@ -1,0 +1,43 @@
+{
+  "business_id": "rt-shop",
+  "synthetic": true,
+  "business_type": "ecommerce",
+  "timezone": "Asia/Kolkata",
+  "sandbox_date": "2026-11-16",
+  "enabled_tools": [
+    "book",
+    "check_slots",
+    "create_ticket",
+    "order_status",
+    "reschedule"
+  ],
+  "services": [
+    {
+      "id": "store_pickup",
+      "name": "Warehouse pickup"
+    },
+    {
+      "id": "returns_dropoff",
+      "name": "Returns drop-off"
+    }
+  ],
+  "ticket_categories": [
+    {
+      "id": "order",
+      "name": "Orders and deliveries"
+    },
+    {
+      "id": "returns",
+      "name": "Returns and refunds"
+    },
+    {
+      "id": "other",
+      "name": "Something else"
+    }
+  ],
+  "emergency_guidance": [
+    "If someone has swallowed a button battery, a magnet, a cleaning product or any other product, call 112 now or go to the nearest hospital emergency department.",
+    "Do not wait for a reply in the chat.",
+    "If you can, bring the product or its packaging with you."
+  ]
+}

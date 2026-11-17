@@ -82,6 +82,11 @@ jobs:
       # or any of it was skipped, read from pytest's own report.
       - name: Canary gate (cross-business isolation suite ran)
         run: uv run python scripts/canary_gate.py "$RUNNER_TEMP/pytest.xml"
+      # The frozen red-team suite (M7 PR 2, D8 (a)): every frozen case ran exactly once, no plain
+      # skip, only closed xfail reasons, soft over-escalations within the frozen ceiling. Read
+      # from the same report; `--final` is added at M7's close-out (plan PR 9).
+      - name: Red-team gate (frozen suite ran as listed)
+        run: uv run python scripts/redteam_gate.py "$RUNNER_TEMP/pytest.xml"
       # Same script as `make coverage` (ADR 0006): gateway/ and guards/ (M7), each combined
       # >= 95.00 % and branches >= 95 %.
       - name: Coverage gate (gateway, guards)

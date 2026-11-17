@@ -160,7 +160,8 @@ runs first and depends on nothing that can fail. Each part:
 6. **Injection signals that tighten (G7).** A message hit runs the turn read-only. A chunk hit
    drops the chunk (reachable only under `guard_answer = on` or `agent_router = on`). A
    tool-result field hit becomes `[withheld]`. A hit in `create_ticket`'s summary replaces the
-   response with a `guard_output` hand-off and returns no token. A document hit is flagged (part
+   response with a `guard_output` hand-off, returns no token and expires the stored pending row at once
+   (**amended 2026-11-17 (shesha)**, M7 PR 2). A document hit is flagged (part
    10). Encoded payloads are a known gap; boundaries, citation ids and W1/W2 stay the real line.
 7. **Output checks (G8; H3, D5 (b): Claude at shesha's request).** On replies, answer
    text and ticket text, never on a hand-off or a confirmation: success claims; medical advice

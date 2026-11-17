@@ -9,7 +9,7 @@ LOCAL_OWNER_URL := postgresql+asyncpg://vectapilot:$${POSTGRES_PASSWORD:-vectapi
 LOCAL_REDIS_URL := redis://127.0.0.1:6379/0
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check mcp-check mcp-test-integration mcp-lock llm-demo eval-check eval-dry-run intent-check intent-dry-run tool-check tool-dry-run extract-check extract-dry-run
+.PHONY: help up down logs ps migrate reset-db lint format typecheck test coverage test-integration check mcp-check mcp-test-integration mcp-lock llm-demo eval-check eval-dry-run intent-check intent-dry-run tool-check tool-dry-run extract-check extract-dry-run redteam-check redteam-gate redteam-dry-run
 
 help: ## List the available commands
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  make %-17s %s\n", $$1, $$2}'
@@ -141,3 +141,24 @@ extract-check: ## Check the doc_extraction dataset for its stage, then print its
 extract-dry-run: ## Dry run of the extraction harness on dev: fixture documents, scripted fake model, $0
 	$(API) VECTAPILOT_LLM_PROVIDER=fake VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" \
 		VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" uv run python -m vectapilot_api.extracteval run --split dev
+
+# ── Red-team suite (M7 PR 2) ────────────────────────────────────────────────────────────
+# Reads evals/datasets/redteam/v0.1 (cases, gates, freeze, fixtures) and the business manifests
+# in data/sample; no model, no network, no database, writes nothing. Counts and codes only.
+redteam-check: ## Check the red-team dataset for its stage, then print its counts
+	$(API) uv run python -m vectapilot_api.redteam check && uv run python -m vectapilot_api.redteam report --counts
+
+# The suite as CI's `api` job runs it, then its gate (scripts/redteam_gate.py) on pytest's JUnit
+# report: needs `make up` (the database cases run against the local stack). The report goes to
+# the git-ignored evals/reports/tmp/. `--final` is for M7's close-out (plan PR 9) only.
+redteam-gate: ## The red-team suite against the local stack, then its CI gate
+	$(API) RUN_INTEGRATION=1 VECTAPILOT_DATABASE_URL="$(LOCAL_DB_URL)" \
+		VECTAPILOT_MIGRATION_DATABASE_URL="$(LOCAL_OWNER_URL)" VECTAPILOT_REDIS_URL="$(LOCAL_REDIS_URL)" \
+		uv run pytest tests/redteam --junit-xml=../../evals/reports/tmp/redteam-pytest.xml && \
+		uv run python scripts/redteam_gate.py ../../evals/reports/tmp/redteam-pytest.xml
+
+# Always a dry run ($0, no network, no model, no database): every frozen case through run_case in
+# process, into the git-ignored evals/reports/tmp/redteam/. There is deliberately no make target
+# for `--live` (D7's raw arm is shesha's alone, plan PR 9).
+redteam-dry-run: ## Dry run of the red-team suite: in-process cases, scripted model text, $0
+	$(API) uv run python -m vectapilot_api.redteam run

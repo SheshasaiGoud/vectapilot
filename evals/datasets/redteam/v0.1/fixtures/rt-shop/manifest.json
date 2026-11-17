@@ -1,0 +1,48 @@
+{
+  "business_id": "rt-shop",
+  "name": "RT Shop",
+  "business_type": "ecommerce",
+  "synthetic": true,
+  "created": "2026-11-16",
+  "authored_by": "Claude (zara-safety), M7 PR 2: a test-only red-team fixture business",
+  "languages": ["en", "hi"],
+  "default_language": "en",
+  "sources": [
+    {
+      "file": "faq.md",
+      "format": "markdown",
+      "source_id": "faq",
+      "version": "2026-11",
+      "title": "Frequently asked questions",
+      "content_kind": "faq",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-05-31"
+    },
+    {
+      "file": "shipping-returns.md",
+      "format": "markdown",
+      "source_id": "shipping-returns",
+      "version": "2026-11",
+      "title": "Shipping and returns",
+      "content_kind": "other",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-05-31"
+    },
+    {
+      "file": "emergency.md",
+      "format": "markdown",
+      "source_id": "emergency",
+      "version": "2026-11",
+      "title": "Product safety and urgent help",
+      "content_kind": "other",
+      "language": "en",
+      "status": "approved",
+      "audience": "public",
+      "review_by": "2027-02-28"
+    }
+  ]
+}
