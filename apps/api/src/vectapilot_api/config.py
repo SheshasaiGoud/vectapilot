@@ -2,6 +2,7 @@
 
 import logging
 import os
+from decimal import Decimal
 from pathlib import Path
 from typing import Final, Literal, Self
 
@@ -74,6 +75,21 @@ GUARD_ANSWER_NOT_WIRED: Final = (
 that guards nothing must not look switched on. PR 8 removes this rule. Fixed text, field names
 only."""
 
+TURN_TIMEOUT_RULE: Final = (
+    "agent_turn_timeout_seconds must be >= agent_llm_deadline_seconds x agent_max_steps"
+    " + 2 x agent_max_steps x guard_redis_timeout_seconds"
+)
+"""The turn's rule (M5 PR 4, with M7 PR 5's Redis bound, G9): every step's model call fits the
+turn, and so do its budget reserve and settle, each bounded by the Redis timeout."""
+
+ROUTER_TIMEOUT_RULE: Final = (
+    "agent_router_timeout_seconds must be >= agent_llm_deadline_seconds"
+    " + 2 x guard_redis_timeout_seconds (the router's one fallback call, with its budget reserve"
+    " and settle)"
+)
+"""The router's rule (M5 PR 4, with M7 PR 5's Redis bound, G9; diego's PR 5 review [proposal]):
+the same arithmetic as `TURN_TIMEOUT_RULE` for the router's one fallback call."""
+
 GUARD_CONFIG_REFUSED: Final = (
     "guard_config_dir (VECTAPILOT_GUARD_CONFIG_DIR) is required outside local, test and ci when a"
     " guarded route serves businesses (tools_config_dir or extraction_config_dir set with"
@@ -96,10 +112,11 @@ opted in. A later provider setting (a paid reranker) is added here; a test fails
 
 API_PAID_REFUSED: Final = (
     "api_allow_paid_llm (VECTAPILOT_API_ALLOW_PAID_LLM) must be true for the API server to use a"
-    " paid {setting} (any but 'fake'): it has no budgets until M7"
+    " paid {setting} (any but 'fake'): embeddings, /v1/answer and /v1/kb/search have no budget"
 )
-"""The API server's refusal (decided 2026-10-22, extended by D9 2026-10-23), filled with a name
-from `API_PAID_PROVIDERS`. Fixed text: it names settings and the rule, never a value."""
+"""The API server's refusal (decided 2026-10-22, extended by D9 2026-10-23; reworded by M7 PR 5,
+G9: the guarded routes' model calls have a budget, the rest does not), filled with a name from
+`API_PAID_PROVIDERS`. Fixed text: it names settings and the rule, never a value."""
 
 # With PYDANTIC_SETTINGS_DEBUG set, pydantic-settings logs every raw source value (the API key and
 # the DSN passwords included) at DEBUG on this logger, before any validator runs. Pinned at WARNING
@@ -156,8 +173,11 @@ class Settings(BaseSettings):
     `llm_provider` (decided 2026-10-22, ADR 0006 Exposure) and `embeddings_provider` (D9,
     2026-10-23; the name stays). Until M7 adds budgets, every answer with evidence and every search
     is an uncapped paid call, so `create_app` refuses any provider in `API_PAID_PROVIDERS` but the
-    fake while this is false (`require_api_paid_provider_opt_in`). The measurement CLI and the eval
-    harness never read it: their `--live` runs have their own `--max-usd` reservation cap."""
+    fake while this is false (`require_api_paid_provider_opt_in`). M7's daily budget
+    (`guard_budget_usd_per_business_per_day`, G9) covers only the model calls of guarded routes;
+    embeddings, and `/v1/answer` and `/v1/kb/search` while `guard_answer` is off, stay
+    unbudgeted, so the opt-in stays. The measurement CLI and the eval harness never read it:
+    their `--live` runs have their own `--max-usd` reservation cap."""
 
     # ── Embeddings (ADR 0008) ──
     embeddings_provider: EmbeddingsProvider = "fake"
@@ -251,8 +271,9 @@ class Settings(BaseSettings):
     """Model steps per turn (`LoopLimits.max_steps`; at most `agent.types.MAX_STEPS_LIMIT`)."""
     agent_turn_timeout_seconds: Seconds = Field(default=35.0, le=300)
     """The whole turn's limit around the loop (`turn_timeout`). At least
-    `agent_llm_deadline_seconds x agent_max_steps`, so a turn of slow but successful steps is
-    never cut off by its own budget, and with `agent_router_timeout_seconds` at most
+    `agent_llm_deadline_seconds x agent_max_steps` plus each step's two Redis calls
+    (`TURN_TIMEOUT_RULE`, M7 PR 5), so a turn of slow but successful steps is never cut off by its
+    own budget, and with `agent_router_timeout_seconds` at most
     `AGENT_ROUTER_TURN_BOUND_SECONDS` (both checked in `_agent_problems`), so 300 is a field bound
     only."""
     agent_router: Literal["off", "on"] = "off"
@@ -272,7 +293,8 @@ class Settings(BaseSettings):
     high; with the emergency guidance for a health business or an urgent hand-off
     (`AgentService`). A router exception hands off by the same rule, so the kind of failure
     never decides urgency [decided 2026-11-11, shesha]. At least
-    `agent_llm_deadline_seconds`, so a slow but successful fallback call is not always cut off,
+    `agent_llm_deadline_seconds` plus the fallback's budget reserve and settle
+    (`ROUTER_TIMEOUT_RULE`, M7 PR 5), so a slow but successful fallback call is not always cut off,
     and with `agent_turn_timeout_seconds` within `AGENT_ROUTER_TURN_BOUND_SECONDS`. Both are
     checked whatever `agent_router` says, so switching the router on never meets a new refusal."""
 
@@ -295,6 +317,27 @@ class Settings(BaseSettings):
     local, test and ci (`require_guard_config`); there, those routes hand off every message
     (`guards_not_configured`, wired by PR 6-8). Not a Settings rule: the MCP server and every CLI
     build `Settings()` without it."""
+
+    # ── Limits and budgets (M7 PR 5, G9; D4 (a)) ──
+    # PLACEHOLDERS [proposal], unmeasured: starting values while every business is synthetic,
+    # tuned only on measured traffic (rule 3). Read by `guards.limits.LimitPolicy`; wired into
+    # the routes by PR 6 (agent, confirm, extractions) and PR 8 (answer, search).
+    guard_limit_business_per_minute: int = Field(default=120, ge=1, le=100_000)
+    """`VECTAPILOT_GUARD_LIMIT_BUSINESS_PER_MINUTE`: requests per business per route per minute,
+    the real control until M8 authenticates customers."""
+    guard_limit_customer_per_minute: int = Field(default=10, ge=1, le=100_000)
+    """`VECTAPILOT_GUARD_LIMIT_CUSTOMER_PER_MINUTE`: requests per customer reference per route
+    per minute. Advisory: `customer_ref` is client-asserted until M8. At most the business's."""
+    guard_budget_usd_per_business_per_day: Decimal = Field(
+        default=Decimal("0.50"), gt=0, le=Decimal(100), max_digits=12, decimal_places=6
+    )
+    """`VECTAPILOT_GUARD_BUDGET_USD_PER_BUSINESS_PER_DAY`: the model spend one business may
+    reserve per UTC day on guarded routes, in dollars (kept as integer micro-USD in Redis). $0.50
+    while every business is synthetic."""
+    guard_redis_timeout_seconds: float = Field(default=0.25, gt=0, le=10, allow_inf_nan=False)
+    """`VECTAPILOT_GUARD_REDIS_TIMEOUT_SECONDS` [proposal: 0.25 s, a safety bound, not a
+    measurement]: each limiter and budget call's limit; expiry fails closed. At most
+    `readiness_timeout_seconds`, and inside the agent's turn (`TURN_TIMEOUT_RULE`)."""
 
     @classmethod
     def settings_customise_sources(
@@ -395,6 +438,12 @@ class Settings(BaseSettings):
                 "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with guard_config_dir: each"
                 " business's type and languages come from its corpus manifest"
             )
+        if self.guard_limit_customer_per_minute > self.guard_limit_business_per_minute:
+            problems.append(
+                "guard_limit_customer_per_minute must be <= guard_limit_business_per_minute"
+            )
+        if self.guard_redis_timeout_seconds > self.readiness_timeout_seconds:
+            problems.append("guard_redis_timeout_seconds must be <= readiness_timeout_seconds")
         return problems
 
     def _embedding_problems(self) -> list[str]:
@@ -427,15 +476,16 @@ class Settings(BaseSettings):
             problems.append(
                 "agent_llm_deadline_seconds must be >= agent_llm_attempt_timeout_seconds"
             )
-        if self.agent_llm_deadline_seconds * self.agent_max_steps > self.agent_turn_timeout_seconds:
-            problems.append(
-                "agent_turn_timeout_seconds must be >= agent_llm_deadline_seconds x agent_max_steps"
-            )
-        if self.agent_router_timeout_seconds < self.agent_llm_deadline_seconds:
-            problems.append(
-                "agent_router_timeout_seconds must be >= agent_llm_deadline_seconds (the router's"
-                " one fallback call)"
-            )
+        # M7 PR 5 (G9): each step may also reserve and settle its budget, each call bounded by
+        # the Redis timeout. With the defaults: 8 x 4 + 2 x 4 x 0.25 = 34 <= 35 (arithmetic).
+        steps = self.agent_max_steps
+        turn = self.agent_llm_deadline_seconds * steps
+        turn += 2 * steps * self.guard_redis_timeout_seconds
+        if turn > self.agent_turn_timeout_seconds:
+            problems.append(TURN_TIMEOUT_RULE)
+        router_call = self.agent_llm_deadline_seconds + 2 * self.guard_redis_timeout_seconds
+        if self.agent_router_timeout_seconds < router_call:
+            problems.append(ROUTER_TIMEOUT_RULE)
         if (
             self.agent_router_timeout_seconds + self.agent_turn_timeout_seconds
             > AGENT_ROUTER_TURN_BOUND_SECONDS

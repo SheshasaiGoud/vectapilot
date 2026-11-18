@@ -5,9 +5,12 @@ scoring rules, "CI semantics"; plan, "Design points left to their PRs").
 object or route its attack goes through. A later PR registers a runner for a path
 (`harness.RUNNERS`); until then every case on it is pending on that PR (`FRONTIER`):
 - `masking` (E, in process against H2's `mask_pii`): PR 3;
-- `limiter` (K outside the agent: the limiter, the key scan, and k-001's search leg, whose control
-  is RLS, built since M2, so it waits only for PR 5's K runner, not for PR 8 [proposal, leo's PR 2
-  review]): PR 5;
+- `limiter` (K on the limiter: k-002's cross-business limit and k-004's key scan, against real
+  Redis on an isolated logical database, `redteam.limiter`): PR 5;
+- `search_leg` (k-001, K on the search route): its control is RLS, built since M2, so it never
+  waits for PR 8 [leo's PR 2 review], but its runner needs planted KB rows for the two sample
+  businesses, removed afterwards as the owner, in the served suite that PR 6 reworks
+  (`tests/redteam/served.py`'s note): PR 6 [proposal, moved from PR 5 by PR 5];
 - `agent` (`/v1/agent` and its confirm route: A, C, G and H on the agent, I, J, L, k-003): PR 6;
 - `log` (F's forced exceptions on every route, through the app's `RedactingJsonFormatter`):
   PR 6, with the route stand-ins and database fixtures its runner shares with the agent path.
@@ -52,6 +55,7 @@ from vectapilot_api.redteam.scoring import Environment as Environment
 class CasePath(StrEnum):
     MASKING = "masking"
     LIMITER = "limiter"
+    SEARCH_LEG = "search_leg"
     AGENT = "agent"
     LOG = "log"
     DOCUMENT = "document"
@@ -88,6 +92,7 @@ FRONTIER: Final[Mapping[CasePath, Build]] = MappingProxyType(
     {
         CasePath.MASKING: Build.PR3,
         CasePath.LIMITER: Build.PR5,
+        CasePath.SEARCH_LEG: Build.PR6,
         CasePath.AGENT: Build.PR6,
         CasePath.LOG: Build.PR6,
         CasePath.DOCUMENT: Build.PR7,
@@ -102,6 +107,8 @@ def path_of(case: Case) -> CasePath:
         return CasePath.MASKING
     if case.surface is Surface.LOG:
         return CasePath.LOG
+    if case.category is Category.K and case.route is Route.SEARCH:
+        return CasePath.SEARCH_LEG
     if case.category is Category.K and case.route is not Route.AGENT:
         return CasePath.LIMITER
     if case.surface is Surface.DOCUMENT or case.route in (Route.EXTRACTION, Route.SCAN):
@@ -116,7 +123,7 @@ def needs(case: Case) -> tuple[HandWrite, ...]:
     path = path_of(case)
     if path in (CasePath.MASKING, CasePath.LOG):
         return (Build.H2,)
-    if path is CasePath.LIMITER:
+    if path in (CasePath.LIMITER, CasePath.SEARCH_LEG):
         return ()
     if path is CasePath.DOCUMENT or case.expect in ("urgent_handoff", "high_handoff"):
         return (Build.H1,)

@@ -335,7 +335,8 @@ def refused_by_the_api(**overrides: Any) -> ValidationError:
 def opt_in_message(setting: str) -> str:
     return (
         "api_allow_paid_llm (VECTAPILOT_API_ALLOW_PAID_LLM) must be true for the API server to use"
-        f" a paid {setting} (any but 'fake'): it has no budgets until M7"
+        f" a paid {setting} (any but 'fake'): embeddings, /v1/answer and /v1/kb/search have no"
+        " budget"
     )
 
 

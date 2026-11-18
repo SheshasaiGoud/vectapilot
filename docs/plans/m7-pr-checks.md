@@ -762,7 +762,9 @@ human steps are not M7's.
   - Controls gate a pass only: a miss stays a miss, and a soft look-alike handed off by the screen
     before any model call is an over-escalation, not "not scored". "Reached" means the check under
     test ran; J and K also prove their arrangement was armed.
-  - Every confirm-route case runs in the database environment; k-001 waits for PR 5's K runner.
+  - Every confirm-route case runs in the database environment; k-001 waits for PR 6's served-suite
+    rework [proposal, moved by PR 5: its runner plants KB rows for both sample businesses and
+    removes them as the owner, which belongs with PR 6's served suite; diego's PR 5 review].
 - **PR 2 decisions (shesha, 2026-11-17, after leo's, ananya's and noah's reviews):**
   - **G7 amended:** a hit in `create_ticket`'s summary also expires the stored pending row at once,
     through the store (not by its 900 s TTL), so confirming it with the real token returns 404;
@@ -858,6 +860,13 @@ human steps are not M7's.
     stay untouched; the `vp:` key scan.
   - A turn's reservations sum across both aliases (`small` and `large`).
   - The CI image check and `make mcp-check` still pass.
+- **PR 5 decisions (shesha, 2026-11-18, after diego's review and the mutation check):**
+  - k-001 (cross-business search) waits for PR 6, which builds its knowledge-base seeding and
+    owner-role cleanup in the served suite (its own `search_leg` path).
+  - The $0.50 per business per day placeholder stays while the businesses are synthetic; PR 6
+    decides the per-turn pre-check amount `require_budget` is given.
+  - The real-Redis tests and canaries read the settings' `redis_url` (environment or
+    `apps/api/.env`, as `tests/canary` does) and run only on logical database 15.
 
 ## PR 6 — `m7/agent-guards` (zara; leo reviews the seams, kenji the order with W11 and the router) · M · after PR 3, PR 4, PR 5
 - **Route layer (`agent/router.py`), G1 in order, as G13 describes.**

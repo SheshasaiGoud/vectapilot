@@ -159,7 +159,8 @@ def test_startup_defers_the_role_check_when_the_database_is_slow(
         await asyncio.sleep(30)
 
     monkeypatch.setattr(Database, "verify_role", hangs)
-    app = create_app(make_settings(readiness_timeout_seconds=0.1))
+    # M7 PR 5: the guards' Redis timeout is at most the readiness timeout.
+    app = create_app(make_settings(readiness_timeout_seconds=0.1, guard_redis_timeout_seconds=0.1))
 
     with TestClient(app):  # starts within the timeout instead of hanging
         assert app.state.database.role_verified is False

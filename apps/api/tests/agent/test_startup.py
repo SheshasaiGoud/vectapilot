@@ -35,7 +35,12 @@ from vectapilot_api.agent.routing import (
 from vectapilot_api.agent.service import AgentService
 from vectapilot_api.agent.types import MAX_STEPS_LIMIT
 from vectapilot_api.answer.service import AnswerService
-from vectapilot_api.config import AGENT_ROUTER_TURN_BOUND_SECONDS, Settings
+from vectapilot_api.config import (
+    AGENT_ROUTER_TURN_BOUND_SECONDS,
+    ROUTER_TIMEOUT_RULE,
+    TURN_TIMEOUT_RULE,
+    Settings,
+)
 from vectapilot_api.embeddings.base import EmbeddingSpec
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.gateway.providers.fake import FakeProvider
@@ -101,10 +106,12 @@ def test_an_attempt_longer_than_the_deadline_is_refused() -> None:
 
 
 def test_steps_that_cannot_fit_the_turn_are_refused() -> None:
-    message = "agent_turn_timeout_seconds must be >= agent_llm_deadline_seconds x agent_max_steps"
+    # M7 PR 5 (G9): each step's budget reserve and settle count too, at the Redis timeout each.
+    message = TURN_TIMEOUT_RULE
     assert message in problems(agent_max_steps=5)
-    assert message in problems(agent_turn_timeout_seconds=31.9)
-    make_settings(agent_turn_timeout_seconds=32.0)  # exactly 8 x 4 fits
+    assert message in problems(agent_turn_timeout_seconds=33.9)
+    assert message in problems(guard_redis_timeout_seconds=0.4)  # 8 x 4 + 2 x 4 x 0.4 = 35.2
+    make_settings(agent_turn_timeout_seconds=34.0)  # exactly 8 x 4 + 2 x 4 x 0.25 fits
 
 
 def test_the_step_cap_is_bounded_like_the_loops_own() -> None:
@@ -112,12 +119,13 @@ def test_the_step_cap_is_bounded_like_the_loops_own() -> None:
     text = problems(agent_max_steps=MAX_STEPS_LIMIT + 1, agent_turn_timeout_seconds=300)
     assert "agent_max_steps\n  Input should be less than or equal to 10" in text
     assert "agent_max_steps" in problems(agent_max_steps=0)
-    # 10 steps fit the request bound only with shorter steps: 10 x 4 s + a 15 s router <= 60 s.
+    # 10 steps fit the request bound only with shorter steps: 10 x 4 s + 10 x 2 x 0.25 s of Redis
+    # + a 15 s router <= 60 s.
     make_settings(
         agent_max_steps=MAX_STEPS_LIMIT,
         agent_llm_attempt_timeout_seconds=4.0,
         agent_llm_deadline_seconds=4.0,
-        agent_turn_timeout_seconds=40.0,
+        agent_turn_timeout_seconds=45.0,  # 10 x 4 + 2 x 10 x 0.25 (M7 PR 5's Redis bound)
     )
 
 
@@ -138,10 +146,7 @@ def test_the_agents_time_limits_have_upper_bounds(field: str, value: float, boun
 
 # ── The router's own limit (decided 2026-11-11, shesha, M5 PR 4 review) ─────────────────────
 
-ROUTER_BELOW_DEADLINE = (
-    "agent_router_timeout_seconds must be >= agent_llm_deadline_seconds (the router's one"
-    " fallback call)"
-)
+ROUTER_BELOW_DEADLINE = ROUTER_TIMEOUT_RULE
 OVER_THE_BOUND = (
     "agent_router_timeout_seconds + agent_turn_timeout_seconds must be <= 60"
     " (AGENT_ROUTER_TURN_BOUND_SECONDS)"
@@ -170,7 +175,13 @@ def test_the_router_timeout_must_be_a_positive_finite_number(value: object, mess
 
 def test_a_router_timeout_below_one_fallback_call_is_refused() -> None:
     assert ROUTER_BELOW_DEADLINE in problems(agent_router_timeout_seconds=7.9)
-    make_settings(agent_router_timeout_seconds=8.0)  # exactly the step deadline fits
+    # M7 PR 5 (G9, diego's review): the fallback's reserve and settle count too, at the Redis
+    # timeout each: 8 + 2 x 0.25 = 8.5.
+    assert ROUTER_BELOW_DEADLINE in problems(agent_router_timeout_seconds=8.4)
+    make_settings(agent_router_timeout_seconds=8.5)  # exactly the call and its two Redis calls
+    assert ROUTER_BELOW_DEADLINE in problems(
+        agent_router_timeout_seconds=8.5, guard_redis_timeout_seconds=0.26
+    )
 
 
 def test_the_router_and_the_turn_must_fit_the_request_bound() -> None:
