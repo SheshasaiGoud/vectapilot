@@ -51,13 +51,17 @@ def lines_of(folder: Path) -> list[ResultLine]:
     return [ResultLine.model_validate_json(line) for line in text.splitlines()]
 
 
-def test_a_dry_run_of_pr_2_reports_every_case_pending(tmp_path: Path) -> None:
+def test_a_dry_run_reports_every_case_pending_but_the_limiters_database_cases(
+    tmp_path: Path,
+) -> None:
     folder = run_dry(DATASET_DIR, io=fake_io(tmp_path))
 
     assert folder == tmp_path / "evals/reports/tmp/redteam/20261117T090000Z-fake-redteam"
     lines = lines_of(folder)
     assert [line.id for line in lines] == sorted(CASES)
-    assert {line.status for line in lines} == {"pending"}
+    # PR 5 registers the limiter: k-002 and k-004 need real Redis, which a dry run never has.
+    not_run = {line.id: line.reason for line in lines if line.status != "pending"}
+    assert not_run == {"k-002": "database_environment", "k-004": "database_environment"}
     info = RedteamRunInfo.model_validate_json((folder / RUN_FILE).read_text("utf-8"))
     assert (info.dry_run, info.cases, info.cost.total_usd) == (True, 139, Decimal(0))
     assert info.cases_reviewed == 0
@@ -73,8 +77,9 @@ def test_a_dry_run_of_pr_2_reports_every_case_pending(tmp_path: Path) -> None:
         REPLAY_LINE,
         "rules version: no data/safety yet",
         "PII generator: redteam-pii.1, seed 20261116",
-        "- pending: 139",
-        "  - pending:PR 6: 87",
+        "- pending: 137",
+        "  - pending:PR 6: 88",
+        "- not run: k-002, k-004",
         "with uncommitted changes). CI gate: not checked by this run",
         "Crisis messages: not measured",
         # noah's review: nothing scored reads "not measured", never a zero.

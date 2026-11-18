@@ -22,6 +22,7 @@ from vectapilot_api.redteam.harness import (
     register,
     run_case,
 )
+from vectapilot_api.redteam.limiter import run_limiter
 from vectapilot_api.redteam.masking import run_masking
 from vectapilot_api.redteam.plan import (
     FINAL_PENDING,
@@ -65,29 +66,34 @@ def test_every_frozen_case_has_one_path_and_one_rule_under_test() -> None:
         "answer": 26,
         "masking": 18,
         "document": 5,
-        "limiter": 3,
+        "limiter": 2,
+        "search_leg": 1,
     }
 
 
-def test_pr_3_registers_masking_only_and_every_case_is_still_pending() -> None:
-    # PR 3 registers the masking path: category E now waits for H2's body, not for a PR.
-    assert dict(RUNNERS) == {CasePath.MASKING: run_masking}
+def test_pr_5_registers_the_limiter_and_only_k_002_and_k_004_leave_pending() -> None:
+    # PR 3 registered the masking path: category E waits for H2's body, not for a PR. PR 5
+    # registers the limiter: k-002 and k-004 need no hand-write, so they take their hard label.
+    assert dict(RUNNERS) == {CasePath.MASKING: run_masking, CasePath.LIMITER: run_limiter}
     plans = {c.id: mark_plan(c, label_of(c.id), RUNNERS) for c in CASES.values()}
 
-    assert {plan.kind for plan in plans.values()} == {"pending"}
+    assert {c for c, plan in plans.items() if plan.kind != "pending"} == {"k-002", "k-004"}
+    assert plans["k-002"] == plans["k-004"] == MarkPlan("hard", None)
     assert Counter(plan.reason for plan in plans.values()) == {
-        "pending:PR 6": 87,
+        "pending:PR 6": 88,
         "pending:PR 8": 26,
         "pending:H2": 18,
         "pending:PR 7": 5,
-        "pending:PR 5": 3,
+        None: 2,
     }
     assert {c.id for c in CASES.values() if plans[c.id].reason == "pending:H2"} == {
         c.id for c in CASES.values() if c.category is Category.E
     }
     assert plans["f-002"].reason == "pending:PR 6"  # logs: the formatter's PR, whatever route
-    # leo's review: k-001's control is RLS, built since M2; it waits only for PR 5's K runner.
-    assert plans["k-001"].reason == "pending:PR 5"
+    # leo's review: k-001's control is RLS, built since M2, so never PR 8; its runner plants KB
+    # rows in the served suite PR 6 reworks (moved from PR 5 by PR 5, a proposal).
+    assert path_of(CASES["k-001"]) is CasePath.SEARCH_LEG
+    assert plans["k-001"].reason == "pending:PR 6"
 
 
 def test_the_reasons_are_a_closed_list_and_final_allows_only_m5_h1() -> None:
@@ -218,8 +224,8 @@ def test_a_runner_gets_the_filled_case_and_its_result_is_scored() -> None:
 def test_a_path_registers_once() -> None:
     runner = runner_returning(lambda f: CaseResult(case_id=f.case.id, outcome="allowed"))
     try:
-        register(CasePath.LIMITER, runner)
+        register(CasePath.DOCUMENT, runner)
         with pytest.raises(ValueError, match="already has a runner"):
-            register(CasePath.LIMITER, runner)
+            register(CasePath.DOCUMENT, runner)
     finally:
-        RUNNERS.pop(CasePath.LIMITER, None)
+        RUNNERS.pop(CasePath.DOCUMENT, None)

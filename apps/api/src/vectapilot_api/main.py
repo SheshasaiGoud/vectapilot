@@ -40,6 +40,7 @@ from vectapilot_api.gateway.gateway import build_gateway
 from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.gateway.providers.fake import FakeProvider
 from vectapilot_api.guards.config import load_guard_dir
+from vectapilot_api.guards.limits import Limiter, LimitPolicy, RedisLimiter
 from vectapilot_api.guards.redact import RequestScope
 from vectapilot_api.guards.selftest import SelftestStatus, run_selftest
 from vectapilot_api.health import router as health_router
@@ -105,6 +106,7 @@ def create_app(
     llm_provider: Provider | None = None,
     agent_provider: Provider | None = None,
     extraction_provider: FakeProvider | None = None,
+    limiter: Limiter | None = None,
 ) -> FastAPI:
     """Build the app. A factory (not a module-level `app`) so tests can pass their own settings.
 
@@ -119,6 +121,11 @@ def create_app(
     paid model, and anything else is a TypeError. Without it the fake has an empty script, so the
     model step fails and the extraction is stored all-review (fail closed, E3).
 
+    `limiter` replaces the Redis limiter and budget (M7 PR 5, G9), as `llm_provider` replaces the
+    provider: unit tests pass `guards.fake_limiter.FakeLimiter`, since they run with a dead Redis.
+    Without it, `RedisLimiter` is built on the app's lazy Redis client in the lifespan (no
+    connection at startup). Nothing reads it until PR 6 wires the routes.
+
     Every paid provider in Settings (`llm_provider`, `embeddings_provider`) needs
     `api_allow_paid_llm` (ADR 0006 Exposure, 2026-10-22 and D9 2026-10-23), injected provider or
     not: the rule reads Settings only.
@@ -130,9 +137,9 @@ def create_app(
     extraction_fake = FakeProvider() if extraction_provider is None else extraction_provider
     # M7 PR 3 (G10): the app's lines are redacted; the M1 CLI and the MCP server keep plain JSON.
     configure_logging(settings.log_level, redact=True)
-    # Fail fast (ADR 0006, amended 2026-10-22 and 2026-10-23): until M7 adds budgets, every answer
-    # and every search is an uncapped paid call, so a paid provider without the opt-in stops the
-    # server here.
+    # Fail fast (ADR 0006, amended 2026-10-22 and 2026-10-23): M7's budgets cover only the guarded
+    # routes' model calls (G9), so embeddings, and every answer and search while `guard_answer` is
+    # off, stay uncapped paid calls: a paid provider without the opt-in stops the server here.
     settings.require_api_paid_provider_opt_in()
     # Fail fast (M7 PR 1, G4): outside local, test and ci, a guarded route that serves businesses
     # needs the guard folder. In local, test and ci the app starts, and those routes will hand off
@@ -223,6 +230,17 @@ def create_app(
         app.state.db_engine = engine
         app.state.database = database
         app.state.redis = Redis.from_url(str(settings.redis_url.get_secret_value()))
+        # M7 PR 5 (G9): limits and budgets on the same lazy client; every call is bounded by
+        # `guard_redis_timeout_seconds` and fails closed. Read by the routes from PR 6.
+        app.state.limiter = (
+            limiter
+            if limiter is not None
+            else RedisLimiter(
+                app.state.redis,
+                LimitPolicy.from_settings(settings),
+                timeout_s=settings.guard_redis_timeout_seconds,
+            )
+        )
         # Embedding batches retry with the gateway's policy (ADR 0006's bounds: one retry policy
         # for every provider call); each request keeps its own timeout.
         policy = settings.llm_retry_policy()

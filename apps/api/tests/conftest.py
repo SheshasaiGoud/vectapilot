@@ -71,6 +71,14 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "guard_routes": "on",
     "guard_answer": "off",
     "guard_config_dir": None,
+    # Far above test volume (M7 PR 5's plan; diego's review): the canary posts one BAIT_CUSTOMER
+    # throughout, and CI's integration job shares one Redis database across tests. The plan's
+    # placeholders stay the Settings defaults (`test_limit_settings.py` pins them); a test that
+    # needs a small limit passes it.
+    "guard_limit_business_per_minute": 100_000,
+    "guard_limit_customer_per_minute": 100_000,
+    "guard_budget_usd_per_business_per_day": "100",
+    "guard_redis_timeout_seconds": 0.25,
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 

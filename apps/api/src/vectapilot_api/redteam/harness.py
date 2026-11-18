@@ -8,8 +8,9 @@ pytest (`tests/redteam/test_cases.py`, test id `test_case[<id>]`) and `redteam r
 `register` (PR 3 masking, PR 5 the limiter, PR 6 the agent and the logs, PR 7 documents, PR 8 the
 answer path). A case whose path has no runner raises `PendingHandWrite` with
 `pending:<PR n>` before anything runs (plan, "Design points left to their PRs"). PR 3 registers
-the masking path (`masking.run_masking`, category E against H2's `mask_pii`); every other path
-is still pending on its PR. A runner that reports `guard_error` with `NotImplementedError`
+the masking path (`masking.run_masking`, category E against H2's `mask_pii`) and PR 5 the limiter
+path (`limiter.run_limiter`, k-002 and k-004 against real Redis); every other path is still
+pending on its PR. A runner that reports `guard_error` with `NotImplementedError`
 reached a `[HAND-WRITE]` stub: pending on the first unwritten hand-write the case needs
 (`plan.unwritten`). If none is unwritten, that hand-off is a plain miss.
 
@@ -24,6 +25,7 @@ from typing import Final, Protocol
 
 from vectapilot_api.guards.types import DecidedBy
 from vectapilot_api.redteam.cases import Case, Label
+from vectapilot_api.redteam.limiter import run_limiter
 from vectapilot_api.redteam.masking import run_masking
 from vectapilot_api.redteam.pii import PiiGenerator
 from vectapilot_api.redteam.plan import (
@@ -93,6 +95,7 @@ def register(path: CasePath, runner: Runner) -> None:
 
 
 register(CasePath.MASKING, run_masking)  # M7 PR 3
+register(CasePath.LIMITER, run_limiter)  # M7 PR 5
 
 
 def reached_a_stub(result: CaseResult) -> bool:
