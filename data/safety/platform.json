@@ -1,0 +1,1430 @@
+{
+  "synthetic": true,
+  "review": "not professionally reviewed (Q8); agent-drafted (zara-safety) and synthetic",
+  "scripts": [
+    {
+      "language": "hi",
+      "ranges": [
+        {
+          "first": "U+0900",
+          "last": "U+097F"
+        }
+      ]
+    },
+    {
+      "language": "te",
+      "ranges": [
+        {
+          "first": "U+0C00",
+          "last": "U+0C7F"
+        }
+      ]
+    }
+  ],
+  "negatives": [
+    {
+      "language": "en",
+      "text": "Is the chest of drawers in the waiting room for sale?"
+    },
+    {
+      "language": "en",
+      "text": "Can I paint the waiting room door this weekend?"
+    },
+    {
+      "language": "en",
+      "text": "Ignore the earlier price, it was a typo."
+    },
+    {
+      "language": "en",
+      "text": "Can I book a blood test for Monday morning?"
+    },
+    {
+      "language": "en",
+      "text": "What time does the breathing exercise class start?"
+    },
+    {
+      "language": "en",
+      "text": "Which size of litter tray suits a 6 kg cat?"
+    },
+    {
+      "language": "en",
+      "text": "Do you have dog food for sensitive stomachs?"
+    },
+    {
+      "language": "en",
+      "text": "Can I return the harness if it is not the right fit?"
+    },
+    {
+      "language": "en",
+      "text": "Is the non-toxic chew toy back in stock?"
+    },
+    {
+      "language": "en",
+      "text": "Which doctors are available on Saturday?"
+    },
+    {
+      "language": "hi",
+      "text": "क्या रविवार को क्लिनिक खुला है?"
+    },
+    {
+      "language": "hi",
+      "text": "खून की जांच की फीस कितनी है?"
+    },
+    {
+      "language": "hi",
+      "text": "kal subah appointment mil sakta hai kya?"
+    },
+    {
+      "language": "hi",
+      "text": "meri report kab tak taiyaar hogi?"
+    }
+  ],
+  "red_flags": [
+    {
+      "id": "pf_this_is_an_emergency",
+      "language": "en",
+      "kind": "phrase",
+      "text": "this is an emergency",
+      "intent": "emergency",
+      "source": {
+        "section": "3.5",
+        "item": "Emergency, safety risk or distress"
+      }
+    },
+    {
+      "id": "pf_its_an_emergency",
+      "language": "en",
+      "kind": "phrase",
+      "text": "it's an emergency",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_this_is_an_emergency",
+        "rule": "the same words, contracted"
+      }
+    },
+    {
+      "id": "pf_its_an_emergency_typed",
+      "language": "en",
+      "kind": "phrase",
+      "text": "its an emergency",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_this_is_an_emergency",
+        "rule": "the contraction typed without its apostrophe"
+      }
+    },
+    {
+      "id": "pf_medical_emergency",
+      "language": "en",
+      "kind": "phrase",
+      "text": "medical emergency",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_this_is_an_emergency",
+        "rule": "a named emergency"
+      }
+    },
+    {
+      "id": "pf_please_help_now",
+      "language": "en",
+      "kind": "phrase",
+      "text": "please help now",
+      "intent": "emergency",
+      "source": {
+        "section": "3.5",
+        "item": "Emergency, safety risk or distress"
+      }
+    },
+    {
+      "id": "pf_help_me_now",
+      "language": "en",
+      "kind": "phrase",
+      "text": "help me now",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_please_help_now",
+        "rule": "the same plea for immediate help"
+      }
+    },
+    {
+      "id": "pf_need_help_urgently",
+      "language": "en",
+      "kind": "phrase",
+      "text": "need help urgently",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_please_help_now",
+        "rule": "the same plea for immediate help"
+      }
+    },
+    {
+      "id": "pf_call_an_ambulance",
+      "language": "en",
+      "kind": "phrase",
+      "text": "call an ambulance",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_this_is_an_emergency",
+        "rule": "asking for emergency transport"
+      }
+    },
+    {
+      "id": "pf_need_an_ambulance",
+      "language": "en",
+      "kind": "phrase",
+      "text": "need an ambulance",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_this_is_an_emergency",
+        "rule": "asking for emergency transport"
+      }
+    },
+    {
+      "id": "pf_emergency_hai_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "इमरजेंसी है",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_this_is_an_emergency",
+        "rule": "the same meaning in Hindi (Devanagari); also inside यह/ये इमरजेंसी है"
+      }
+    },
+    {
+      "id": "pf_turant_madad_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "तुरंत मदद चाहिए",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_please_help_now",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_jaldi_madad_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "जल्दी मदद करो",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_please_help_now",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_ambulance_bulao_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "एम्बुलेंस",
+          "एंबुलेंस"
+        ],
+        [
+          "बुलाओ",
+          "बुलाइए",
+          "भेजो",
+          "भेजिए",
+          "चाहिए"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_call_an_ambulance",
+        "rule": "the same meaning in Hindi (Devanagari), in either spelling, within 5 words"
+      }
+    },
+    {
+      "id": "pf_emergency_hai_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "emergency hai",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_this_is_an_emergency",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_turant_madad_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "turant madad chahiye",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_please_help_now",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_jaldi_madad_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "jaldi madad karo",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_please_help_now",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_ambulance_bulao_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "ambulance"
+        ],
+        [
+          "bulao",
+          "bulaiye",
+          "bhejo",
+          "bhejiye",
+          "chahiye"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_call_an_ambulance",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17), within 5 words"
+      }
+    },
+    {
+      "id": "pf_unconscious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "unconscious",
+      "intent": "emergency",
+      "source": {
+        "section": "3.5",
+        "item": "Emergency, safety risk or distress"
+      }
+    },
+    {
+      "id": "pf_unresponsive",
+      "language": "en",
+      "kind": "phrase",
+      "text": "unresponsive",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_unconscious",
+        "rule": "the same, as staff say it"
+      }
+    },
+    {
+      "id": "pf_behosh_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "बेहोश",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_unconscious",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_behosh_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "behosh",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_unconscious",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_not_breathing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "not breathing",
+      "intent": "emergency",
+      "source": {
+        "section": "3.5",
+        "item": "Emergency, safety risk or distress"
+      }
+    },
+    {
+      "id": "pf_is_choking",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is choking",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_not_breathing",
+        "rule": "a blocked airway (not 'choking hazard', a product label)"
+      }
+    },
+    {
+      "id": "pf_choking_on",
+      "language": "en",
+      "kind": "phrase",
+      "text": "choking on",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "pf_not_breathing",
+        "rule": "a blocked airway (not 'choking hazard', a product label)"
+      }
+    },
+    {
+      "id": "pf_severe_bleeding",
+      "language": "en",
+      "kind": "phrase",
+      "text": "severe bleeding",
+      "intent": "emergency",
+      "source": {
+        "section": "3.5",
+        "item": "Emergency, safety risk or distress"
+      }
+    },
+    {
+      "id": "pf_swallowed_object",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "swallowed",
+          "ate",
+          "eaten",
+          "drank",
+          "drunk"
+        ],
+        [
+          "battery",
+          "batteries",
+          "magnet",
+          "magnets",
+          "bleach",
+          "poison",
+          "pesticide",
+          "kerosene",
+          "phenyl",
+          "detergent"
+        ]
+      ],
+      "window": 7,
+      "intent": "emergency",
+      "source": {
+        "section": "3.5",
+        "item": "Emergency, safety risk or distress"
+      }
+    }
+  ],
+  "injection": [
+    {
+      "id": "pf_ignore_instructions",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "ignore",
+          "disregard",
+          "override",
+          "bypass"
+        ],
+        [
+          "instructions",
+          "instruction",
+          "prompt",
+          "guidelines"
+        ]
+      ],
+      "window": 6,
+      "source": {
+        "rule": "G7: an instruction to override or drop the assistant's rules"
+      }
+    },
+    {
+      "id": "pf_ignore_rules",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "ignore",
+          "disregard",
+          "override",
+          "bypass"
+        ],
+        [
+          "rules",
+          "restrictions",
+          "guardrails",
+          "safeguards"
+        ]
+      ],
+      "window": 6,
+      "source": {
+        "rule": "G7: an instruction to override or drop the assistant's rules"
+      }
+    },
+    {
+      "id": "pf_new_instructions",
+      "language": "en",
+      "kind": "phrase",
+      "text": "new instructions",
+      "source": {
+        "rule": "G7: an instruction to override or drop the assistant's rules"
+      }
+    },
+    {
+      "id": "pf_system_prompt",
+      "language": "en",
+      "kind": "phrase",
+      "text": "system prompt",
+      "source": {
+        "rule": "G7: a request for the assistant's hidden prompt or configuration"
+      }
+    },
+    {
+      "id": "pf_hidden_instructions",
+      "language": "en",
+      "kind": "phrase",
+      "text": "hidden instructions",
+      "source": {
+        "rule": "G7: a request for the assistant's hidden prompt or configuration"
+      }
+    },
+    {
+      "id": "pf_developer_mode",
+      "language": "en",
+      "kind": "phrase",
+      "text": "developer mode",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_admin_mode",
+      "language": "en",
+      "kind": "phrase",
+      "text": "admin mode",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_admin_override",
+      "language": "en",
+      "kind": "phrase",
+      "text": "admin override",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_jailbreak",
+      "language": "en",
+      "kind": "phrase",
+      "text": "jailbreak",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_do_anything_now",
+      "language": "en",
+      "kind": "phrase",
+      "text": "do anything now",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_pretend_you_are",
+      "language": "en",
+      "kind": "phrase",
+      "text": "pretend you are",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_pretend_to_be",
+      "language": "en",
+      "kind": "phrase",
+      "text": "pretend to be",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_from_now_on_you_are",
+      "language": "en",
+      "kind": "phrase",
+      "text": "from now on you are",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_role_play_as",
+      "language": "en",
+      "kind": "phrase",
+      "text": "role play as",
+      "source": {
+        "rule": "G7: a role-play, persona or mode switch aimed at the assistant"
+      }
+    },
+    {
+      "id": "pf_if_you_are_an_ai",
+      "language": "en",
+      "kind": "phrase",
+      "text": "if you are an ai",
+      "source": {
+        "rule": "G7: text inside data that addresses the AI instead of the reader"
+      }
+    },
+    {
+      "id": "pf_note_to_the_assistant",
+      "language": "en",
+      "kind": "phrase",
+      "text": "note to the assistant",
+      "source": {
+        "rule": "G7: text inside data that addresses the AI instead of the reader"
+      }
+    },
+    {
+      "id": "pf_note_to_ai",
+      "language": "en",
+      "kind": "phrase",
+      "text": "note to ai",
+      "source": {
+        "rule": "G7: text inside data that addresses the AI instead of the reader"
+      }
+    },
+    {
+      "id": "pf_assistant_must",
+      "language": "en",
+      "kind": "phrase",
+      "text": "the assistant must",
+      "source": {
+        "rule": "G7: text inside data that addresses the AI instead of the reader"
+      }
+    },
+    {
+      "id": "pf_system_note",
+      "language": "en",
+      "kind": "phrase",
+      "text": "system note",
+      "source": {
+        "rule": "G7: text inside data that addresses the AI instead of the reader"
+      }
+    },
+    {
+      "id": "pf_tell_the_customer",
+      "language": "en",
+      "kind": "phrase",
+      "text": "tell the customer",
+      "source": {
+        "rule": "G7: text inside data that addresses the AI instead of the reader"
+      }
+    },
+    {
+      "id": "pf_ignore_customer",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "ignore",
+          "disregard",
+          "override"
+        ],
+        [
+          "customer",
+          "customers",
+          "user",
+          "choice"
+        ]
+      ],
+      "window": 5,
+      "source": {
+        "rule": "G7: text inside data that overrides the customer's own choice or request"
+      }
+    },
+    {
+      "id": "pf_skip_confirmation",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "skip",
+          "bypass",
+          "without"
+        ],
+        [
+          "confirmation",
+          "confirming"
+        ]
+      ],
+      "window": 4,
+      "source": {
+        "rule": "G7: asking to act without the customer's confirmation (ADR 0016 W1: no write without it)"
+      }
+    },
+    {
+      "id": "pf_nirdesh_andekha_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "निर्देश",
+          "निर्देशों",
+          "नियम",
+          "नियमों"
+        ],
+        [
+          "अनदेखा",
+          "नज़रअंदाज़"
+        ]
+      ],
+      "window": 5,
+      "source": {
+        "synonym_of": "pf_ignore_instructions",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_system_prompt_batao_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "सिस्टम प्रॉम्प्ट",
+      "source": {
+        "synonym_of": "pf_system_prompt",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_nirdesh_andekha_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "nirdesh",
+          "niyam",
+          "instructions",
+          "rules"
+        ],
+        [
+          "ignore",
+          "andekha",
+          "nazarandaz",
+          "nazarandaaz"
+        ]
+      ],
+      "window": 5,
+      "source": {
+        "synonym_of": "pf_ignore_instructions",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    }
+  ],
+  "output": [
+    {
+      "id": "pf_i_have_booked",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "i",
+          "we"
+        ],
+        [
+          "have",
+          "ve"
+        ],
+        [
+          "booked",
+          "cancelled",
+          "canceled",
+          "rescheduled",
+          "refunded",
+          "created",
+          "processed"
+        ]
+      ],
+      "window": 4,
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_has_been_booked",
+      "language": "en",
+      "kind": "phrase",
+      "text": "has been booked",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_has_been_cancelled",
+      "language": "en",
+      "kind": "phrase",
+      "text": "has been cancelled",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_has_been_rescheduled",
+      "language": "en",
+      "kind": "phrase",
+      "text": "has been rescheduled",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_refund_has_been_issued",
+      "language": "en",
+      "kind": "phrase",
+      "text": "refund has been issued",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_your_booking_is_confirmed",
+      "language": "en",
+      "kind": "phrase",
+      "text": "your booking is confirmed",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_has_been_confirmed",
+      "language": "en",
+      "kind": "phrase",
+      "text": "has been confirmed",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_is_booked",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is booked",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_is_confirmed",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is confirmed",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_is_cancelled",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is cancelled",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_is_canceled",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is canceled",
+      "category": "success_claim",
+      "source": {
+        "synonym_of": "pf_is_cancelled",
+        "rule": "the US spelling"
+      }
+    },
+    {
+      "id": "pf_is_rescheduled",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is rescheduled",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_i_booked",
+      "language": "en",
+      "kind": "phrase",
+      "text": "i booked",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_i_cancelled",
+      "language": "en",
+      "kind": "phrase",
+      "text": "i cancelled",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_i_rescheduled",
+      "language": "en",
+      "kind": "phrase",
+      "text": "i rescheduled",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_we_booked",
+      "language": "en",
+      "kind": "phrase",
+      "text": "we booked",
+      "category": "success_claim",
+      "source": {
+        "rule": "G8: a claim that a write happened; the loop cannot confirm one (W1)"
+      }
+    },
+    {
+      "id": "pf_book_kar_diya_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "बुक कर दिया",
+      "category": "success_claim",
+      "source": {
+        "synonym_of": "pf_has_been_booked",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_radd_kar_diya_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "रद्द कर दिया",
+      "category": "success_claim",
+      "source": {
+        "synonym_of": "pf_has_been_cancelled",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_ho_gaya_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "हो",
+          "बन"
+        ],
+        [
+          "गया",
+          "गई",
+          "चुका",
+          "चुकी"
+        ],
+        [
+          "बुकिंग",
+          "टिकट",
+          "रिफ़ंड",
+          "अपॉइंटमेंट",
+          "रिटर्न",
+          "कैंसिल"
+        ]
+      ],
+      "window": 6,
+      "category": "success_claim",
+      "source": {
+        "synonym_of": "pf_has_been_booked",
+        "rule": "the same meaning in Hindi (Devanagari): a completion form (हो गया, बन गया, हो चुका) next to a write noun"
+      }
+    },
+    {
+      "id": "pf_book_kar_diya_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "book kar diya",
+      "category": "success_claim",
+      "source": {
+        "synonym_of": "pf_has_been_booked",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_cancel_kar_diya_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "cancel kar diya",
+      "category": "success_claim",
+      "source": {
+        "synonym_of": "pf_has_been_cancelled",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_ho_gaya_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "ho",
+          "ban"
+        ],
+        [
+          "gaya",
+          "gayi",
+          "gai",
+          "chuka",
+          "chuki"
+        ],
+        [
+          "booking",
+          "ticket",
+          "refund",
+          "appointment",
+          "reschedule",
+          "cancel"
+        ]
+      ],
+      "window": 6,
+      "category": "success_claim",
+      "source": {
+        "synonym_of": "pf_has_been_booked",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17): a completion form next to a write noun"
+      }
+    },
+    {
+      "id": "pf_take_tablets",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "take",
+          "give",
+          "taking",
+          "giving"
+        ],
+        [
+          "one",
+          "two",
+          "three",
+          "four",
+          "half",
+          "quarter",
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        [
+          "tablet",
+          "tablets",
+          "pill",
+          "pills",
+          "drops",
+          "capsule",
+          "capsules",
+          "mg",
+          "spoon",
+          "spoonful",
+          "teaspoon"
+        ]
+      ],
+      "window": 5,
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_twice_a_day",
+      "language": "en",
+      "kind": "phrase",
+      "text": "twice a day",
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_three_times_a_day",
+      "language": "en",
+      "kind": "phrase",
+      "text": "three times a day",
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_once_a_day",
+      "language": "en",
+      "kind": "phrase",
+      "text": "once a day",
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_twice_daily",
+      "language": "en",
+      "kind": "phrase",
+      "text": "twice daily",
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_try_giving",
+      "language": "en",
+      "kind": "phrase",
+      "text": "try giving",
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_try_taking",
+      "language": "en",
+      "kind": "phrase",
+      "text": "try taking",
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_recommend_taking",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "recommend",
+          "suggest",
+          "advise"
+        ],
+        [
+          "taking",
+          "giving"
+        ]
+      ],
+      "window": 3,
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_goli_lein_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "गोली",
+          "गोलियां",
+          "दवा",
+          "दवाई",
+          "कैप्सूल"
+        ],
+        [
+          "लें",
+          "लीजिए",
+          "खाएं",
+          "खाइए",
+          "दें",
+          "दीजिए"
+        ]
+      ],
+      "window": 3,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_take_tablets",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_din_mein_baar_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "दिन"
+        ],
+        [
+          "एक",
+          "दो",
+          "तीन",
+          "चार"
+        ],
+        [
+          "बार"
+        ],
+        [
+          "गोली",
+          "गोलियां",
+          "दवा",
+          "दवाई",
+          "लें",
+          "खाएं",
+          "दें",
+          "खिलाएं",
+          "पिलाएं"
+        ]
+      ],
+      "window": 6,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_twice_a_day",
+        "rule": "the same meaning in Hindi (Devanagari), with a medicine or dosing word"
+      }
+    },
+    {
+      "id": "pf_goli_lo_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "goli",
+          "dawa",
+          "dawai",
+          "dava",
+          "davai"
+        ],
+        [
+          "lo",
+          "lijiye",
+          "khao",
+          "khaiye",
+          "dijiye",
+          "lena"
+        ]
+      ],
+      "window": 3,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_take_tablets",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_din_mein_baar_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "din"
+        ],
+        [
+          "ek",
+          "do",
+          "teen",
+          "char"
+        ],
+        [
+          "baar"
+        ],
+        [
+          "goli",
+          "dawa",
+          "dawai",
+          "lein",
+          "lena",
+          "khayein",
+          "khaiye",
+          "dein",
+          "dijiye",
+          "lijiye"
+        ]
+      ],
+      "window": 6,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_twice_a_day",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17), with a medicine or dosing word"
+      }
+    },
+    {
+      "id": "pf_idiot",
+      "language": "en",
+      "kind": "phrase",
+      "text": "idiot",
+      "category": "abuse",
+      "source": {
+        "rule": "D2 (i): a mild insult in model text"
+      }
+    },
+    {
+      "id": "pf_idiots",
+      "language": "en",
+      "kind": "phrase",
+      "text": "idiots",
+      "category": "abuse",
+      "source": {
+        "rule": "D2 (i): a mild insult in model text"
+      }
+    },
+    {
+      "id": "pf_stupid",
+      "language": "en",
+      "kind": "phrase",
+      "text": "stupid",
+      "category": "abuse",
+      "source": {
+        "rule": "D2 (i): a mild insult in model text"
+      }
+    },
+    {
+      "id": "pf_moron",
+      "language": "en",
+      "kind": "phrase",
+      "text": "moron",
+      "category": "abuse",
+      "source": {
+        "rule": "D2 (i): a mild insult in model text"
+      }
+    },
+    {
+      "id": "pf_shut_up",
+      "language": "en",
+      "kind": "phrase",
+      "text": "shut up",
+      "category": "abuse",
+      "source": {
+        "rule": "D2 (i): a mild insult in model text"
+      }
+    },
+    {
+      "id": "pf_useless_staff",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "useless",
+          "incompetent",
+          "pathetic"
+        ],
+        [
+          "doctor",
+          "doctors",
+          "vet",
+          "vets",
+          "staff",
+          "team",
+          "clinic"
+        ]
+      ],
+      "window": 3,
+      "category": "abuse",
+      "source": {
+        "rule": "D2 (i): a mild insult in model text"
+      }
+    },
+    {
+      "id": "pf_bewakoof_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "बेवकूफ",
+      "category": "abuse",
+      "source": {
+        "synonym_of": "pf_idiot",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_moorkh_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "मूर्ख",
+      "category": "abuse",
+      "source": {
+        "synonym_of": "pf_idiot",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_chup_raho_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "चुप रहो",
+      "category": "abuse",
+      "source": {
+        "synonym_of": "pf_shut_up",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_bakwas_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "बकवास",
+      "category": "abuse",
+      "source": {
+        "synonym_of": "pf_stupid",
+        "rule": "nonsense, in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "pf_bewakoof_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "bewakoof",
+      "category": "abuse",
+      "source": {
+        "synonym_of": "pf_idiot",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_bevkoof_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "bevkoof",
+      "category": "abuse",
+      "source": {
+        "synonym_of": "pf_idiot",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_chup_raho_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "chup raho",
+      "category": "abuse",
+      "source": {
+        "synonym_of": "pf_shut_up",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "pf_bakwas_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "bakwas",
+      "category": "abuse",
+      "source": {
+        "synonym_of": "pf_stupid",
+        "rule": "nonsense, in romanised Hindi"
+      }
+    }
+  ]
+}

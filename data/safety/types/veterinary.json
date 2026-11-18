@@ -1,0 +1,1302 @@
+{
+  "business_type": "veterinary",
+  "synthetic": true,
+  "review": "not professionally reviewed (Q8); agent-drafted (zara-safety) and synthetic",
+  "not_covered_categories": [
+    "self_harm"
+  ],
+  "red_flags": [
+    {
+      "id": "vet_rat_poison",
+      "language": "en",
+      "kind": "phrase",
+      "text": "rat poison",
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "suspected poisoning or toxic ingestion"
+      }
+    },
+    {
+      "id": "vet_rat_killer",
+      "language": "en",
+      "kind": "phrase",
+      "text": "rat killer",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_rat_poison",
+        "rule": "the same product, as shops name it"
+      }
+    },
+    {
+      "id": "vet_poisoning",
+      "language": "en",
+      "kind": "phrase",
+      "text": "poisoning",
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "suspected poisoning or toxic ingestion"
+      }
+    },
+    {
+      "id": "vet_poisoned",
+      "language": "en",
+      "kind": "phrase",
+      "text": "poisoned",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_poisoning",
+        "rule": "the same, as a verb"
+      }
+    },
+    {
+      "id": "vet_ate_toxic",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "ate",
+          "eaten",
+          "eat",
+          "eats",
+          "eating",
+          "swallowed",
+          "chewed",
+          "licked",
+          "ingested",
+          "drank"
+        ],
+        [
+          "poison",
+          "chocolate",
+          "chocolates",
+          "grapes",
+          "grape",
+          "raisins",
+          "raisin",
+          "lily",
+          "lilies",
+          "xylitol",
+          "onion",
+          "onions"
+        ]
+      ],
+      "window": 7,
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "suspected poisoning or toxic ingestion"
+      }
+    },
+    {
+      "id": "vet_ate_medicine",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "ate",
+          "eaten",
+          "eat",
+          "eats",
+          "eating",
+          "swallowed",
+          "chewed",
+          "licked",
+          "ingested",
+          "drank"
+        ],
+        [
+          "medicine",
+          "medicines",
+          "pill",
+          "pills",
+          "tablet",
+          "tablets",
+          "paracetamol",
+          "ibuprofen",
+          "painkiller",
+          "painkillers"
+        ]
+      ],
+      "window": 7,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_ate_toxic",
+        "rule": "a human medicine taken in; an ingestion verb and its object within 7 words (the object can carry a determiner, a quantity and adjectives)"
+      }
+    },
+    {
+      "id": "vet_ate_chemical",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "ate",
+          "eaten",
+          "eat",
+          "eats",
+          "eating",
+          "swallowed",
+          "chewed",
+          "licked",
+          "ingested",
+          "drank"
+        ],
+        [
+          "antifreeze",
+          "rodenticide",
+          "bleach",
+          "pesticide",
+          "insecticide",
+          "detergent",
+          "battery",
+          "batteries"
+        ]
+      ],
+      "window": 7,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_ate_toxic",
+        "rule": "a household chemical taken in; an ingestion verb and its object within 7 words (the object can carry a determiner, a quantity and adjectives)"
+      }
+    },
+    {
+      "id": "vet_got_into",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "got"
+        ],
+        [
+          "into"
+        ],
+        [
+          "poison",
+          "chocolate",
+          "chocolates",
+          "medicine",
+          "medicines",
+          "pills",
+          "tablets",
+          "antifreeze",
+          "bleach",
+          "xylitol",
+          "grapes",
+          "raisins"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_ate_toxic",
+        "rule": "got into a toxic product"
+      }
+    },
+    {
+      "id": "vet_difficulty_breathing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "difficulty breathing",
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "difficulty breathing"
+      }
+    },
+    {
+      "id": "vet_breathing_near",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "breathe",
+          "breathes",
+          "breathing",
+          "breath"
+        ],
+        [
+          "difficulty",
+          "difficult",
+          "trouble",
+          "struggle",
+          "struggles",
+          "struggling",
+          "hard",
+          "problem",
+          "problems"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_difficulty_breathing",
+        "rule": "a breathing word and a difficulty word within 5 words"
+      }
+    },
+    {
+      "id": "vet_breathing_cannot",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "breathe",
+          "breathes",
+          "breathing",
+          "breath"
+        ],
+        [
+          "cannot",
+          "cant",
+          "couldnt",
+          "unable",
+          "stopped",
+          "stopping",
+          "gasping"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_difficulty_breathing",
+        "rule": "a breathing word and an inability word within 5 words"
+      }
+    },
+    {
+      "id": "vet_cant_breathe",
+      "language": "en",
+      "kind": "phrase",
+      "text": "can't breathe",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_difficulty_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "vet_not_breathing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "not breathing",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_difficulty_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "vet_choking",
+      "language": "en",
+      "kind": "phrase",
+      "text": "choking",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_difficulty_breathing",
+        "rule": "a blocked airway"
+      }
+    },
+    {
+      "id": "vet_seizures",
+      "language": "en",
+      "kind": "phrase",
+      "text": "seizures",
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "seizures"
+      }
+    },
+    {
+      "id": "vet_seizure",
+      "language": "en",
+      "kind": "phrase",
+      "text": "seizure",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "the singular"
+      }
+    },
+    {
+      "id": "vet_seizing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "seizing",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "the same, as a verb"
+      }
+    },
+    {
+      "id": "vet_convulsing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "convulsing",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "another word for a seizure"
+      }
+    },
+    {
+      "id": "vet_convulsions",
+      "language": "en",
+      "kind": "phrase",
+      "text": "convulsions",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "another word for seizures"
+      }
+    },
+    {
+      "id": "vet_having_a_fit",
+      "language": "en",
+      "kind": "phrase",
+      "text": "having a fit",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "a seizure, said plainly"
+      }
+    },
+    {
+      "id": "vet_had_a_fit",
+      "language": "en",
+      "kind": "phrase",
+      "text": "had a fit",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "a seizure, said plainly"
+      }
+    },
+    {
+      "id": "vet_having_fits",
+      "language": "en",
+      "kind": "phrase",
+      "text": "having fits",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "a seizure, said plainly"
+      }
+    },
+    {
+      "id": "vet_collapsed",
+      "language": "en",
+      "kind": "phrase",
+      "text": "collapsed",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "a sudden collapse, as urgent as a seizure"
+      }
+    },
+    {
+      "id": "vet_collapsing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "collapsing",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_seizures",
+        "rule": "a sudden collapse, as urgent as a seizure"
+      }
+    },
+    {
+      "id": "vet_collapse",
+      "language": "en",
+      "kind": "phrase",
+      "text": "collapse",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_collapsed",
+        "rule": "the same, as a noun or verb"
+      }
+    },
+    {
+      "id": "vet_collapses",
+      "language": "en",
+      "kind": "phrase",
+      "text": "collapses",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_collapsed",
+        "rule": "the same, as a verb"
+      }
+    },
+    {
+      "id": "vet_unconscious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "unconscious",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_collapsed",
+        "rule": "a collapse with loss of consciousness"
+      }
+    },
+    {
+      "id": "vet_unresponsive",
+      "language": "en",
+      "kind": "phrase",
+      "text": "unresponsive",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_collapsed",
+        "rule": "a collapse with loss of consciousness"
+      }
+    },
+    {
+      "id": "vet_fainted",
+      "language": "en",
+      "kind": "phrase",
+      "text": "fainted",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_collapsed",
+        "rule": "a brief collapse"
+      }
+    },
+    {
+      "id": "vet_passed_out",
+      "language": "en",
+      "kind": "phrase",
+      "text": "passed out",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_collapsed",
+        "rule": "a brief collapse"
+      }
+    },
+    {
+      "id": "vet_wont_wake_up",
+      "language": "en",
+      "kind": "phrase",
+      "text": "won't wake up",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_collapsed",
+        "rule": "a collapse with loss of consciousness, said plainly"
+      }
+    },
+    {
+      "id": "vet_not_waking_up",
+      "language": "en",
+      "kind": "phrase",
+      "text": "not waking up",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_collapsed",
+        "rule": "a collapse with loss of consciousness, said plainly"
+      }
+    },
+    {
+      "id": "vet_trauma",
+      "language": "en",
+      "kind": "phrase",
+      "text": "trauma",
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "trauma"
+      }
+    },
+    {
+      "id": "vet_hit_by_vehicle",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "hit",
+          "struck"
+        ],
+        [
+          "car",
+          "vehicle",
+          "bike",
+          "truck",
+          "scooter",
+          "motorbike",
+          "auto"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "an injury from a vehicle"
+      }
+    },
+    {
+      "id": "vet_run_over",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "run",
+          "ran"
+        ],
+        [
+          "over"
+        ],
+        [
+          "car",
+          "vehicle",
+          "bike",
+          "scooter",
+          "truck",
+          "auto",
+          "got",
+          "was",
+          "been"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "an injury from a vehicle (run over with a vehicle or a passive verb; not 'run over the fees')"
+      }
+    },
+    {
+      "id": "vet_badly_hurt",
+      "language": "en",
+      "kind": "phrase",
+      "text": "badly hurt",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "a serious injury"
+      }
+    },
+    {
+      "id": "vet_badly_injured",
+      "language": "en",
+      "kind": "phrase",
+      "text": "badly injured",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "a serious injury"
+      }
+    },
+    {
+      "id": "vet_broken_bone",
+      "language": "en",
+      "kind": "phrase",
+      "text": "broken bone",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "a serious injury"
+      }
+    },
+    {
+      "id": "vet_broken_leg",
+      "language": "en",
+      "kind": "phrase",
+      "text": "broken leg",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "a serious injury"
+      }
+    },
+    {
+      "id": "vet_broken_near",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "broken",
+          "broke",
+          "fractured"
+        ],
+        [
+          "leg",
+          "legs",
+          "paw",
+          "bone",
+          "bones",
+          "tail",
+          "jaw",
+          "rib",
+          "ribs",
+          "hip"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "a broken bone in any word order"
+      }
+    },
+    {
+      "id": "vet_fracture",
+      "language": "en",
+      "kind": "phrase",
+      "text": "fracture",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "a serious injury"
+      }
+    },
+    {
+      "id": "vet_fell_from",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "fell",
+          "fallen",
+          "falling"
+        ],
+        [
+          "balcony",
+          "roof",
+          "terrace",
+          "building",
+          "stairs",
+          "height"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "a fall from a height"
+      }
+    },
+    {
+      "id": "vet_bitten_badly",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "bitten",
+          "attacked",
+          "mauled"
+        ],
+        [
+          "badly",
+          "another",
+          "stray",
+          "snake",
+          "deep",
+          "bleeding"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "a bite or an attack by another animal"
+      }
+    },
+    {
+      "id": "vet_bleeding_near",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "bleeding"
+        ],
+        [
+          "heavily",
+          "badly",
+          "lot",
+          "lots",
+          "stop",
+          "stopping"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_trauma",
+        "rule": "bleeding that is heavy or does not stop"
+      }
+    },
+    {
+      "id": "vet_bloat",
+      "language": "en",
+      "kind": "phrase",
+      "text": "bloat",
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "signs of bloat"
+      }
+    },
+    {
+      "id": "vet_bloated",
+      "language": "en",
+      "kind": "phrase",
+      "text": "bloated",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "the same, as an adjective"
+      }
+    },
+    {
+      "id": "vet_swollen_belly",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "belly",
+          "stomach",
+          "tummy",
+          "abdomen"
+        ],
+        [
+          "swollen",
+          "swelling",
+          "distended"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "a swollen belly"
+      }
+    },
+    {
+      "id": "vet_hard_belly",
+      "language": "en",
+      "kind": "phrase",
+      "text": "hard belly",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "a hard belly"
+      }
+    },
+    {
+      "id": "vet_belly_is_hard",
+      "language": "en",
+      "kind": "phrase",
+      "text": "belly is hard",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "a hard belly"
+      }
+    },
+    {
+      "id": "vet_stomach_is_hard",
+      "language": "en",
+      "kind": "phrase",
+      "text": "stomach is hard",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "a hard belly"
+      }
+    },
+    {
+      "id": "vet_tummy_is_hard",
+      "language": "en",
+      "kind": "phrase",
+      "text": "tummy is hard",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "a hard belly"
+      }
+    },
+    {
+      "id": "vet_trying_to_vomit",
+      "language": "en",
+      "kind": "phrase",
+      "text": "trying to vomit",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "retching without bringing anything up"
+      }
+    },
+    {
+      "id": "vet_trying_to_throw_up",
+      "language": "en",
+      "kind": "phrase",
+      "text": "trying to throw up",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "retching without bringing anything up"
+      }
+    },
+    {
+      "id": "vet_retching",
+      "language": "en",
+      "kind": "phrase",
+      "text": "retching",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "retching without bringing anything up"
+      }
+    },
+    {
+      "id": "vet_dry_heaving",
+      "language": "en",
+      "kind": "phrase",
+      "text": "dry heaving",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_bloat",
+        "rule": "retching without bringing anything up"
+      }
+    },
+    {
+      "id": "vet_difficult_birth",
+      "language": "en",
+      "kind": "phrase",
+      "text": "difficult birth",
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "difficult birth"
+      }
+    },
+    {
+      "id": "vet_birth_near",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "birth",
+          "labour",
+          "labor",
+          "whelping",
+          "delivering"
+        ],
+        [
+          "trouble",
+          "difficult",
+          "difficulty",
+          "stuck",
+          "struggling",
+          "straining"
+        ]
+      ],
+      "window": 6,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_difficult_birth",
+        "rule": "a birth word and a difficulty word within 6 words"
+      }
+    },
+    {
+      "id": "vet_stuck_puppy",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "puppy",
+          "kitten",
+          "puppies",
+          "kittens"
+        ],
+        [
+          "stuck"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_difficult_birth",
+        "rule": "a newborn stuck during birth"
+      }
+    },
+    {
+      "id": "vet_heatstroke",
+      "language": "en",
+      "kind": "phrase",
+      "text": "heatstroke",
+      "intent": "emergency",
+      "source": {
+        "section": "4.2",
+        "item": "heatstroke"
+      }
+    },
+    {
+      "id": "vet_heat_stroke",
+      "language": "en",
+      "kind": "phrase",
+      "text": "heat stroke",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_heatstroke",
+        "rule": "the same, as two words"
+      }
+    },
+    {
+      "id": "vet_overheated",
+      "language": "en",
+      "kind": "phrase",
+      "text": "overheated",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_heatstroke",
+        "rule": "overheating"
+      }
+    },
+    {
+      "id": "vet_overheating",
+      "language": "en",
+      "kind": "phrase",
+      "text": "overheating",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_heatstroke",
+        "rule": "overheating"
+      }
+    },
+    {
+      "id": "vet_panting_heavily",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "panting"
+        ],
+        [
+          "heavily",
+          "heavy",
+          "hard",
+          "nonstop",
+          "badly"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "vet_heatstroke",
+        "rule": "heavy panting in the heat"
+      }
+    },
+    {
+      "id": "vet_whats_wrong_with_my",
+      "language": "en",
+      "kind": "phrase",
+      "text": "what's wrong with my",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Diagnose an animal or interpret its symptoms"
+      }
+    },
+    {
+      "id": "vet_what_is_wrong_with_my",
+      "language": "en",
+      "kind": "phrase",
+      "text": "what is wrong with my",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Diagnose an animal or interpret its symptoms"
+      }
+    },
+    {
+      "id": "vet_what_do_you_think_it_is",
+      "language": "en",
+      "kind": "phrase",
+      "text": "what do you think it is",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Diagnose an animal or interpret its symptoms"
+      }
+    },
+    {
+      "id": "vet_pet_symptom",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "dog",
+          "cat",
+          "pet",
+          "puppy",
+          "kitten",
+          "rabbit"
+        ],
+        [
+          "vomiting",
+          "limping",
+          "coughing",
+          "sneezing",
+          "diarrhea",
+          "diarrhoea",
+          "lethargic",
+          "drooling",
+          "shaking",
+          "wheezing"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Diagnose an animal or interpret its symptoms"
+      }
+    },
+    {
+      "id": "vet_diagnose",
+      "language": "en",
+      "kind": "phrase",
+      "text": "diagnose",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Diagnose an animal or interpret its symptoms"
+      }
+    },
+    {
+      "id": "vet_dose_by_weight",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "dose",
+          "dosage",
+          "paracetamol",
+          "ibuprofen",
+          "aspirin",
+          "medicine",
+          "medication"
+        ],
+        [
+          "give",
+          "giving",
+          "weight",
+          "weighs",
+          "kg"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Recommend or dose medication — including dosing by weight beyond the product label"
+      }
+    },
+    {
+      "id": "vet_how_many_tablets",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "how"
+        ],
+        [
+          "many"
+        ],
+        [
+          "tablet",
+          "tablets",
+          "pill",
+          "pills",
+          "drops",
+          "ml",
+          "mg"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "vet_dose_by_weight",
+        "rule": "dosing asked as a count"
+      }
+    },
+    {
+      "id": "vet_dose_amount",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "how"
+        ],
+        [
+          "many",
+          "much"
+        ],
+        [
+          "tablet",
+          "tablets",
+          "pill",
+          "pills",
+          "syrup",
+          "drops",
+          "liquid",
+          "ml",
+          "mg",
+          "dose",
+          "injection",
+          "paste"
+        ],
+        [
+          "give",
+          "giving"
+        ]
+      ],
+      "window": 8,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "vet_dose_by_weight",
+        "rule": "an amount of any medicine form to give"
+      }
+    },
+    {
+      "id": "vet_how_much_should_i_give",
+      "language": "en",
+      "kind": "phrase",
+      "text": "how much should i give",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Recommend or dose medication — including dosing by weight beyond the product label"
+      }
+    },
+    {
+      "id": "vet_prescription",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "prescription"
+        ],
+        [
+          "diet",
+          "diets",
+          "food",
+          "without",
+          "only"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Advise on prescription-only items or prescription diets without vet authorisation"
+      }
+    },
+    {
+      "id": "vet_is_it_serious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is it serious",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Judge whether something is urgent (beyond detecting emergencies)"
+      }
+    },
+    {
+      "id": "vet_is_this_serious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is this serious",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "vet_is_it_serious",
+        "rule": "the same question"
+      }
+    },
+    {
+      "id": "vet_should_i_be_worried",
+      "language": "en",
+      "kind": "phrase",
+      "text": "should i be worried",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Judge whether something is urgent (beyond detecting emergencies)"
+      }
+    },
+    {
+      "id": "vet_is_it_an_emergency",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is it an emergency",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Judge whether something is urgent (beyond detecting emergencies)"
+      }
+    },
+    {
+      "id": "vet_can_it_wait",
+      "language": "en",
+      "kind": "phrase",
+      "text": "can it wait",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.2",
+        "item": "Judge whether something is urgent (beyond detecting emergencies)"
+      }
+    }
+  ],
+  "output": [
+    {
+      "id": "vet_pet_probably_has",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "dog",
+          "cat",
+          "pet",
+          "puppy",
+          "kitten",
+          "rabbit"
+        ],
+        [
+          "probably",
+          "likely"
+        ],
+        [
+          "has"
+        ]
+      ],
+      "window": 4,
+      "category": "diagnosis",
+      "source": {
+        "section": "4.2",
+        "item": "Diagnose an animal or interpret its symptoms"
+      }
+    },
+    {
+      "id": "vet_a_sign_of",
+      "language": "en",
+      "kind": "phrase",
+      "text": "a sign of",
+      "category": "diagnosis",
+      "source": {
+        "section": "4.2",
+        "item": "Diagnose an animal or interpret its symptoms"
+      }
+    },
+    {
+      "id": "vet_a_symptom_of",
+      "language": "en",
+      "kind": "phrase",
+      "text": "a symptom of",
+      "category": "diagnosis",
+      "source": {
+        "section": "4.2",
+        "item": "Diagnose an animal or interpret its symptoms"
+      }
+    }
+  ]
+}

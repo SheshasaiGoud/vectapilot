@@ -1,5 +1,6 @@
 {
   "business_type": "veterinary",
+  "synthetic": true,
   "not_covered_categories": ["self_harm"],
   "red_flags": [
     {

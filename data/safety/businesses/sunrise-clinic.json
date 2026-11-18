@@ -1,0 +1,12 @@
+{
+  "business_id": "sunrise-clinic",
+  "synthetic": true,
+  "review": "not professionally reviewed (Q8); agent-drafted (zara-safety) and synthetic",
+  "not_covered": [],
+  "guidance": [
+    "We cannot treat emergencies.",
+    "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+    "You do not have to handle this alone.",
+    "Do not wait for a reply in the chat."
+  ]
+}
