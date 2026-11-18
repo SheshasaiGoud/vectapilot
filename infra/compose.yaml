@@ -27,6 +27,12 @@ x-api-environment: &api-environment
   # business, mounted read-only below. The API validates and compiles the whole folder at
   # startup; each business's type is checked against its corpus manifest.
   VECTAPILOT_EXTRACTION_CONFIG_DIR: /app/data/extraction
+  # M7 PR 4 (G4, G14): the guard term files (synthetic, not professionally reviewed: Q8), mounted
+  # read-only below. The API validates the whole folder against the corpus manifests at startup
+  # and self-tests every term; while H1 (the term matcher) is a stub, the self-test reports the
+  # matcher unavailable, so once PR 6–8 guard the routes, each guarded route hands off (fail
+  # closed). No route is guarded before PR 6.
+  VECTAPILOT_GUARD_CONFIG_DIR: /app/data/safety
 
 services:
   postgres:
@@ -86,6 +92,9 @@ services:
       # M6 PR 1: takes effect when the api container is next recreated (`make up`); a recreate
       # keeps the database volume, it is not a reset.
       - ../data/extraction:/app/data/extraction:ro
+      # M7 PR 4: takes effect when the api container is next recreated (`make up`); a recreate,
+      # not a reset.
+      - ../data/safety:/app/data/safety:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -1,4 +1,5 @@
 {
+  "synthetic": true,
   "scripts": [
     {"language": "hi", "ranges": [{"first": "U+0900", "last": "U+097F"}]},
     {"language": "te", "ranges": [{"first": "U+0C00", "last": "U+0C7F"}]}

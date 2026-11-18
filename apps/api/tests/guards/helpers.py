@@ -2,8 +2,8 @@
 stand-in that is NOT H1.
 
 The fixture folder (`fixtures/guard/`) holds synthetic test terms for three fictional businesses
-(`fx-clinic`, `fx-vet`, `fx-shop`); the real term files arrive in PR 4 (`data/safety/`). Every
-guidance line is invented and marked fictional.
+(`fx-clinic`, `fx-vet`, `fx-shop`); the real term files are `data/safety/` (PR 4,
+`test_safety_terms.py`). Every fixture guidance line is invented and marked fictional.
 """
 
 import json
@@ -18,8 +18,14 @@ from vectapilot_api import main
 from vectapilot_api.guards.config import ConfiguredTerm, GuardConfig, load_guard_dir
 from vectapilot_api.guards.selftest import SelftestResult, positives, run_selftest, screen_text
 from vectapilot_api.guards.types import Folded, TermHit, TermSet
+from vectapilot_api.intents.policy import BusinessType
 
-SANDBOX_DIR: Final = Path(__file__).resolve().parents[4] / "data" / "sandbox"
+REPO_DIR: Final = Path(__file__).resolve().parents[4]
+SANDBOX_DIR: Final = REPO_DIR / "data" / "sandbox"
+SAFETY_DIR: Final = REPO_DIR / "data" / "safety"
+"""The real term files (M7 PR 4): synthetic, agent-drafted, not professionally reviewed (Q8)."""
+SAMPLE_CORPUS_DIR: Final = REPO_DIR / "data" / "sample"
+SAMPLE_EXTRACTION_DIR: Final = REPO_DIR / "data" / "extraction"
 FIXTURES: Final = Path(__file__).resolve().parent / "fixtures"
 GUARD_DIR: Final = FIXTURES / "guard"
 CORPUS_DIR: Final = FIXTURES / "corpus"
@@ -56,8 +62,8 @@ def sample_guard_dir(destination: Path) -> Path:
     """A guard folder for the two sample businesses (`data/sample/`), for tests that start the app
     with a tool or extraction folder outside local, test and ci: the fixture platform and type
     files, and per business its languages' `not_covered` and the guidance lines of its own
-    `tools.json` (copied, never written here). The terms stay fixture terms (PR 4 brings the real
-    ones)."""
+    `tools.json` (copied, never written here). The terms stay fixture terms; the real ones are
+    `SAFETY_DIR`."""
     guard = shutil.copytree(GUARD_DIR, destination)
     for path in (guard / "businesses").iterdir():
         path.unlink()
@@ -77,6 +83,20 @@ def sample_guard_dir(destination: Path) -> Path:
 
 def load_fixtures() -> GuardConfig:
     return load_guard_dir(GUARD_DIR, CORPUS_DIR)
+
+
+def sample_served() -> dict[str, BusinessType]:
+    """What `create_app` passes as `served` for the sample businesses: each `tools.json`'s type."""
+    return {
+        path.name: BusinessType(read_json(path / "tools.json")["business_type"])
+        for path in sorted(SANDBOX_DIR.iterdir())
+        if (path / "tools.json").is_file()
+    }
+
+
+def load_safety() -> GuardConfig:
+    """The real term files (`data/safety/`) for the sample corpus, as `create_app` loads them."""
+    return load_guard_dir(SAFETY_DIR, SAMPLE_CORPUS_DIR, served=sample_served())
 
 
 def configured(config: GuardConfig, term_id: str) -> ConfiguredTerm:

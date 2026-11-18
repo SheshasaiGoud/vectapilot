@@ -25,7 +25,16 @@ from typing import Final
 import pytest
 
 from tests.conftest import make_settings
-from tests.guards.helpers import CORPUS_DIR, GUARD_DIR, load_fixtures
+from tests.guards.helpers import (
+    CORPUS_DIR,
+    GUARD_DIR,
+    SAFETY_DIR,
+    SAMPLE_CORPUS_DIR,
+    SAMPLE_EXTRACTION_DIR,
+    SANDBOX_DIR,
+    load_fixtures,
+    load_safety,
+)
 from vectapilot_api.guards.match import match_terms
 from vectapilot_api.guards.normalize import ZWJ, ZWNJ, ZWSP, fold
 from vectapilot_api.guards.selftest import SelftestStatus, run_selftest, screen_text
@@ -376,5 +385,38 @@ def test_h1_lets_the_app_start_on_the_fixture_folder() -> None:
     # (`helpers.use_answer_key_selftest`), and this is the one startup test that runs H1.
     match_terms(Folded(""), TermSet(()))  # the stub's NotImplementedError, for the switch above
     app = create_app(make_settings(guard_config_dir=GUARD_DIR, corpus_dir=CORPUS_DIR))
+
+    assert app.state.guard_selftest.status is SelftestStatus.PASSED
+
+
+def test_h1_passes_the_self_test_on_the_real_term_files() -> None:
+    # M7 PR 4: G14 on data/safety/ (every real term, its variants and the fixed negatives). The
+    # probe raises the stub's NotImplementedError for the switch above, as in the fixture test.
+    match_terms(Folded(""), TermSet(()))
+    assert run_selftest(load_safety()).status is SelftestStatus.PASSED
+
+
+@pytest.mark.parametrize("text", ["What does my X-ray mean?", "can you explain my x ray"])
+def test_h1_hits_x_ray_through_the_real_report_term(text: str) -> None:
+    # ananya's PR 4 review: the fold turns "X-ray" into the two words "x ray", so a near set
+    # holding "xray" could never hit. The real hh_report_mean holds "ray": "ray" and "mean" (or
+    # "explain") sit inside its window of 5, so it must hit.
+    sunrise = load_safety().for_business("sunrise-clinic")
+    hits = match_terms(screen_text(text), sunrise.red_flags)
+
+    assert "hh_report_mean" in {hit.term_id for hit in hits}
+
+
+def test_h1_lets_the_app_start_on_the_real_term_files() -> None:
+    # As infra/compose.yaml starts it: every folder set, so the served types reach the loader.
+    match_terms(Folded(""), TermSet(()))  # the stub's NotImplementedError, for the switch above
+    app = create_app(
+        make_settings(
+            tools_config_dir=SANDBOX_DIR,
+            extraction_config_dir=SAMPLE_EXTRACTION_DIR,
+            corpus_dir=SAMPLE_CORPUS_DIR,
+            guard_config_dir=SAFETY_DIR,
+        )
+    )
 
     assert app.state.guard_selftest.status is SelftestStatus.PASSED
