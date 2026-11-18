@@ -153,8 +153,10 @@ runs first and depends on nothing that can fail. Each part:
    - Masked: the message, free-text tool-result fields (never ids or numbers), and the question
      before Voyage and the model behind `guard_answer`. Not extraction, whose values are the
      identifiers.
-   - After H2 (D5 (b): Claude at shesha's request), a `RedactingJsonFormatter`
-     installed only by `create_app` masks each formatted line, `exception` included.
+   - A `RedactingJsonFormatter` installed only by `create_app` masks each formatted line,
+     `exception` included (**amended 2026-11-18 (shesha)**: installed from M7 PR 3; masking
+     switches on by itself once H2 exists, and every logger's exceptions are class names and
+     frames only, never their message).
      `JsonFormatter` and the `llm_call` lines stay byte-identical (the M1 CLI, the MCP server,
      M3's window).
 6. **Injection signals that tighten (G7).** A message hit runs the turn read-only. A chunk hit

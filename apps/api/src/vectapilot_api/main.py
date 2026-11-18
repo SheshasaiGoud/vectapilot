@@ -40,6 +40,7 @@ from vectapilot_api.gateway.gateway import build_gateway
 from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.gateway.providers.fake import FakeProvider
 from vectapilot_api.guards.config import load_guard_dir
+from vectapilot_api.guards.redact import RequestScope
 from vectapilot_api.guards.selftest import SelftestStatus, run_selftest
 from vectapilot_api.health import router as health_router
 from vectapilot_api.intents.fallback import LLMIntentFallback
@@ -127,7 +128,8 @@ def create_app(
     if extraction_provider is not None and not isinstance(extraction_provider, FakeProvider):
         raise TypeError("the extraction route's provider is a FakeProvider in M6 (E11)")
     extraction_fake = FakeProvider() if extraction_provider is None else extraction_provider
-    configure_logging(settings.log_level)
+    # M7 PR 3 (G10): the app's lines are redacted; the M1 CLI and the MCP server keep plain JSON.
+    configure_logging(settings.log_level, redact=True)
     # Fail fast (ADR 0006, amended 2026-10-22 and 2026-10-23): until M7 adds budgets, every answer
     # and every search is an uncapped paid call, so a paid provider without the opt-in stops the
     # server here.
@@ -303,6 +305,9 @@ def create_app(
     app.include_router(agent_router)
     app.include_router(extraction_router)
     install_error_handlers(app)
+    # G10-S2: the access line names the matched route's template, read from the request's scope
+    # (`guards.redact.AccessLine`). For the log only: it screens and changes nothing.
+    app.add_middleware(RequestScope)
     return app
 
 

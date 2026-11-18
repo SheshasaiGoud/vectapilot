@@ -16,7 +16,8 @@ The harness:
 - `scoring` (outcome *and* deciding rule, the positive controls, `ExpectationMiss`,
   `PendingHandWrite`, `NotScored`), `plan` (each case's path, the PR or hand-write it waits for,
   its environment and CI mark), `harness` (`run_case`, shared by pytest and `run`, and the runner
-  registry later PRs fill), `replay` (the scripted stand-in for M5's H1 `run_turn`, not a loop),
+  registry later PRs fill), `masking` (category E's runner, M7 PR 3), `replay` (the scripted
+  stand-in for M5's H1 `run_turn`, not a loop),
   `businesses` (`rt-shop` from the dataset fixtures, as a served app reads it)
 - `runinfo` (folder names, run.json and its fingerprint), `spend` (D7's $1.00 on M3's counting
   core), `ledger` (once per config), `runs` (`run` and `summarize`), `summary` (results lines and
@@ -25,7 +26,8 @@ The harness:
 The cases are agent-drafted and synthetic (D6 (a)), frozen before PR 4's term files; the held-out
 probe is separate, and agents never read it. The dataset is `evals/datasets/redteam/<version>/`;
 its README holds the authoring rules. The suite scores the guards from outside: of
-`vectapilot_api.guards` it imports only the closed codes (`types`), `match_terms` to probe whether
-H1 is written (`plan`) and the loader for the rules version (`runs`); a guard's runner is
-registered by the PR that builds it (`harness.register`).
+`vectapilot_api.guards` it imports only the closed codes (`types`), `match_terms` and `mask_pii`
+to probe whether H1 and H2 are written (`plan`), the loader for the rules version (`runs`), and
+what a registered runner drives (`masking`: `clean`, the locales and `mask_pii`, M7 PR 3); a
+guard's runner is registered by the PR that builds it (`harness.register`).
 """

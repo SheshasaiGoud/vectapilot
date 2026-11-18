@@ -274,7 +274,8 @@ split over en, hi and code-mixed hi, so each language cell holds about 5 cases.
   action id of a withheld proposal, the decision and durations. It never holds matched text, a
   term or a term id: a term id like `red_flag:chest_pain` would say what the customer wrote. Its
   logger is pinned at INFO, as `gateway.py:108-110` does for `llm_call`.
-  - After H2, a **`RedactingJsonFormatter`** (a subclass of `JsonFormatter`) masks the final
+  - A **`RedactingJsonFormatter`** (installed from PR 3, amended 2026-11-18 (shesha); its masking
+    switches on by itself once H2 exists, probed at startup) (a subclass of `JsonFormatter`) masks the final
     payload after `formatException` and `str()`: the message, free-text extras and `exception`.
     A `logging.Filter` cannot do this, because `JsonFormatter.format` builds `exception` and
     stringifies extras after every filter has run (`log.py:25-28`).
@@ -778,16 +779,29 @@ human steps are not M7's.
 ## PR 3 — `m7/masking` (zara; ananya reviews offsets and scripts) · S · after PR 1, D1
 - **The server's error line (G10-S1), decided 2026-11-16 (shesha, D-error-line):** the
   `uvicorn.error` record of an escaped exception keeps its exception's class name and stack
-  frames, never its message, and the rest is PII-masked. PR 1's strict xfail
+  frames, never its message, and the rest is PII-masked. **Widened 2026-11-18 (shesha, diego's
+  PR 3 review):** every record with `exc_info`, whatever its logger, is written the same way
+  (asyncio's "Task exception was never retrieved", a library's error with `input_value=...`). PR 1's strict xfail
   (`test_known_gap_the_servers_error_line_holds_no_canary`, 11 cases, one per route whose forced
   exception escapes) asserts that no canary part is left; it turns XPASS(strict) here, and its
   mark is removed.
 - **The access line's path (G10-S2, diego's PR 1 review):** customer text in the URL path (a
   malformed `{action_id}` on the confirm route, a 422; an unknown route, a 404) reaches the
-  access line, since `DropQueryString` cuts only the query. [proposal] The access line names the
+  access line, since `DropQueryString` cuts only the query. Built in PR 3 [proposal, kept]: the access line names the
   matched route template (`/v1/agent/actions/{action_id}/confirm`) and `[unmatched]` for a 404,
   instead of the raw path: masking alone would leave free text. PR 1 pins it as a strict xfail
   on the PII parts (2 cases); tighten it to every part if the template is adopted.
+- **PR 3 decisions (shesha, 2026-11-18, after ananya's and diego's reviews and the mutation
+  check):**
+  - H2's revised contract (every start position, overlaps join, up to three passes then
+    `MaskingIncomplete`, `MASK_CAP` 6,000, GSTIN as `[PAN]`) and the locale tightenings (a `+`
+    before a phone no longer hides it; a one-character UPI name is masked) are confirmed.
+  - Every logger's exceptions are class names and frames only (D-error-line widened, above).
+  - The redacting formatter is installed in PR 3, with masking off until H2 (PR 6's bullet and
+    ADR 0018 part 5 amended).
+  - Open, recorded: digits joined by ZWJ, ZWNJ, VS15 or VS16 and keycap digits are not masked
+    (handled in H2's PR, e.g. a squeezed view with an offset map); the client IP in the access
+    line is decided (keep, truncate to /24 or /48, or drop) before any real pilot business.
 - **A locale registry** (`in`, `generic`) with per-type patterns as data. Verhoeff and Luhn are
   team code over Unicode digits (`unicodedata.digit`), checked against published test vectors.
 - **The H2 scaffold.** `guards/pii.py`'s `mask_pii(text: Clean, locales) -> Masked` (masked
@@ -873,8 +887,10 @@ human steps are not M7's.
   `docs/learning/m7-output-checks.md`.
 - **Records.** The `agent_turn` record stays the loop's outcome, and the `guard` record states
   what the customer got. Both share the trace id.
-- **The `RedactingJsonFormatter` (G10)** goes in this PR if H2 has merged, else in the close-out.
-  With `mask_pii` still a stub, every logged string would become `[redaction_failed]`.
+- **The `RedactingJsonFormatter` (G10)** is already installed since PR 3 (amended 2026-11-18,
+  shesha): while `mask_pii` is the stub, free text is logged as before and metadata records pass
+  by key, byte-identical; masking switches on by itself once H2 exists (`guards/redact.py`'s
+  `log_masker` startup probe; a broken H2 stops startup).
 - **MCP.** `server.py`'s "the same text the agent's model reads" becomes false; its docstring is
   updated. `vectapilot_api.guards` joins `NEVER_LOADED`
   (`packages/mcp_server/tests/test_loaded_modules.py:18`), and the log canary covers MCP
@@ -960,9 +976,14 @@ The G14 self-test and G3 surround it. The explain-back is part of acceptance.
 
 ## H2 — `m7/pii-masking` (`[HAND-WRITE]`, [D5]; time-box 1.5 h) · S
 `mask_pii(text: Clean, locales) -> Masked`. Pure.
-- It finds spans per locale pattern, separators included, over Unicode digits.
+- It finds spans per locale pattern, separators included, over Unicode digits, at every start
+  position (ananya's PR 3 review; decided 2026-11-18, shesha).
 - Shape decides; the checksum only picks the label (G6).
-- Overlaps resolve longest first, then leftmost.
+- Overlaps resolve longest first, then leftmost. Decided 2026-11-18 (shesha, ananya's PR 3
+  review): overlapping spans join into one, labelled by that order, so no digit of either stays
+  visible; passes repeat until one finds nothing (at most three, else `MaskingIncomplete`, fail
+  closed), so a code glued to a number is masked. `MASK_CAP` is 6,000 (NFC can triple a
+  2,000-character message); GSTIN is masked as `[PAN]`.
 - Each span is replaced by its typed placeholder, and the result returns counts by type.
 - Nothing is logged or kept. Patterns follow G3's rule.
 
