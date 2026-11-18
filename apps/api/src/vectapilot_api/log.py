@@ -4,6 +4,7 @@ import json
 import logging
 import sys
 from datetime import UTC, datetime
+from typing import Final
 
 # Attributes every LogRecord has; anything else on a record came from `extra=` and is kept.
 # `color_message` is uvicorn's copy of the message with terminal colour codes — noise in JSON.
@@ -60,10 +61,31 @@ def silence_untrusted_parsers() -> None:
         logging.getLogger(name).setLevel(SILENT_LEVEL)
 
 
-def configure_logging(level: str) -> None:
-    """Send every log line — ours and uvicorn's — to stdout as JSON."""
+LOG_MASKING: Final = "log_masking"
+"""The startup warning of `configure_logging(..., redact=True)` while H2 is the stub: free text in
+the API's log lines is not masked yet (`guards/redact.py`, the interim). Fixed codes only."""
+
+
+def configure_logging(level: str, *, redact: bool = False) -> None:
+    """Send every log line — ours and uvicorn's — to stdout as JSON.
+
+    `redact=True` is `create_app`'s alone (M7 PR 3, G10): the lines are redacted
+    (`guards.redact.RedactingJsonFormatter`) and the access line names the route's template
+    (`AccessLine`, which needs `create_app`'s `RequestScope`). The guards are imported only then,
+    so the M1 measurement CLI and the MCP server, which import this module for `JsonFormatter`,
+    never load them.
+    """
+    access_filter: DropQueryString = DropQueryString()
+    formatter: logging.Formatter = JsonFormatter()
+    masking_off = False
+    if redact:
+        from vectapilot_api.guards.redact import AccessLine, RedactingJsonFormatter, log_masker
+
+        masker = log_masker()
+        masking_off = masker is None
+        access_filter, formatter = AccessLine(), RedactingJsonFormatter(masker)
     handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonFormatter())
+    handler.setFormatter(formatter)
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level)
@@ -73,6 +95,13 @@ def configure_logging(level: str) -> None:
         uvicorn_logger.handlers.clear()
         uvicorn_logger.propagate = True
     silence_untrusted_parsers()
+    # Exactly one access filter per process, the one this call asks for (`AccessLine` is a
+    # stricter `DropQueryString`), whatever an earlier call installed.
     access = logging.getLogger("uvicorn.access")
-    if not any(isinstance(f, DropQueryString) for f in access.filters):  # one per process
-        access.addFilter(DropQueryString())
+    for installed in [f for f in access.filters if isinstance(f, DropQueryString)]:
+        access.removeFilter(installed)
+    access.addFilter(access_filter)
+    if masking_off:
+        logging.getLogger("vectapilot_api").warning(
+            LOG_MASKING, extra={"status": "masker_unavailable"}
+        )

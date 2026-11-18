@@ -37,6 +37,7 @@ from vectapilot_api.config import (
 from vectapilot_api.guards.config import GuardConfig, GuardConfigError
 from vectapilot_api.guards.selftest import SelftestStatus, run_selftest
 from vectapilot_api.guards.types import Folded, TermSet
+from vectapilot_api.log import LOG_MASKING
 from vectapilot_api.main import GUARD_SELFTEST, GUARDS_NOT_CONFIGURED, create_app
 
 EXTRACTION_DIR: Final = REPO_ROOT / "data" / "extraction"
@@ -344,9 +345,11 @@ def restored_logging() -> Iterator[None]:
 
 
 def warnings(capsys: pytest.CaptureFixture[str]) -> list[dict[str, Any]]:
-    """The WARNING lines `create_app` wrote (its JSON handler writes to stdout)."""
+    """The guards' WARNING lines `create_app` wrote (its JSON handler writes to stdout). The log
+    formatter's own `log_masking` warning (while H2 is the stub; tests/guards/test_redact.py) is
+    not one of them."""
     lines = [json.loads(line) for line in capsys.readouterr().out.splitlines() if line]
-    return [line for line in lines if line["level"] == "WARNING"]
+    return [line for line in lines if line["level"] == "WARNING" and line["message"] != LOG_MASKING]
 
 
 @with_restored_logging

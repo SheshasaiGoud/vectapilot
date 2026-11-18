@@ -3,9 +3,9 @@ success, refusal and forced-exception paths, and no log line the API writes may 
 it. Unit: every route runs on the stand-ins its own route tests use (no database, no Redis).
 
 **What is checked is the formatted line**, never `caplog`'s raw record: each record is formatted
-by the app's own formatter (the one `configure_logging` installed on the root logger, so PR 3's
-`RedactingJsonFormatter` is checked here the day it replaces `JsonFormatter`), `exc_info`
-included, and the canary is searched in the line as written and URL-decoded.
+by the app's own formatter (the one `configure_logging(..., redact=True)` installed on the root
+logger: PR 3's `RedactingJsonFormatter`), `exc_info` included, and the canary is searched in the
+line as written and URL-decoded.
 
 **The server is part of the log.** In production uvicorn writes two lines of its own per request:
 the access line (`uvicorn.access`, which `DropQueryString` cuts at the `?`) and, when an exception
@@ -13,18 +13,17 @@ escapes the app, "Exception in ASGI application" with `exc_info` (`uvicorn.error
 `protocols/http/h11_impl.py`, `run_asgi`). `TestClient` writes neither, so `Server` below writes
 both as uvicorn does.
 
-**Known gaps, each pinned as a strict xfail; everything else is a hard assertion:**
-- **G10-S1** (11 cases, one per route in `ESCAPES`): a forced exception that escapes a route is
-  written by the server's error line with its message, canary included. Today's records are
-  metadata-only, but an escaped exception is not a record we build. Decided 2026-11-16 (shesha,
-  D-error-line): PR 3 rewrites the `uvicorn.error` record's `exception` field to the exception's
-  class name and stack frames, without its message (and masks PII). The xfail asserts that no
-  canary part at all is left, so it shows XPASS(strict) once PR 3 lands: remove its mark then.
+**The two server lines PR 1 pinned as known gaps are hard assertions since PR 3:**
+- **G10-S1** (11 cases, one per route in `ESCAPES`): a forced exception that escapes a route was
+  written by the server's error line with its message, canary included. Decided 2026-11-16
+  (shesha, D-error-line): the `uvicorn.error` record's `exception` is the exception's class name
+  and stack frames, never its message (`guards.redact.frames_only`), and masked once H2 exists.
+  No canary part at all is left.
 - **G10-S2** (2 cases, diego's PR 1 review): customer text in the URL *path* (a malformed
-  `{action_id}` on the confirm route, an unknown route's 404) reaches the access line, because
-  `DropQueryString` cuts only the query. Fixed in PR 3 (a [proposal]: the access line names the
-  matched route template, `[unmatched]` for a 404). The xfail asserts on the PII parts only; if
-  PR 3 adopts the template, tighten it to every part.
+  `{action_id}` on the confirm route, an unknown route's 404) reached the access line, because
+  `DropQueryString` cuts only the query. [proposal] The access line names the matched route's
+  template, `[unmatched]` for a 404 (`guards.redact.AccessLine`), so no canary part at all is
+  left, not only the PII ones.
 
 The canary is synthetic: the phone number is not dialable (+91 numbers never start with 0, as
 the repository's other fixtures) and the e-mail is under `example.com` (RFC 2606).
@@ -92,6 +91,7 @@ from vectapilot_api.db import Database
 from vectapilot_api.extraction.extractor import FieldExtractor
 from vectapilot_api.extraction.service import ExtractionService
 from vectapilot_api.gateway.providers.fake import FakeProvider
+from vectapilot_api.guards.redact import METADATA_RECORDS, UNMATCHED, RedactingJsonFormatter
 from vectapilot_api.guards.selftest import SelftestStatus
 from vectapilot_api.health import CheckResult
 from vectapilot_api.intents.policy import BusinessType
@@ -194,13 +194,15 @@ class Logged:
     server_errors: list[str]
     access: list[str]
     """The server's access lines (also in `lines`)."""
+    records: list[logging.LogRecord]
+    """The raw records behind every line (for the detector's own positive control only)."""
 
 
 def run(exchange: Exchange) -> Logged:
     root = logging.getLogger()
     [handler] = root.handlers  # `configure_logging`'s, installed by `create_app`
     formatter = handler.formatter
-    assert isinstance(formatter, JsonFormatter)  # the app's own (PR 3: its redacting subclass)
+    assert isinstance(formatter, RedactingJsonFormatter)  # the app's own (PR 3)
     capture = Capture()
     root.addHandler(capture)
     try:
@@ -220,6 +222,7 @@ def run(exchange: Exchange) -> Logged:
         [formatter.format(r) for r in records if r not in escaped],
         [formatter.format(r) for r in escaped],
         [formatter.format(r) for r in records if r.name == "uvicorn.access"],
+        records,
     )
 
 
@@ -579,24 +582,46 @@ def test_no_log_line_holds_the_canary(
     assert bool(logged.server_errors) == (kind == "forced" and route in ESCAPES)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="G10-S1: the server's error line writes an escaped exception's text; decided"
-    " 2026-11-16 (D-error-line): PR 3 writes its class name and frames, never its message",
-)
 @pytest.mark.parametrize("route", sorted(ESCAPES), ids=" ".join)
-def test_known_gap_the_servers_error_line_holds_no_canary(
+def test_the_servers_error_line_holds_no_canary(
     route: tuple[str, str], settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     logged = run(ROUTES[route]("forced", settings, monkeypatch))
 
     [line] = logged.server_errors
-    # The positive control survives PR 3's rewrite (the class name stays); not an
-    # AssertionError, which the mark expects.
-    if ASGI_ERROR not in line or "RuntimeError" not in line:
-        raise LookupError("this is not the forced exception's line")
+    exception = json.loads(line)["exception"]
+    # The positive control: the forced exception's line, with its class name and its frames.
+    assert ASGI_ERROR in json.loads(line)["message"]
+    assert exception.startswith("Traceback (most recent call last):\n  File ")
+    assert exception.endswith("\nRuntimeError")
     assert parts_in(line) == []
+    assert "forced failure" not in line  # nothing of the message, canary or not
+
+
+def masked_everything(text: str) -> str:
+    """A stand-in masker, NOT H2: any text that reaches it becomes `[MASKED]`."""
+    return "[MASKED]"
+
+
+@pytest.mark.parametrize(("route", "kind"), cases())
+def test_every_line_but_the_servers_own_is_todays_line(
+    route: tuple[str, str], kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # M7 PR 3's interim (H2 is the stub, so no masker): the app's formatter changes only the
+    # server's two lines. And whatever a masker would do, a metadata record never reaches it.
+    logged = run(ROUTES[route](kind, settings, monkeypatch))
+    [handler] = logging.getLogger().handlers
+    app_formatter = handler.formatter
+    assert isinstance(app_formatter, RedactingJsonFormatter) and app_formatter.masker is None
+    hostile = RedactingJsonFormatter(masked_everything)
+
+    ours = [r for r in logged.records if not r.name.startswith("uvicorn.")]
+
+    assert ours  # startup and shutdown, at least
+    for record in ours:
+        assert app_formatter.format(record) == JsonFormatter().format(record)
+        if record.getMessage() in METADATA_RECORDS:
+            assert hostile.format(record) == JsonFormatter().format(record)
 
 
 def path_exchange(path: str, status: int, settings: Settings) -> Exchange:
@@ -611,36 +636,29 @@ def path_exchange(path: str, status: int, settings: Settings) -> Exchange:
     return Exchange(create_app(settings), send, status)
 
 
-@pytest.mark.parametrize(("path", "status"), PATH_CASES.values(), ids=PATH_CASES.keys())
-def test_with_the_canary_in_the_path_no_line_but_the_access_line_holds_it(
-    path: str, status: int, settings: Settings
+PATH_TEMPLATES: Final = {
+    "confirm action id": "/v1/agent/actions/{action_id}/confirm",
+    "unknown route": UNMATCHED,
+}
+
+
+@pytest.mark.parametrize(
+    ("path", "status", "template"),
+    [(*PATH_CASES[name], PATH_TEMPLATES[name]) for name in PATH_CASES],
+    ids=PATH_CASES.keys(),
+)
+def test_with_the_canary_in_the_path_no_line_holds_it(
+    path: str, status: int, template: str, settings: Settings
 ) -> None:
     logged = run(path_exchange(path, status, settings))
 
     assert logged.response.status_code == status, logged.response.text
     [access] = logged.access
-    others = [line for line in logged.lines if line != access]
-    assert [(line, parts_in(line)) for line in others if parts_in(line)] == []
+    assert json.loads(access)["message"] == (
+        f'127.0.0.1:50000 - "POST {template} HTTP/1.1" {status}'
+    )
+    assert [(line, parts_in(line)) for line in logged.lines if parts_in(line)] == []
     assert logged.server_errors == []
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="G10-S2: the access line keeps the raw path; PR 3 fixes it (a route template"
-    " [proposal])",
-)
-@pytest.mark.parametrize(("path", "status"), PATH_CASES.values(), ids=PATH_CASES.keys())
-def test_known_gap_the_access_line_holds_no_pii_from_the_path(
-    path: str, status: int, settings: Settings
-) -> None:
-    logged = run(path_exchange(path, status, settings))
-
-    # The positive control: this request, and exactly one access line; not an AssertionError.
-    if logged.response.status_code != status or len(logged.access) != 1:
-        raise LookupError("this is not the canary path's request")
-    [access] = logged.access
-    assert [part for part in PII_PARTS if part in access or part in unquote_plus(access)] == []
 
 
 def test_the_agent_success_path_writes_its_model_and_tool_records(
@@ -677,8 +695,17 @@ def test_the_detector_finds_a_planted_line_and_the_access_line_has_no_query(
 
     logged = run(Exchange(app, get("/readyz"), 200))
 
+    # The detector, on the record as plain JSON (`JsonFormatter`, no redaction): every part.
+    [record] = [r for r in logged.records if r.getMessage().startswith("planted ")]
+    plain = JsonFormatter().format(record)
+    assert {MARK, PHONE.removeprefix("+91 "), EMAIL} <= set(parts_in(plain))
+    assert plain.count(MARK) == 3  # message, extra and exception
+    # The app's line keeps the free text that has no PII shape (masking is not a free-text
+    # filter): the mark stays in the message and the extra, with H2 or without it. The exception
+    # is class names and frames only, for every logger (decided 2026-11-18, shesha).
     [found] = [line for line in logged.lines if '"planted ' in line]
-    assert {MARK, PHONE.removeprefix("+91 "), EMAIL} <= set(parts_in(found))
-    assert found.count(MARK) == 3  # message, extra and exception
+    assert found.count(MARK) == 2
+    exception = json.loads(found)["exception"]
+    assert MARK not in exception and exception.endswith("RuntimeError")
     [access] = [line for line in logged.lines if "/readyz" in line]
-    assert "?" not in access and "note" not in access  # DropQueryString cut the query
+    assert "?" not in access and "note" not in access  # the access line has no query

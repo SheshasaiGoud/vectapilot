@@ -9,8 +9,9 @@ object or route its attack goes through. A later PR registers a runner for a pat
   is RLS, built since M2, so it waits only for PR 5's K runner, not for PR 8 [proposal, leo's PR 2
   review]): PR 5;
 - `agent` (`/v1/agent` and its confirm route: A, C, G and H on the agent, I, J, L, k-003): PR 6;
-- `log` (F's forced exceptions on every route, through the `RedactingJsonFormatter`, which lands
-  with PR 6 when H2 has merged; plan PR 6, "The `RedactingJsonFormatter`"): PR 6;
+- `log` (F's forced exceptions on every route, through the app's `RedactingJsonFormatter`):
+  PR 6, with the route stand-ins and database fixtures its runner shares with the agent path.
+  The formatter itself is built in PR 3 (it masks once H2 is written, `guards/redact.py`);
 - `document` (D, `/v1/extractions`' page screens): PR 7;
 - `answer` (`/v1/answer` and `/v1/kb/search` with `guard_answer = on` in tests): PR 8.
 
@@ -19,8 +20,8 @@ object or route its attack goes through. A later PR registers a runner for a pat
 it needs (`needs`): a red-flag case only H1; E and F's logs only H2; D H1; K's limiter none; every
 other agent or answer case H1, H2 and H3 (a guarded route hands off everything while one of them
 is a stub, plan "Risks"). Whether a hand-write is written is probed (`HAND_WRITE_PROBES`): H1's
-`match_terms` today; PR 3 adds H2's probe and PR 6 H3's. A hand-write without a probe counts as
-unwritten.
+`match_terms` and, since PR 3, H2's `mask_pii`; PR 6 adds H3's. A hand-write without a probe
+counts as unwritten.
 
 **Mark plans** (`mark_plan`): pending first (`pending:<PR n|Hn>` from `PENDING_REASONS`, a closed
 list that also holds `pending:M5-H1` for the real-loop pass, D8 (i)), then the gate label: `hard`
@@ -40,8 +41,10 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Final, Literal
 
+from vectapilot_api.guards.locales import locales
 from vectapilot_api.guards.match import match_terms
-from vectapilot_api.guards.types import Folded, TermSet
+from vectapilot_api.guards.pii import mask_pii
+from vectapilot_api.guards.types import Clean, Folded, TermSet
 from vectapilot_api.redteam.cases import Case, Category, Label, Route, Surface
 from vectapilot_api.redteam.scoring import Environment as Environment
 
@@ -128,10 +131,18 @@ def _h1_written() -> bool:
     return True
 
 
+def _h2_written() -> bool:
+    try:
+        mask_pii(Clean(""), locales())
+    except NotImplementedError:
+        return False
+    return True
+
+
 HAND_WRITE_PROBES: Final[Mapping[Build, Callable[[], bool]]] = MappingProxyType(
-    {Build.H1: _h1_written}
+    {Build.H1: _h1_written, Build.H2: _h2_written}
 )
-"""Whether each hand-write is written (module docstring). PR 3 adds H2's, PR 6 H3's."""
+"""Whether each hand-write is written (module docstring). PR 6 adds H3's."""
 
 
 def unwritten(

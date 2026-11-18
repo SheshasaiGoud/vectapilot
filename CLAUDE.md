@@ -272,6 +272,8 @@ Planned: `scripts/`.
   them (G13).
 - **M7 remaining, shesha only:** H1 (`match_terms`, guide `docs/learning/m7-term-matching.md`,
   time-box 2 h; 58 strict xfails in `tests/guards/test_match.py`), then the explain-backs.
+  H2 (`mask_pii`, guide `docs/learning/m7-masking.md`) is Claude's at shesha's request (D5 (b));
+  its explain-back is shesha's.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

@@ -7,8 +7,9 @@ pytest (`tests/redteam/test_cases.py`, test id `test_case[<id>]`) and `redteam r
 **The registry.** `RUNNERS` maps a `plan.CasePath` to the runner a later PR registers with
 `register` (PR 3 masking, PR 5 the limiter, PR 6 the agent and the logs, PR 7 documents, PR 8 the
 answer path). A case whose path has no runner raises `PendingHandWrite` with
-`pending:<PR n>` before anything runs (plan, "Design points left to their PRs"): in PR 2 no guard
-exists, so every case is pending. A runner that reports `guard_error` with `NotImplementedError`
+`pending:<PR n>` before anything runs (plan, "Design points left to their PRs"). PR 3 registers
+the masking path (`masking.run_masking`, category E against H2's `mask_pii`); every other path
+is still pending on its PR. A runner that reports `guard_error` with `NotImplementedError`
 reached a `[HAND-WRITE]` stub: pending on the first unwritten hand-write the case needs
 (`plan.unwritten`). If none is unwritten, that hand-off is a plain miss.
 
@@ -23,6 +24,7 @@ from typing import Final, Protocol
 
 from vectapilot_api.guards.types import DecidedBy
 from vectapilot_api.redteam.cases import Case, Label
+from vectapilot_api.redteam.masking import run_masking
 from vectapilot_api.redteam.pii import PiiGenerator
 from vectapilot_api.redteam.plan import (
     FRONTIER,
@@ -80,7 +82,7 @@ class Runner(Protocol):
 
 
 RUNNERS: Final[dict[CasePath, Runner]] = {}
-"""Empty in PR 2: no guard is built yet (module docstring)."""
+"""Each built guard's runner, by path (module docstring)."""
 
 
 def register(path: CasePath, runner: Runner) -> None:
@@ -88,6 +90,9 @@ def register(path: CasePath, runner: Runner) -> None:
     if path in RUNNERS:
         raise ValueError(f"{path} already has a runner")
     RUNNERS[path] = runner
+
+
+register(CasePath.MASKING, run_masking)  # M7 PR 3
 
 
 def reached_a_stub(result: CaseResult) -> bool:

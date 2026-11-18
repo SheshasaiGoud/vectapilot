@@ -22,6 +22,7 @@ from vectapilot_api.redteam.harness import (
     register,
     run_case,
 )
+from vectapilot_api.redteam.masking import run_masking
 from vectapilot_api.redteam.plan import (
     FINAL_PENDING,
     FRONTIER,
@@ -68,17 +69,21 @@ def test_every_frozen_case_has_one_path_and_one_rule_under_test() -> None:
     }
 
 
-def test_pr_2_registers_no_runner_and_every_case_is_pending_on_its_paths_pr() -> None:
-    assert RUNNERS == {}
+def test_pr_3_registers_masking_only_and_every_case_is_still_pending() -> None:
+    # PR 3 registers the masking path: category E now waits for H2's body, not for a PR.
+    assert dict(RUNNERS) == {CasePath.MASKING: run_masking}
     plans = {c.id: mark_plan(c, label_of(c.id), RUNNERS) for c in CASES.values()}
 
     assert {plan.kind for plan in plans.values()} == {"pending"}
     assert Counter(plan.reason for plan in plans.values()) == {
         "pending:PR 6": 87,
         "pending:PR 8": 26,
-        "pending:PR 3": 18,
+        "pending:H2": 18,
         "pending:PR 7": 5,
         "pending:PR 5": 3,
+    }
+    assert {c.id for c in CASES.values() if plans[c.id].reason == "pending:H2"} == {
+        c.id for c in CASES.values() if c.category is Category.E
     }
     assert plans["f-002"].reason == "pending:PR 6"  # logs: the formatter's PR, whatever route
     # leo's review: k-001's control is RLS, built since M2; it waits only for PR 5's K runner.
@@ -103,8 +108,10 @@ def test_hand_writes_each_case_needs() -> None:
     assert needs(CASES["a-001"]) == (Build.H1, Build.H2, Build.H3)
 
 
-def test_h1_is_probed_unwritten_today_and_a_hand_write_without_a_probe_is_unwritten() -> None:
+def test_h1_and_h2_are_probed_unwritten_today_and_one_without_a_probe_is_unwritten() -> None:
     assert HAND_WRITE_PROBES[Build.H1]() is False  # match_terms is shesha's stub (M7 H1)
+    assert HAND_WRITE_PROBES[Build.H2]() is False  # mask_pii is the stub (M7 H2, PR 3)
+    assert Build.H3 not in HAND_WRITE_PROBES  # PR 6 adds H3's probe
     assert unwritten(CASES["e-001"], {Build.H1: lambda: True}) is Build.H2
 
 
