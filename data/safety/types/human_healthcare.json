@@ -1,0 +1,2526 @@
+{
+  "business_type": "human_healthcare",
+  "synthetic": true,
+  "review": "not professionally reviewed (Q8); agent-drafted (zara-safety) and synthetic",
+  "not_covered_categories": [
+    "self_harm"
+  ],
+  "red_flags": [
+    {
+      "id": "hh_chest_pain",
+      "language": "en",
+      "kind": "phrase",
+      "text": "chest pain",
+      "intent": "emergency",
+      "source": {
+        "section": "4.1",
+        "item": "chest pain"
+      }
+    },
+    {
+      "id": "hh_chest_near",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "chest"
+        ],
+        [
+          "pain",
+          "pains",
+          "hurts",
+          "hurt",
+          "hurting",
+          "tight",
+          "tightness",
+          "pressure",
+          "ache",
+          "ached",
+          "aching",
+          "heavy"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_chest_pain",
+        "rule": "a chest word and a pain word within 5 words, in any order"
+      }
+    },
+    {
+      "id": "hh_heart_attack",
+      "language": "en",
+      "kind": "phrase",
+      "text": "heart attack",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_chest_pain",
+        "rule": "the condition chest pain is screened for"
+      }
+    },
+    {
+      "id": "hh_trouble_breathing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "trouble breathing",
+      "intent": "emergency",
+      "source": {
+        "section": "4.1",
+        "item": "trouble breathing"
+      }
+    },
+    {
+      "id": "hh_breathing_near",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "breathe",
+          "breathes",
+          "breathing",
+          "breath"
+        ],
+        [
+          "trouble",
+          "difficulty",
+          "difficult",
+          "hard",
+          "struggle",
+          "struggles",
+          "struggling",
+          "problem",
+          "problems",
+          "shortness"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "a breathing word and a difficulty word within 5 words"
+      }
+    },
+    {
+      "id": "hh_breathing_cannot",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "breathe",
+          "breathes",
+          "breathing",
+          "breath"
+        ],
+        [
+          "cannot",
+          "cant",
+          "couldnt",
+          "unable",
+          "stopped",
+          "stopping",
+          "gasping"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "a breathing word and an inability word within 5 words"
+      }
+    },
+    {
+      "id": "hh_cant_breathe",
+      "language": "en",
+      "kind": "phrase",
+      "text": "can't breathe",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_can_not_breathe",
+      "language": "en",
+      "kind": "phrase",
+      "text": "can not breathe",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_couldnt_breathe",
+      "language": "en",
+      "kind": "phrase",
+      "text": "couldn't breathe",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_not_breathing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "not breathing",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_short_of_breath",
+      "language": "en",
+      "kind": "phrase",
+      "text": "short of breath",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_breathless",
+      "language": "en",
+      "kind": "phrase",
+      "text": "breathless",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_gasping_for_air",
+      "language": "en",
+      "kind": "phrase",
+      "text": "gasping for air",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_choking",
+      "language": "en",
+      "kind": "phrase",
+      "text": "choking",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "a blocked airway"
+      }
+    },
+    {
+      "id": "hh_stroke",
+      "language": "en",
+      "kind": "phrase",
+      "text": "stroke",
+      "intent": "emergency",
+      "source": {
+        "section": "4.1",
+        "item": "signs of stroke"
+      }
+    },
+    {
+      "id": "hh_paralysis",
+      "language": "en",
+      "kind": "phrase",
+      "text": "paralysis",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_stroke",
+        "rule": "a stroke sign: paralysis"
+      }
+    },
+    {
+      "id": "hh_face_drooping",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "face",
+          "mouth"
+        ],
+        [
+          "drooping",
+          "droopy",
+          "droops",
+          "drooped",
+          "dropped",
+          "numb"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_stroke",
+        "rule": "a stroke sign: a drooping face"
+      }
+    },
+    {
+      "id": "hh_arm_weakness",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "arm",
+          "leg"
+        ],
+        [
+          "weak",
+          "weakness",
+          "numb",
+          "numbness"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_stroke",
+        "rule": "a stroke sign: weakness in an arm"
+      }
+    },
+    {
+      "id": "hh_slurred_speech",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "speech",
+          "talking",
+          "words"
+        ],
+        [
+          "slurred",
+          "slurring"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_stroke",
+        "rule": "a stroke sign: slurred speech"
+      }
+    },
+    {
+      "id": "hh_severe_bleeding",
+      "language": "en",
+      "kind": "phrase",
+      "text": "severe bleeding",
+      "intent": "emergency",
+      "source": {
+        "section": "4.1",
+        "item": "severe bleeding"
+      }
+    },
+    {
+      "id": "hh_bleeding_heavy",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "bleeding",
+          "bleeds",
+          "bled"
+        ],
+        [
+          "severe",
+          "heavy",
+          "heavily",
+          "profusely",
+          "lot",
+          "lots",
+          "badly"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_bleeding",
+        "rule": "bleeding with a severity word"
+      }
+    },
+    {
+      "id": "hh_blood_heavy",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "blood"
+        ],
+        [
+          "severe",
+          "heavily",
+          "profusely",
+          "gushing",
+          "pouring"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_bleeding",
+        "rule": "blood with a severity word (not 'a lot of', which also means many blood tests)"
+      }
+    },
+    {
+      "id": "hh_lots_of_blood",
+      "language": "en",
+      "kind": "phrase",
+      "text": "lots of blood",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_bleeding",
+        "rule": "a lot of blood, said plainly"
+      }
+    },
+    {
+      "id": "hh_a_lot_of_blood",
+      "language": "en",
+      "kind": "phrase",
+      "text": "a lot of blood",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_bleeding",
+        "rule": "a lot of blood, said plainly (also hits 'a lot of blood tests': accepted for recall)"
+      }
+    },
+    {
+      "id": "hh_bleeding_wont_stop",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "bleeding"
+        ],
+        [
+          "stop",
+          "stopping"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_bleeding",
+        "rule": "bleeding that does not stop"
+      }
+    },
+    {
+      "id": "hh_unconscious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "unconscious",
+      "intent": "emergency",
+      "source": {
+        "section": "4.1",
+        "item": "loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_loss_of_consciousness",
+      "language": "en",
+      "kind": "phrase",
+      "text": "loss of consciousness",
+      "intent": "emergency",
+      "source": {
+        "section": "4.1",
+        "item": "loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_lost_consciousness",
+      "language": "en",
+      "kind": "phrase",
+      "text": "lost consciousness",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_loss_of_consciousness",
+        "rule": "the same, as a verb"
+      }
+    },
+    {
+      "id": "hh_fainted",
+      "language": "en",
+      "kind": "phrase",
+      "text": "fainted",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "a brief loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_fainting",
+      "language": "en",
+      "kind": "phrase",
+      "text": "fainting",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "a brief loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_faints",
+      "language": "en",
+      "kind": "phrase",
+      "text": "faints",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "a brief loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_passed_out",
+      "language": "en",
+      "kind": "phrase",
+      "text": "passed out",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "a brief loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_passing_out",
+      "language": "en",
+      "kind": "phrase",
+      "text": "passing out",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "a brief loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_blacked_out",
+      "language": "en",
+      "kind": "phrase",
+      "text": "blacked out",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "a brief loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_unresponsive",
+      "language": "en",
+      "kind": "phrase",
+      "text": "unresponsive",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "the same, as staff say it"
+      }
+    },
+    {
+      "id": "hh_wont_wake_up",
+      "language": "en",
+      "kind": "phrase",
+      "text": "won't wake up",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_not_waking_up",
+      "language": "en",
+      "kind": "phrase",
+      "text": "not waking up",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_cant_wake",
+      "language": "en",
+      "kind": "phrase",
+      "text": "can't wake",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_hard_to_wake",
+      "language": "en",
+      "kind": "phrase",
+      "text": "hard to wake",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "the same, said plainly"
+      }
+    },
+    {
+      "id": "hh_collapsed",
+      "language": "en",
+      "kind": "phrase",
+      "text": "collapsed",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "a sudden loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_seizure",
+      "language": "en",
+      "kind": "phrase",
+      "text": "seizure",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "a fit, often with loss of consciousness"
+      }
+    },
+    {
+      "id": "hh_seizures",
+      "language": "en",
+      "kind": "phrase",
+      "text": "seizures",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "the plural"
+      }
+    },
+    {
+      "id": "hh_convulsing",
+      "language": "en",
+      "kind": "phrase",
+      "text": "convulsing",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "another word for a seizure"
+      }
+    },
+    {
+      "id": "hh_convulsions",
+      "language": "en",
+      "kind": "phrase",
+      "text": "convulsions",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "another word for seizures"
+      }
+    },
+    {
+      "id": "hh_had_a_fit",
+      "language": "en",
+      "kind": "phrase",
+      "text": "had a fit",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "a seizure, said plainly"
+      }
+    },
+    {
+      "id": "hh_having_a_fit",
+      "language": "en",
+      "kind": "phrase",
+      "text": "having a fit",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "a seizure, said plainly"
+      }
+    },
+    {
+      "id": "hh_fits_near",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "fits"
+        ],
+        [
+          "having",
+          "had",
+          "getting",
+          "gets",
+          "aa",
+          "aaye",
+          "aate",
+          "pad",
+          "pade",
+          "padte"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "fits with a verb in en or romanised Hindi (bare 'fits' also means 'suits')"
+      }
+    },
+    {
+      "id": "hh_severe_allergic_reaction",
+      "language": "en",
+      "kind": "phrase",
+      "text": "severe allergic reaction",
+      "intent": "emergency",
+      "source": {
+        "section": "4.1",
+        "item": "severe allergic reaction"
+      }
+    },
+    {
+      "id": "hh_allergic_reaction",
+      "language": "en",
+      "kind": "phrase",
+      "text": "allergic reaction",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_allergic_reaction",
+        "rule": "the reaction without its severity word (recall first)"
+      }
+    },
+    {
+      "id": "hh_anaphylaxis",
+      "language": "en",
+      "kind": "phrase",
+      "text": "anaphylaxis",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_allergic_reaction",
+        "rule": "the medical name"
+      }
+    },
+    {
+      "id": "hh_anaphylactic",
+      "language": "en",
+      "kind": "phrase",
+      "text": "anaphylactic",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_allergic_reaction",
+        "rule": "the medical name, as an adjective"
+      }
+    },
+    {
+      "id": "hh_throat_swelling",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "face",
+          "throat",
+          "tongue",
+          "lips"
+        ],
+        [
+          "swollen",
+          "swelling",
+          "swelled",
+          "closing"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_allergic_reaction",
+        "rule": "a swollen face or throat"
+      }
+    },
+    {
+      "id": "hh_poisoning",
+      "language": "en",
+      "kind": "phrase",
+      "text": "poisoning",
+      "intent": "emergency",
+      "source": {
+        "section": "4.1",
+        "item": "poisoning"
+      }
+    },
+    {
+      "id": "hh_poisoned",
+      "language": "en",
+      "kind": "phrase",
+      "text": "poisoned",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "the same, as a verb"
+      }
+    },
+    {
+      "id": "hh_overdose",
+      "language": "en",
+      "kind": "phrase",
+      "text": "overdose",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "poisoning by a medicine"
+      }
+    },
+    {
+      "id": "hh_overdosed",
+      "language": "en",
+      "kind": "phrase",
+      "text": "overdosed",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "poisoning by a medicine"
+      }
+    },
+    {
+      "id": "hh_swallowed_poison",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "swallowed",
+          "drank",
+          "drunk",
+          "ate",
+          "eaten"
+        ],
+        [
+          "poison",
+          "bleach",
+          "pesticide",
+          "kerosene",
+          "phenyl",
+          "cleaner",
+          "detergent",
+          "battery",
+          "batteries"
+        ]
+      ],
+      "window": 7,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "a toxic product taken in; an ingestion verb and its object within 7 words (the object can carry a determiner, a quantity and adjectives)"
+      }
+    },
+    {
+      "id": "hh_swallowed_medicine",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "swallowed",
+          "drank",
+          "drunk",
+          "ate",
+          "eaten"
+        ],
+        [
+          "tablet",
+          "tablets",
+          "pill",
+          "pills",
+          "medicine",
+          "medicines",
+          "syrup"
+        ]
+      ],
+      "window": 7,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_overdose",
+        "rule": "a medicine taken in by mistake; an ingestion verb and its object within 7 words (the object can carry a determiner, a quantity and adjectives)"
+      }
+    },
+    {
+      "id": "hh_drank_acid",
+      "language": "en",
+      "kind": "phrase",
+      "text": "drank acid",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "a toxic product taken in (acid alone also means acidity)"
+      }
+    },
+    {
+      "id": "hh_swallowed_acid",
+      "language": "en",
+      "kind": "phrase",
+      "text": "swallowed acid",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "a toxic product taken in (acid alone also means acidity)"
+      }
+    },
+    {
+      "id": "hh_too_many_pills",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "too"
+        ],
+        [
+          "many",
+          "much"
+        ],
+        [
+          "pills",
+          "tablets",
+          "medicine",
+          "medicines"
+        ],
+        [
+          "took",
+          "taken",
+          "swallowed",
+          "ate",
+          "had",
+          "drank",
+          "kha",
+          "khaa"
+        ]
+      ],
+      "window": 6,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_overdose",
+        "rule": "too much of a medicine, with a verb of taking it"
+      }
+    },
+    {
+      "id": "hh_seene_mein_dard_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "सीने में दर्द",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_chest_pain",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_chhati_mein_dard_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "छाती में दर्द",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_chest_pain",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_chest_near_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "सीने",
+          "सीना",
+          "छाती"
+        ],
+        [
+          "दर्द",
+          "जकड़न",
+          "दबाव",
+          "भारीपन"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_chest_near",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_dil_ka_daura_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "दिल का दौरा",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_heart_attack",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_heart_attack_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "हार्ट अटैक",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_heart_attack",
+        "rule": "the same meaning in Hindi (Devanagari), as the English loanword"
+      }
+    },
+    {
+      "id": "hh_saans_takleef_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "सांस लेने में तकलीफ",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_trouble_breathing",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_breathing_near_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "सांस",
+          "सांसें"
+        ],
+        [
+          "तकलीफ",
+          "दिक्कत",
+          "परेशानी",
+          "फूल",
+          "रुक",
+          "नहीं",
+          "नही",
+          "मुश्किल",
+          "घुट"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_breathing_near",
+        "rule": "the same meaning in Hindi (Devanagari), with नहीं typed with or without its anusvara"
+      }
+    },
+    {
+      "id": "hh_saans_nahi_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "सांस नहीं आ रही",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_cant_breathe",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_stroke_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "स्ट्रोक",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_stroke",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_lakwa_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "लकवा",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_stroke",
+        "rule": "paralysis, how a stroke is often named in Hindi"
+      }
+    },
+    {
+      "id": "hh_face_drooping_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "चेहरा",
+          "चेहरे",
+          "मुंह"
+        ],
+        [
+          "टेढ़ा",
+          "लटक",
+          "लटका",
+          "लटकी"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_face_drooping",
+        "rule": "the same meaning in Hindi (Devanagari), with the oblique चेहरे"
+      }
+    },
+    {
+      "id": "hh_slurred_speech_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "जुबान",
+          "जबान"
+        ],
+        [
+          "लड़खड़ा",
+          "लड़खड़ाने",
+          "लड़खड़ाती"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_slurred_speech",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_bahut_khoon_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "बहुत खून",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_bleeding",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_khoon_near_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "खून"
+        ],
+        [
+          "बह",
+          "रुक"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_bleeding_wont_stop",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_behosh_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "बेहोश",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_hosh_nahi_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "होश नहीं",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_daura_near_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "दौरा",
+          "दौरे"
+        ],
+        [
+          "पड़ा",
+          "पड़",
+          "पड़े",
+          "पड़ने",
+          "पड़ी",
+          "आया"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "the same meaning in Hindi (Devanagari): दौरा/दौरे with पड़ (any form) or आया, as hh_daura_rom"
+      }
+    },
+    {
+      "id": "hh_mirgi_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "मिर्गी",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "epilepsy, how seizures are often named in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_gambhir_allergy_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "गंभीर एलर्जी",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_severe_allergic_reaction",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_swelling_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "चेहरा",
+          "चेहरे",
+          "गला",
+          "गले",
+          "होंठ",
+          "जीभ"
+        ],
+        [
+          "सूज",
+          "सूजन",
+          "सूजा",
+          "सूजी"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_throat_swelling",
+        "rule": "the same meaning in Hindi (Devanagari), with the oblique चेहरे"
+      }
+    },
+    {
+      "id": "hh_zehar_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "ज़हर",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_maarne_ki_dawa_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "मारने"
+        ],
+        [
+          "दवा",
+          "दवाई"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "a pest-killer product (चूहे/कीड़े मारने की दवा), how rat poison and insecticide are named in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_keetnashak_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "कीटनाशक",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "pesticide, in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_phenyl_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "फिनाइल",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "phenyl, a floor cleaner, in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_overdose_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "ओवरडोज",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_overdose",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_zyada_dawa_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "ज़्यादा",
+          "बहुत"
+        ],
+        [
+          "दवा",
+          "दवाई",
+          "गोली",
+          "गोलियां"
+        ],
+        [
+          "खा",
+          "खाई",
+          "ली"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_too_many_pills",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_chest_near_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "seene",
+          "seena",
+          "chhati",
+          "chati",
+          "chhaati",
+          "chaati",
+          "chest",
+          "dil"
+        ],
+        [
+          "dard",
+          "dardh",
+          "jakdan",
+          "dabav",
+          "dabaav"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_chest_near",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17); code-mixed chest and dil too"
+      }
+    },
+    {
+      "id": "hh_dil_ka_daura_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "dil ka daura",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_heart_attack",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_breathing_near_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "saans",
+          "sans",
+          "saansein"
+        ],
+        [
+          "takleef",
+          "taklif",
+          "dikkat",
+          "pareshani",
+          "phool",
+          "ruk",
+          "nahi",
+          "nahin",
+          "mushkil",
+          "ghut"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_breathing_near",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_lakwa_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "lakwa",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_lakwa_hi",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_khoon_near_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "khoon",
+          "khun"
+        ],
+        [
+          "beh",
+          "bah",
+          "ruk",
+          "behta",
+          "bahta",
+          "nikal"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_khoon_near_hi",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_bleeding_band_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "bleeding"
+        ],
+        [
+          "band",
+          "ruk",
+          "ruki",
+          "rukti",
+          "nahi"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_bleeding_wont_stop",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17): code-mixed bleeding that does not stop"
+      }
+    },
+    {
+      "id": "hh_behosh_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "behosh",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_unconscious",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_hosh_nahi_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "hosh nahi",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_hosh_nahi_hi",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_hosh_nahin_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "hosh nahin",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_hosh_nahi_hi",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_daura_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "daura",
+          "daure"
+        ],
+        [
+          "pada",
+          "pad",
+          "padte",
+          "padne",
+          "aaya"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_seizure",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_swelling_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "gala",
+          "gale",
+          "chehra",
+          "chehre",
+          "honth",
+          "jeebh"
+        ],
+        [
+          "sooj",
+          "sooja",
+          "soojan",
+          "sujan",
+          "suja",
+          "sujh"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_throat_swelling",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17), with the oblique gale and chehre"
+      }
+    },
+    {
+      "id": "hh_zehar_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "zehar",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_zeher_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "zeher",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_zahar_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "zahar",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17), the most common spelling"
+      }
+    },
+    {
+      "id": "hh_jahar_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "jahar",
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_poisoning",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_maarne_ki_dawa_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "maarne",
+          "marne"
+        ],
+        [
+          "dawa",
+          "dawai",
+          "dava",
+          "davai"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_maarne_ki_dawa_hi",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_zyada_dawa_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "zyada",
+          "jyada",
+          "bahut"
+        ],
+        [
+          "dawa",
+          "dawai",
+          "goli",
+          "goliyan",
+          "tablet",
+          "tablets"
+        ],
+        [
+          "kha",
+          "khai",
+          "li",
+          "le"
+        ]
+      ],
+      "window": 5,
+      "intent": "emergency",
+      "source": {
+        "synonym_of": "hh_zyada_dawa_hi",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_whats_wrong_with_me",
+      "language": "en",
+      "kind": "phrase",
+      "text": "what's wrong with me",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_what_is_wrong_with_me",
+      "language": "en",
+      "kind": "phrase",
+      "text": "what is wrong with me",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_what_do_you_think_it_is",
+      "language": "en",
+      "kind": "phrase",
+      "text": "what do you think it is",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_could_it_be",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "could",
+          "can",
+          "might"
+        ],
+        [
+          "it",
+          "this",
+          "that"
+        ],
+        [
+          "be"
+        ],
+        [
+          "infection",
+          "condition",
+          "disease",
+          "allergy",
+          "diabetes",
+          "fracture",
+          "dengue",
+          "malaria",
+          "typhoid",
+          "asthma",
+          "cancer",
+          "migraine"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_what_do_you_think_it_is",
+        "rule": "asking whether a symptom could be a named illness"
+      }
+    },
+    {
+      "id": "hh_symptom_mean",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "symptom",
+          "symptoms"
+        ],
+        [
+          "mean",
+          "means",
+          "meaning",
+          "cause",
+          "causes",
+          "sign"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_diagnose",
+      "language": "en",
+      "kind": "phrase",
+      "text": "diagnose",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_diagnosis",
+      "language": "en",
+      "kind": "phrase",
+      "text": "diagnosis",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_is_it_serious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is it serious",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Judge how urgent a symptom is (beyond detecting emergencies)"
+      }
+    },
+    {
+      "id": "hh_is_this_serious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is this serious",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_is_it_serious",
+        "rule": "the same question"
+      }
+    },
+    {
+      "id": "hh_is_that_serious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is that serious",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_is_it_serious",
+        "rule": "the same question"
+      }
+    },
+    {
+      "id": "hh_how_serious",
+      "language": "en",
+      "kind": "phrase",
+      "text": "how serious",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_is_it_serious",
+        "rule": "the same question"
+      }
+    },
+    {
+      "id": "hh_is_it_normal_to",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "is"
+        ],
+        [
+          "normal"
+        ],
+        [
+          "have",
+          "having",
+          "feel",
+          "feeling"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_is_it_serious",
+        "rule": "asking whether a symptom is normal"
+      }
+    },
+    {
+      "id": "hh_should_i_be_worried",
+      "language": "en",
+      "kind": "phrase",
+      "text": "should i be worried",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Judge how urgent a symptom is (beyond detecting emergencies)"
+      }
+    },
+    {
+      "id": "hh_is_it_an_emergency",
+      "language": "en",
+      "kind": "phrase",
+      "text": "is it an emergency",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Judge how urgent a symptom is (beyond detecting emergencies)"
+      }
+    },
+    {
+      "id": "hh_should_i_go_to_the_hospital",
+      "language": "en",
+      "kind": "phrase",
+      "text": "should i go to the hospital",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Judge how urgent a symptom is (beyond detecting emergencies)"
+      }
+    },
+    {
+      "id": "hh_should_i_go_to_hospital",
+      "language": "en",
+      "kind": "phrase",
+      "text": "should i go to hospital",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_should_i_go_to_the_hospital",
+        "rule": "the same question without the article"
+      }
+    },
+    {
+      "id": "hh_report_mean",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "report",
+          "reports",
+          "result",
+          "results",
+          "scan",
+          "scans",
+          "ray",
+          "ecg",
+          "mri"
+        ],
+        [
+          "mean",
+          "means",
+          "normal",
+          "interpret",
+          "explain"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Interpret test results, reports or images"
+      }
+    },
+    {
+      "id": "hh_change_dose",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "dose",
+          "dosage",
+          "medicine",
+          "medicines",
+          "medication",
+          "tablet",
+          "tablets",
+          "pills"
+        ],
+        [
+          "change",
+          "increase",
+          "reduce",
+          "stop",
+          "skip",
+          "double",
+          "missed",
+          "switch"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Recommend, change or dose any medication or treatment"
+      }
+    },
+    {
+      "id": "hh_should_i_take",
+      "language": "en",
+      "kind": "phrase",
+      "text": "should i take",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Recommend, change or dose any medication or treatment"
+      }
+    },
+    {
+      "id": "hh_take_medicine",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "take",
+          "taking"
+        ],
+        [
+          "paracetamol",
+          "ibuprofen",
+          "aspirin",
+          "antibiotic",
+          "antibiotics",
+          "painkiller",
+          "painkillers",
+          "medicine",
+          "medicines",
+          "tablet",
+          "tablets"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Recommend, change or dose any medication or treatment"
+      }
+    },
+    {
+      "id": "hh_dose_amount",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "how"
+        ],
+        [
+          "many",
+          "much"
+        ],
+        [
+          "tablet",
+          "tablets",
+          "pill",
+          "pills",
+          "syrup",
+          "drops",
+          "ml",
+          "mg",
+          "dose",
+          "paracetamol",
+          "ibuprofen",
+          "capsules"
+        ],
+        [
+          "give",
+          "giving",
+          "take",
+          "taking"
+        ]
+      ],
+      "window": 8,
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Recommend, change or dose any medication or treatment"
+      }
+    },
+    {
+      "id": "hh_which_medicine",
+      "language": "en",
+      "kind": "phrase",
+      "text": "which medicine",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Recommend, change or dose any medication or treatment"
+      }
+    },
+    {
+      "id": "hh_what_medicine",
+      "language": "en",
+      "kind": "phrase",
+      "text": "what medicine",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Recommend, change or dose any medication or treatment"
+      }
+    },
+    {
+      "id": "hh_stop_taking",
+      "language": "en",
+      "kind": "phrase",
+      "text": "can i stop taking",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Recommend, change or dose any medication or treatment"
+      }
+    },
+    {
+      "id": "hh_prognosis",
+      "language": "en",
+      "kind": "phrase",
+      "text": "prognosis",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Give a prognosis or second opinion"
+      }
+    },
+    {
+      "id": "hh_second_opinion",
+      "language": "en",
+      "kind": "phrase",
+      "text": "second opinion",
+      "intent": "professional_judgement",
+      "source": {
+        "section": "4.1",
+        "item": "Give a prognosis or second opinion"
+      }
+    },
+    {
+      "id": "hh_will_i_recover",
+      "language": "en",
+      "kind": "phrase",
+      "text": "will i recover",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_prognosis",
+        "rule": "a prognosis asked plainly"
+      }
+    },
+    {
+      "id": "hh_chances_of_recovery",
+      "language": "en",
+      "kind": "phrase",
+      "text": "chances of recovery",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_prognosis",
+        "rule": "a prognosis asked plainly"
+      }
+    },
+    {
+      "id": "hh_dawa_badal_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "दवा",
+          "दवाई",
+          "गोली",
+          "खुराक"
+        ],
+        [
+          "बढ़ा",
+          "बढ़ाऊं",
+          "घटा",
+          "घटाऊं",
+          "बदल",
+          "बंद",
+          "छोड़",
+          "कौन"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_change_dose",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_dawa_ki_khurak_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "दवा की खुराक",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_change_dose",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_kitni_goli_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "कितनी",
+          "कितना",
+          "कितने"
+        ],
+        [
+          "गोली",
+          "गोलियां",
+          "दवा",
+          "दवाई",
+          "सिरप",
+          "खुराक",
+          "डोज"
+        ],
+        [
+          "दूं",
+          "दें",
+          "दे",
+          "लूं",
+          "लें",
+          "ले",
+          "खिलाऊं",
+          "खाऊं",
+          "पिलाऊं"
+        ]
+      ],
+      "window": 6,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_dose_amount",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_kya_yah_gambhir_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "गंभीर",
+          "सीरियस"
+        ],
+        [
+          "क्या"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_is_it_serious",
+        "rule": "the same meaning in Hindi (Devanagari), with यह, ये or no pronoun"
+      }
+    },
+    {
+      "id": "hh_chinta_ki_baat_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "चिंता की बात",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_should_i_be_worried",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_report_matlab_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "रिपोर्ट",
+          "नतीजे",
+          "रिजल्ट"
+        ],
+        [
+          "मतलब",
+          "सामान्य",
+          "नॉर्मल",
+          "समझा"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_report_mean",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_kya_bimari_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "क्या बीमारी है",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_what_is_wrong_with_me",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_ho_sakta_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "हो"
+        ],
+        [
+          "सकता",
+          "सकती"
+        ],
+        [
+          "डेंगू",
+          "मलेरिया",
+          "टाइफाइड",
+          "इन्फेक्शन",
+          "संक्रमण",
+          "बीमारी",
+          "कैंसर",
+          "शुगर",
+          "टीबी"
+        ],
+        [
+          "यह",
+          "ये",
+          "मुझे",
+          "इसे",
+          "उसे"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_could_it_be",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_dawa_badal_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "dawa",
+          "dawai",
+          "dava",
+          "davai",
+          "goli",
+          "khurak",
+          "dose"
+        ],
+        [
+          "badha",
+          "badhau",
+          "badhaun",
+          "kam",
+          "band",
+          "chhod",
+          "chod",
+          "kaunsi",
+          "konsi"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_change_dose",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_kitni_goli_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "kitni",
+          "kitna",
+          "kitne"
+        ],
+        [
+          "goli",
+          "goliyan",
+          "dawa",
+          "dawai",
+          "syrup",
+          "khurak",
+          "dose",
+          "tablet",
+          "tablets"
+        ],
+        [
+          "doon",
+          "dun",
+          "du",
+          "dein",
+          "de",
+          "loon",
+          "lun",
+          "lu",
+          "lein",
+          "le",
+          "khilau"
+        ]
+      ],
+      "window": 6,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_dose_amount",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_report_matlab_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "report",
+          "reports",
+          "result"
+        ],
+        [
+          "matlab",
+          "samjha",
+          "samjhao"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_report_mean",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_serious_kya_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "serious",
+          "gambhir"
+        ],
+        [
+          "kya"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_is_it_serious",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_kya_bimari_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "kya bimari hai",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_what_is_wrong_with_me",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_chinta_ki_baat_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "chinta ki baat",
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_should_i_be_worried",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    },
+    {
+      "id": "hh_ho_sakta_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "ho"
+        ],
+        [
+          "sakta",
+          "sakti"
+        ],
+        [
+          "dengue",
+          "malaria",
+          "typhoid",
+          "infection",
+          "bimari",
+          "cancer",
+          "sugar",
+          "tb",
+          "jaundice",
+          "pneumonia",
+          "covid",
+          "allergy"
+        ],
+        [
+          "yeh",
+          "ye",
+          "yah",
+          "mujhe",
+          "use",
+          "ise"
+        ]
+      ],
+      "window": 5,
+      "intent": "professional_judgement",
+      "source": {
+        "synonym_of": "hh_could_it_be",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    }
+  ],
+  "output": [
+    {
+      "id": "hh_might_have_condition",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "might",
+          "probably",
+          "likely"
+        ],
+        [
+          "have",
+          "has"
+        ],
+        [
+          "infection",
+          "condition",
+          "disease",
+          "fracture",
+          "dengue",
+          "malaria",
+          "typhoid",
+          "asthma",
+          "cancer",
+          "migraine",
+          "flu",
+          "pneumonia"
+        ]
+      ],
+      "window": 4,
+      "category": "diagnosis",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_a_sign_of",
+      "language": "en",
+      "kind": "phrase",
+      "text": "a sign of",
+      "category": "diagnosis",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_a_symptom_of",
+      "language": "en",
+      "kind": "phrase",
+      "text": "a symptom of",
+      "category": "diagnosis",
+      "source": {
+        "section": "4.1",
+        "item": "Diagnose or suggest what a symptom might mean"
+      }
+    },
+    {
+      "id": "hh_ka_lakshan_hi",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "का लक्षण",
+      "category": "diagnosis",
+      "source": {
+        "synonym_of": "hh_a_symptom_of",
+        "rule": "the same meaning in Hindi (Devanagari)"
+      }
+    },
+    {
+      "id": "hh_ka_lakshan_rom",
+      "language": "hi",
+      "kind": "phrase",
+      "text": "ka lakshan",
+      "category": "diagnosis",
+      "source": {
+        "synonym_of": "hh_a_symptom_of",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+      }
+    }
+  ]
+}

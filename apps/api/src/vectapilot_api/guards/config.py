@@ -35,10 +35,10 @@ list (D3 (i)): each needs a script range in `platform.json`.
 language (the manifest's `languages`) that is neither covered nor `not_covered`; a type file silent
 on `not_covered_categories`; a health type without a type file; a health business without guidance
 (and a health business a guarded route serves without a file); a business file whose id differs
-from its filename, that has no corpus manifest, or without `synthetic: true` (while Q4c is open);
-and, through `selftest`, a term that fails G14. A language is covered when the business's terms
-hold at least one injection and one `emergency` term in it, and for a health business one
-`professional_judgement` term too [proposal].
+from its filename or that has no corpus manifest; any file without `synthetic: true` (while Q4c
+is open); and, through `selftest`, a term that fails G14. A language is covered when the
+business's terms hold at least one injection and one `emergency` term in it, and for a health
+business one `professional_judgement` term too [proposal].
 
 **Errors name the file and the location, never a term.** Every model hides its input; our
 validators raise fixed sentences; the files use lists, never mappings, so no text a file wrote
@@ -285,11 +285,21 @@ class OutputSpec(TermSpec):
 
 
 class TermLists(GuardModel):
-    """The three lists every file may hold."""
+    """What every file holds: `synthetic: true` (G4, while Q4c is open), an optional `review`
+    note (who reviewed the terms; "not professionally reviewed (Q8)" while Q8 is open, M7 PR 4)
+    and the three term lists."""
 
+    synthetic: bool
+    review: SourceText | None = None
     red_flags: tuple[RedFlagSpec, ...] = Field(default=(), max_length=TERMS_MAX)
     injection: tuple[TermSpec, ...] = Field(default=(), max_length=TERMS_MAX)
     output: tuple[OutputSpec, ...] = Field(default=(), max_length=TERMS_MAX)
+
+    @model_validator(mode="after")
+    def _synthetic(self) -> Self:
+        if not self.synthetic:
+            raise ValueError("a guard file carries synthetic: true while Q4c is open")
+        return self
 
     def located(self, where: str) -> list[tuple[TermSpec, str]]:
         """Every term with its location (`<file>: <list>.<index>`), in file order."""
@@ -369,7 +379,6 @@ class BusinessFile(TermLists):
     """`businesses/<business_id>.json`: one business's added terms and guidance."""
 
     business_id: BusinessId
-    synthetic: bool
     not_covered: tuple[LanguageTag, ...] = ()
     guidance: tuple[Annotated[SingleLine, Field(max_length=GUIDANCE_LINE_MAX)], ...] = Field(
         default=(), max_length=GUIDANCE_LINES_MAX
@@ -379,8 +388,6 @@ class BusinessFile(TermLists):
 
     @model_validator(mode="after")
     def _consistent(self) -> Self:
-        if not self.synthetic:
-            raise ValueError("a business file carries synthetic: true while Q4c is open")
         if len(set(self.not_covered)) != len(self.not_covered):
             raise ValueError("each not_covered language is listed once")
         return self

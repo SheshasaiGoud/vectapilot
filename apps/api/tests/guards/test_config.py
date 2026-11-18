@@ -426,10 +426,26 @@ INVALID: list[tuple[str, Callable[[dict[str, Any]], object], str]] = [
     (
         SHOP,
         lambda d: d.update(synthetic=False),
-        f"{SHOP} {VALID}: (file) (a business file carries synthetic: true while Q4c is open)",
+        f"{SHOP} {VALID}: (file) (a guard file carries synthetic: true while Q4c is open)",
     ),
     (SHOP, without("synthetic"), f"{SHOP} {VALID}: synthetic"),
     (SHOP, lambda d: d.update(synthetic="yes"), f"{SHOP} {VALID}: synthetic"),
+    # Every guard file carries synthetic: true while Q4c is open (G4; M7 PR 4).
+    (
+        PLATFORM,
+        lambda d: d.update(synthetic=False),
+        f"{PLATFORM} {VALID}: (file) (a guard file carries synthetic: true while Q4c is open)",
+    ),
+    (PLATFORM, without("synthetic"), f"{PLATFORM} {VALID}: synthetic"),
+    (
+        HUMAN,
+        lambda d: d.update(synthetic=False),
+        f"{HUMAN} {VALID}: (file) (a guard file carries synthetic: true while Q4c is open)",
+    ),
+    (VET, without("synthetic"), f"{VET} {VALID}: synthetic"),
+    # The review note is one short line (M7 PR 4).
+    (SHOP, lambda d: d.update(review="x" * 201), f"{SHOP} {VALID}: review"),
+    (PLATFORM, lambda d: d.update(review=["not a line"]), f"{PLATFORM} {VALID}: review"),
     (VET_FILE, without("guidance"), f"{VET_FILE}: a health business has guidance lines (G3, G4)"),
     (
         VET_FILE,
@@ -726,3 +742,15 @@ def test_the_fixture_files_are_synthetic_and_name_no_sample_business() -> None:
         data = read_json(path)
         assert data["synthetic"] is True
         assert data["business_id"].startswith("fx-")
+    for path in [GUARD_DIR / PLATFORM, *sorted((GUARD_DIR / "types").glob("*.json"))]:
+        assert read_json(path)["synthetic"] is True
+
+
+def test_a_review_note_is_optional_and_kept_out_of_the_terms(tmp_path: Path) -> None:
+    guard, corpus = copy_fixtures(tmp_path)
+    before = load_guard_dir(guard, corpus)
+    edit_json(guard / PLATFORM, lambda d: d.update(review="not professionally reviewed (Q8)"))
+    after = load_guard_dir(guard, corpus)
+
+    assert [t.term for t in after.terms] == [t.term for t in before.terms]
+    assert after.rules_version != before.rules_version  # the file's bytes changed

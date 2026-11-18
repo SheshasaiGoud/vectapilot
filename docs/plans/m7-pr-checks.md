@@ -830,6 +830,15 @@ human steps are not M7's.
 - **Tests:** G14's self-test passes once H1 exists (pending until then), and the startup
   refusals (G4) run against the real files.
 
+- **PR 4 decisions (shesha, 2026-11-18, after ananya's and noah's reviews):**
+  - Injection terms may cite an author-written G7 class (option (a)); `pf_note_to_the_assistant`
+    stays, and the frozen injection number is disclosed as not independent (the probe is the
+    held-out figure; `data/safety/README.md`, the review sheet).
+  - A probe re-run needs a non-empty term diff, and the note names both rules versions (written
+    into PR 9's runbook).
+  - `hh_a_lot_of_blood` stays for recall (it also hits "a lot of blood tests").
+  - Every guard file carries `synthetic: true`, with an optional one-line `review` note.
+  - shesha reviews every term in `docs/notes/m7-term-review.md` before merging PR 4.
 ## PR 5 — `m7/limits` (zara; diego reviews Redis and the wrapper) · M · after PR 1, D3, D4
 - **The limiter**: one Lua script per request over every window (G9), `register_script`, the key
   grammar, the pseudonymous hash.

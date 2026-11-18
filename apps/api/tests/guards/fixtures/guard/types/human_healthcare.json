@@ -1,5 +1,6 @@
 {
   "business_type": "human_healthcare",
+  "synthetic": true,
   "not_covered_categories": ["self_harm"],
   "red_flags": [
     {
