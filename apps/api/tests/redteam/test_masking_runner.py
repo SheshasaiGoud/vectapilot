@@ -1,9 +1,11 @@
 """M7 PR 3: category E's runner (`redteam/masking.py`), registered for `CasePath.MASKING`.
 
-Today every E case reaches H2's stub and is `pending:H2`. TEST-ONLY stand-in maskers (they know
-each case's values, so they are NOT H2 and say nothing about how to mask) show the runner's
-other answers: an exact mask passes, and a missed, partial or extra span is a `leak`, a wrong
-label a miss, a raising masker G3's `guard_error`.
+While H2 was the stub every E case reached it and was `pending:H2`; since H2 was written
+(2026-11-20) the E cases run as hard cases against `mask_pii` in tests/redteam/test_cases.py,
+which prove the registered runner. TEST-ONLY stand-in maskers (they know each case's values, so
+they are NOT H2 and say nothing about how to mask) show the runner's other answers: an exact mask
+passes, and a missed, partial or extra span is a `leak`, a wrong label a miss, a raising masker
+G3's `guard_error`, and a stub's `NotImplementedError` pending only while H2 is unwritten.
 """
 
 from collections.abc import Callable, Sequence
@@ -78,13 +80,6 @@ def run(case: Case, masker: Masker) -> Verdict:
 def test_pr_3_registers_the_masking_runner() -> None:
     assert RUNNERS[CasePath.MASKING] is run_masking
     assert [locale.id for locale in MASK_LOCALES] == ["in", "generic"]
-
-
-@pytest.mark.parametrize("case", E_CASES, ids=lambda c: c.id)
-def test_every_e_case_reaches_h2s_stub_and_is_pending_on_h2(case: Case) -> None:
-    with pytest.raises(PendingHandWrite) as raised:
-        run_case(case, "hard", ENV)
-    assert raised.value.reason == "pending:H2"
 
 
 @pytest.mark.parametrize("case", E_CASES, ids=lambda c: c.id)

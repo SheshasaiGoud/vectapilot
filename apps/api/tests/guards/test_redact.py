@@ -1,11 +1,13 @@
 """G10's log redaction (M7 PR 3): `guards.redact`, unit.
 
-**Maskers here are stand-ins, never H2.** `DIGITS` replaces every ASCII digit with `#`, `HOSTILE`
-replaces any text it is given with `[MASKED]` (so a field that reaches the masker at all shows
-it), `RAISING` always raises. H2's own contract is tests/guards/test_mask_pii.py. With H2 a stub,
-`log_masker()` is None and the app's formatter writes free text as before (the interim,
-`guards/redact.py`'s docstring): tested here directly, and through every route in
-tests/guards/test_log_canary.py.
+**Maskers here are stand-ins, never H2**, except in the `log_masker` and `configure_logging`
+tests at the end. `DIGITS` replaces every ASCII digit with `#`, `HOSTILE` replaces any text it is
+given with `[MASKED]` (so a field that reaches the masker at all shows it), `RAISING` always
+raises. H2's own contract is tests/guards/test_mask_pii.py. Since H2 was written (2026-11-20),
+`log_masker()` is H2 over `clean` and the app's formatter masks free text (tested at the end and
+through every route in tests/guards/test_log_canary.py). The formatter without a masker (the
+interim while H2 was the stub, `guards/redact.py`'s docstring) is still tested directly here: it
+is what `configure_logging` installs if the startup probe ever finds a stub again.
 
 Personal data comes from the red-team generator (`redteam/pii.py`, reserved ranges) or is a
 string of all ones or nines; the canary mark is free text with no PII shape.
@@ -453,7 +455,8 @@ def test_the_formatter_never_raises_and_never_writes_the_record() -> None:
 
 
 def test_without_a_masker_free_text_is_written_as_today() -> None:
-    # The interim: H2 is the stub, so `log_masker()` is None. Free text is not masked or cleaned.
+    # The formatter without a masker (the interim while H2 was the stub, `log_masker()` None):
+    # free text is not masked or cleaned.
     record = make("call %s\t", (PHONE,), note=EMAIL * 200, count=9, trace_id=TRACE)
 
     assert INTERIM.format(record) == JsonFormatter().format(record)
@@ -497,7 +500,8 @@ def test_the_cut_reads_the_cleaned_text_the_masker_masks(invisible: str) -> None
     # diego's PR 3 review: in "99999<ZW> <ZW>99999" the raw space has no digit beside it, but
     # `clean` drops the invisible characters and the masker would see "99999 99999" cut after
     # its first half. Cleaned first, that space is between digits: never a place to cut. (ZWJ
-    # and ZWNJ survive `clean`; digits joined by them are a masking gap, guide §2.6.)
+    # and ZWNJ survive `clean`. Since H2, its squeezed view masks digits joined by them, but this
+    # cut does not look through them yet: an open item recorded in H2's PR.)
     value = f"99999{invisible} {invisible}99999"
     for length in range(FIELD_CAP - 16, FIELD_CAP - 2):  # the cap falls across the value
         recording = Recording()
@@ -890,8 +894,13 @@ def test_the_middleware_names_only_http_scopes_and_create_app_installs_it() -> N
 # ── The masker and configure_logging ─────────────────────────────────────────────────────────
 
 
-def test_log_masker_is_none_while_h2_is_the_stub() -> None:
-    assert log_masker() is None
+def test_log_masker_is_h2_over_clean_text_once_h2_is_written() -> None:
+    # H2 written (2026-11-20): the startup probe passes, so the masker is H2 over `clean` (the
+    # doubled space collapsed, the zero-width space dropped, then the phone masked).
+    masker = log_masker()
+
+    assert masker is not None
+    assert masker(f"call  {PHONE}\u200b now") == "call [PHONE] now"
 
 
 def test_log_masker_masks_clean_text_once_h2_answers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -912,6 +921,18 @@ def test_log_masker_masks_clean_text_once_h2_answers(monkeypatch: pytest.MonkeyP
     assert masker is not None
     assert masker("call  99​9") == "call ###"  # cleaned first: spaces, the zero-width space
     assert seen[-1] == ("call 999", ("in", "generic"))
+
+
+def test_a_stub_h2_would_still_mean_no_masker(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The probe outlives the stub (H2 written 2026-11-20): if `mask_pii` raised the stub's
+    # `NotImplementedError` again, there would be no masker and `configure_logging` would say so
+    # (the test below), never an error at every log line.
+    def stub(text: str, locales: Any) -> NoReturn:  # NOT H2: the stub as it was
+        raise NotImplementedError
+
+    monkeypatch.setattr(redact, "mask_pii", stub)
+
+    assert log_masker() is None
 
 
 def test_a_broken_h2_stops_startup_instead_of_turning_masking_off(
@@ -957,7 +978,8 @@ def test_configure_logging_installs_exactly_what_it_is_asked_for(
     configure_logging("INFO", redact=True)
     configure_logging("INFO", redact=True)
     formatter, filters = installed()
-    assert type(formatter) is RedactingJsonFormatter and formatter.masker is None
+    assert type(formatter) is RedactingJsonFormatter and formatter.masker is not None
+    assert formatter.masker(PHONE) == "[PHONE]"  # H2: the startup probe passed
     assert [type(f) for f in filters if isinstance(f, DropQueryString)] == [AccessLine]
 
     configure_logging("INFO")
@@ -967,15 +989,20 @@ def test_configure_logging_installs_exactly_what_it_is_asked_for(
 
 
 @pytest.mark.usefixtures("restored")
-def test_without_h2_the_redacting_setup_says_so_once_with_a_fixed_code(
+def test_with_h2_the_redacting_setup_writes_no_log_masking_line(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # H2 written (2026-11-20): no `log_masking` line is written at all. Only a masker the startup
+    # probe could not get (`log_masker()` None, as while H2 was the stub) would be said once,
+    # with a fixed code, and free text written unmasked.
     stdout = io.StringIO()
     monkeypatch.setattr(sys, "stdout", stdout)
 
     configure_logging("INFO", redact=True)
     configure_logging("INFO")
-    monkeypatch.setattr(redact, "log_masker", lambda: digits)
+    assert stdout.getvalue() == ""
+
+    monkeypatch.setattr(redact, "log_masker", lambda: None)
     configure_logging("INFO", redact=True)
 
     lines = [loads(line) for line in stdout.getvalue().splitlines()]
@@ -989,7 +1016,7 @@ def test_without_h2_the_redacting_setup_says_so_once_with_a_fixed_code(
         }
     ]
     formatter, _ = installed()
-    assert isinstance(formatter, RedactingJsonFormatter) and formatter.masker is digits
+    assert isinstance(formatter, RedactingJsonFormatter) and formatter.masker is None
 
 
 def test_importing_the_log_module_loads_no_guard() -> None:

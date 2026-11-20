@@ -802,8 +802,10 @@ human steps are not M7's.
   - The redacting formatter is installed in PR 3, with masking off until H2 (PR 6's bullet and
     ADR 0018 part 5 amended).
   - Open, recorded: digits joined by ZWJ, ZWNJ, VS15 or VS16 and keycap digits are not masked
-    (handled in H2's PR, e.g. a squeezed view with an offset map); the client IP in the access
-    line is decided (keep, truncate to /24 or /48, or drop) before any real pilot business.
+    (handled in H2's PR, e.g. a squeezed view with an offset map; done 2026-11-20 on
+    `m7/pii-masking` as rule 2's squeezed view, which only adds spans, for review); the client IP
+    in the access line is decided (keep, truncate to /24 or /48, or drop) before any real pilot
+    business.
 - **A locale registry** (`in`, `generic`) with per-type patterns as data. Verhoeff and Luhn are
   team code over Unicode digits (`unicodedata.digit`), checked against published test vectors.
 - **The H2 scaffold.** `guards/pii.py`'s `mask_pii(text: Clean, locales) -> Masked` (masked
@@ -1006,6 +1008,14 @@ The G14 self-test and G3 surround it. The explain-back is part of acceptance.
 - Nothing is logged or kept. Patterns follow G3's rule.
 
 The explain-back is part of acceptance.
+
+**H2 written 2026-11-20** (Claude at shesha's request, D5 (b); reviewed by ananya-rag, mutation
+checked). Joined and keycap digits are masked through a squeezed view with an offset map (the PR 3
+open item). Decided 2026-11-20 (shesha): four review items stay recorded gaps
+(`docs/learning/m7-masking.md` §5): `redact.safe_cut` looking through the squeezed characters is a
+small follow-up commit in PR 7; widening the squeezed view to every combining mark, the locale
+tightenings (line breaks, separator runs, PAN's right edge) and masking a digit-then-`+` phone are
+revisited with real data.
 
 ## H3 — `m7/output-checks` (`[HAND-WRITE]`, [D5]; time-box 1.5 h) · S
 `check_reply(reply: str, context: OutputContext) -> tuple[Finding, ...]`. Pure: G8's checks,

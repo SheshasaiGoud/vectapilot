@@ -12,12 +12,20 @@ neighbour. Pure Python over one string: no model, no network, no
 files. The decisions behind every rule are in [ADR 0018](../adr/0018-guardrails.md) (part 5) and
 the plan's G3, G6, G10 and "H2" sections ([`m7-pr-checks.md`](../plans/m7-pr-checks.md)).
 
-> **Status (2026-11-18, M7 PR 3 scaffold, after ananya's and diego's reviews).** The body raises
-> `NotImplementedError`; its tests are strict xfails behind one switch. Rules 2, 3 and 6 of the
-> contract (every start position, overlapping candidates join, repeated passes) follow ananya's
-> review and were confirmed by shesha on 2026-11-18, before H2 is written. Under D5 (b) Claude writes it at shesha's request, on its own
-> branch, for shesha's review; the explain-back (§6) is shesha's and part of acceptance. No
-> number in this guide is a result: every text and digit string below is made up to explain a
+> **Status (2026-11-20): H2 is written, by Claude at shesha's request (D5 (b)), on
+> `m7/pii-masking`, for shesha's review; the explain-back (§6) is shesha's, due, and part of
+> acceptance.** All 120 contract cases passed with no expected value changed and the switch is
+> deleted. Rules 2, 3 and 6 (every start position, overlapping candidates join, repeated passes)
+> follow ananya's PR 3 review, confirmed by shesha on 2026-11-18. One addition, the PR 3 open
+> item: rule 2 also runs every pattern over a **squeezed view** without ZWNJ, ZWJ, VS15, VS16 and
+> the keycap mark (§2.6), with 18 new hand-derived cases, plus one for the cap's boundary (6,001
+> characters, which a mutation check showed no test pinned). After ananya-rag's review and a
+> second mutation check (2026-11-20): two hand-derived pass tests (`+` phones glued one after
+> another, §2.8) and six probes, each shown to fail on the mutant it was written for (the joined
+> end, the best's length, a tie across the two views both ways, the cap checked once, a fixed
+> over-cap message): 147 in all, with no earlier expected value changed. Log masking is now on
+> and the 18 category E red-team cases are hard passes. The review's open questions are in §5.
+> No number in this guide is a result: every text and digit string below is made up to explain a
 > rule, and every personal-data value comes from a reserved range.
 
 ## Your task
@@ -201,15 +209,40 @@ review ran each one):
 - **Dotted phones** (`99999.99999`) and **parentheses** (`(020) 7946 0123`) are not matched; a
   full stop between groups counts only for Aadhaar and 13–19 digit runs
   (`4111.1111.1111.1111` is masked).
+- **Other separators** between digit groups split the number, so each group stays visible when
+  it is no shape alone: a line break (`99999` newline `99999`, or a card broken across lines,
+  `4111 1111` newline `1111 1111`; `clean` turns CRLF, U+2028, U+2029, NEL and VT into a
+  newline too), a run of separators (`99999 - 99999`, `99999--99999`), and a slash, underscore,
+  comma or middle dot (`99999/99999`, `99999_99999`, `99999,99999`, `99999·99999`). Tightening
+  any of them is a locale choice (§5, open).
+- **Digits that are not decimal digits** (Unicode category No, so not digits in the view):
+  superscripts (`⁹⁹⁹⁹⁹⁹⁹⁹⁹⁹`) and circled digits (`⑨⑨⑨⑨⑨⑨⑨⑨⑨⑨`) are not matched.
 - **Spaced or written-out e-mail addresses** (`customer01 @ mail.example`,
   `customer01[at]mail.example`) are not matched, and an e-mail local part longer than 64
   characters keeps its start.
-- **A Devanagari local part** is matched only from its first `\w` character after a vowel sign:
-  `नाम@mail.example` becomes `ना[EMAIL]` (Python's `\w` does not match a combining vowel sign).
-- **Digits joined by ZWJ or ZWNJ** (which `clean` keeps for Indic conjuncts and emoji) or a
-  variation selector are not matched (`99999` + ZWJ + `99999`), nor are keycap digits.
+- **A Devanagari local part** is matched only from the `\w` characters right before the `@`
+  (Python's `\w` does not match a combining vowel sign, virama or anusvara): `नाम@mail.example`
+  becomes `ना[EMAIL]` and `राम@okaxis` becomes `रा[UPI]`, because a letter sits right before the
+  `@`. A local part that ends in a sign has no candidate at all: `नमस्ते@gmail.com` and
+  `सीता@okaxis` stay as written (ananya's H2 review; widening the squeezed view to every
+  combining mark would mask them, §5, open).
+- **Digits joined by ZWJ or ZWNJ** (which `clean` keeps for Indic conjuncts and emoji), VS15 or
+  VS16, and **keycap digits** (`9`, VS16, U+20E3) were the PR 3 open item; H2 handles them with
+  a **squeezed view** (rule 2, `pii.SQUEEZED_OUT`): when the ASCII view holds one of those five
+  characters, every pattern also runs over the view without them, and an offset map turns each
+  span back into the text's offsets, from its first character to just before the next character
+  kept, so a keycap's marks after the last digit go with it. Both views' candidates join under
+  rule 3, so the squeezed view only adds spans: `99999` + ZWJ + `99999` and ten keycap nines are
+  each `[PHONE]`, and a PAN after `x` + ZWJ is still masked although `x` sits right before it in
+  the squeezed view. Still not matched: digits carrying any other combining mark (a strike-through
+  U+0336, an enclosing circle U+20DD, a combining grave U+0300), which `clean` keeps (§5, open).
+  And the log formatter's cut (`redact.safe_cut`, team code) does not look through the five
+  characters yet, so a field over `FIELD_CAP` cut at the space in `99999` + ZWJ + space + ZWJ +
+  `99999` keeps its first five digits (§5, open; before H2 all ten stayed).
 - **Two codes glued together** (`ABCZZ9999ZABCZZ9999Z`) are not masked: each blocks the other's
-  whole-word boundary. A code glued to a number is masked in a second pass (rule 6).
+  whole-word boundary. A code glued to a number is masked in a second pass (rule 6) when the
+  number is itself masked: `ABCZZ9999Z1` and `ABCZZ9999Z99999999999` stay whole (neither number
+  is a shape, so the code stays glued), as does a code glued after letters, `myPANisABCZZ9999Z`.
 - **A run longer than 19 digits** is masked whole when contiguous (`generic.long_digits`) and,
   with candidates at every start, when spaced per digit or grouped in fours, threes or fives (a
   13–19 digit window ends on a group's end); its label is then usually `ID_NUMBER`. Two groups of
@@ -218,12 +251,16 @@ review ran each one):
 
 ### 2.7 Bounded by construction (G3)
 `re` has no timeout and `asyncio.timeout` cannot interrupt pure code, so a slow pattern would
-hold a request with nothing to stop it. Three things keep masking linear: every text is capped
+hold a request with nothing to stop it. Three things keep masking bounded: every text is capped
 first (`MASK_CAP`, 6,000; over it you raise `OverCap`, never truncate); every pattern follows
 G3's written rule, checked when the pattern is built (no quantifier inside another, no two
 neighbouring quantifiers that can match the same character, every repeat bounded), so each start
 position costs a bounded number of steps, `anywhere`'s too; and at most `MAX_PASSES` (3) passes
-replace anything. The adversarial tests at the cap use a generous time bound: a bound, not a
+replace anything. One exception to the second: a pattern of one item may repeat up to the cap
+(rule 3 of G3), and `generic.long_digits` reads from every start of a run of digits to the run's
+end, so it is quadratic within one run: at most about `MASK_CAP` squared over 2 characters (18
+million) per view, and H2 searches a second, squeezed view when the text holds a joiner (§2.6).
+The adversarial tests at the cap assert under `GENEROUS_SECONDS` (2.0 s): a bound, not a
 measurement.
 
 Why 6,000 and not the message's 2,000: G1 counts 2,000 on the raw text, and `clean`'s NFC can
@@ -237,11 +274,16 @@ Patterns that need a whole word look one character beyond the span (`(?<![A-Za-z
 `pan ABCZZ9999Z9999999999` the PAN is followed by a digit, so it is no whole word, and only the
 mobile is found: one pass gives `pan ABCZZ9999Z[PHONE]`, with the PAN visible. Now a `[`
 follows it, and a second pass masks it. So masking repeats until a pass finds nothing, and the
-counts add up. A placeholder never holds a match (`test_pii_types.py`), so with the registered
-patterns two passes settle; for any patterns (the tests' letter patterns can chain), at most
-`MAX_PASSES` passes replace anything and a text that still holds a span raises
-`MaskingIncomplete` (fail closed). The result is idempotent by construction: masking it again
-finds nothing.
+counts add up. A placeholder never holds a match (`test_pii_types.py`), but a replacement can
+free a neighbour that frees the next one: a phone never starts right after a digit, so in
+`9999999999+99999999999+99999999999` each `+` phone waits until the digit before it is inside a
+placeholder, one pass each. Such chains can be any length, with the registered patterns as with
+the tests' letter patterns, so at most `MAX_PASSES` passes replace anything and a text that
+still holds a span then raises `MaskingIncomplete`: fail closed, a `guard_error` hand-off at a
+route and `[redaction_failed]` in a log field. A crafted text can force that hand-off; it can
+never make masking return a visible value. The same refusal leaves `1+99999999999` as it is:
+the `+` phone has a digit before it, and eleven digits alone are no other shape. The result is
+idempotent by construction: masking it again finds nothing.
 
 ## 3. The contract, with hand-checkable examples
 Texts go through `clean` first; `DEFAULT` is `locales()` (India, then generic). "nines" and "ones"
@@ -251,6 +293,7 @@ are digit strings that belong to nobody.
 |---|---|---|---|
 | `call +91 00000 12345 now` | `call [PHONE] now` | PHONE 1 | 2, 5 |
 | the same in Devanagari digits | `call [PHONE] now` | PHONE 1 | 2 (the view) |
+| `call 99999<ZWJ>99999 now`, or ten keycap nines | `call [PHONE] now` | PHONE 1 | 2 (the squeezed view) |
 | `ID <Aadhaar, valid check>` | `ID [AADHAAR]` | AADHAAR 1 | 4 |
 | `ID <Aadhaar, wrong check digit>` | `ID [ID_NUMBER]` | ID_NUMBER 1 | 4 (shape decides) |
 | `ref 1111111111111` (13 ones) | `ref [ID_NUMBER]` | ID_NUMBER 1 | 4 (Luhn: 7 + 12 = 19) |
@@ -267,14 +310,14 @@ are digit strings that belong to nobody.
 | a masked text, again | the same text | none | 6 |
 
 ## 4. Test by test, with level-2 hints
-- **Rule 1, errors** (§6 of the tests, 4 tests): check the locales and the cap before anything
+- **Rule 1, errors** (§6 of the tests, 7 tests): check the locales and the cap before anything
   else, once; raise `caps.OverCap` with a fixed message that names `MASK_CAP`, never the text.
   (`caps.require_within_cap` checks a surface's own cap, which is not this one.)
 - **Rule 2, candidates** (§1, 3 tests, 33 cases): `view = ascii_view(text)`, then
   `for locale in locales: for pattern in locale.patterns: for match in
   pattern.anywhere.finditer(view)`, with `match.span(1)` as the span. Remember each
   candidate's start, end, pattern and order (a running counter over all patterns).
-- **Rule 3, joining** (§3, 7 tests, 18 cases): sort by start; sweep, extending the current
+- **Rule 3, joining** (§3, 7 tests, 20 cases): sort by start; sweep, extending the current
   span while the next candidate starts before its end (`start < end`, so touching spans stay
   apart); for each joined span keep the candidate with the smallest
   `(-(end - start), start, order)`.
@@ -283,11 +326,27 @@ are digit strings that belong to nobody.
   joined one) picks between `pattern.kind` and `PiiKind.ID_NUMBER`.
 - **Rule 5, replace and count** (§4, 2 tests, 5 cases): walk the joined spans in text order,
   copy the text before each, append `PLACEHOLDERS[label]`, count the label; copy the rest.
-- **Rule 6, passes, and purity** (§5, 8 tests, 11 cases): rules 2–5 are one pass over the
+- **Rule 6, passes, and purity** (§5, 10 tests, 13 cases): rules 2–5 are one pass over the
   current text; loop until a pass finds nothing, adding the counts; after `MAX_PASSES` passes
   that replaced something, one more pass that still finds a span means
   `raise MaskingIncomplete`. Return `Masked(Clean(result), counts)`. No logging.
-- **The cap** (§7, 3 tests): nothing to add; they show the work stays linear.
+- **The cap** (§7, 3 tests): nothing to add; they show the work stays within a generous bound.
+- **Rule 2's squeezed view** (§8, 8 tests, 20 cases; added with H2, §2.6): only when the view
+  holds a character of `SQUEEZED_OUT`, build the view without them and a list of where each of
+  its characters sits in the view (one more entry: the view's length), run every pattern over it
+  too, and map each span `[a, b)` to `[kept[a], kept[b])`.
+
+**As written (2026-11-20).** Rules 2 and 3 meet in one array instead of a sort: for each start
+offset H2 keeps only the longest candidate that starts there (patterns run in order, each over
+both views, so a tie keeps the earlier pattern whichever view found it). Every other candidate
+starting there lies inside it, so it would join the same span and never be its best. Then one
+sweep from left to right joins (a start before the current span's end; the joined span ends at
+the furthest end so far, not at its best candidate's) and keeps the best (only a strictly longer
+candidate than the best so far replaces it, so the leftmost wins a tie). Work: the regexes over
+each view, then linear in the text; the one quadratic part is `generic.long_digits` at every
+start of a long digit run (a run of 6,000 nines reads about 18 million characters per view
+inside the regex engine, twice that with a squeezed character; the cap tests assert under
+`GENEROUS_SECONDS` = 2.0 s, a bound, not a measurement).
 
 ## 5. The hint ladder, the time-box and decisions
 The ladder is M1's to M6's: level 1 = §2, level 2 = §4, level 3 = pseudo-code in chat on request
@@ -310,7 +369,11 @@ and masks every free-text log field with your function as soon as it stops raisi
 `NotImplementedError` (its startup probe, `guards.redact.log_masker`); until then the app's
 free text is written as before and `log_masking status=masker_unavailable` says so (decided 2026-11-18, shesha;
 the plan's PR 6 bullet and ADR 0018 part 5 are amended to match). Your PR
-then also turns the four interim log tests listed in §1 into their H2 versions.
+then also turns the four interim log tests listed in §1 into their H2 versions. Done in H2's PR
+(2026-11-20): the four log tests, `test_plan.py`'s two H2 lines, the deleted stub-pinning test
+in `test_masking_runner.py`, and one more, `test_runs.py`'s dry run (a dry run now scores the
+18 E cases in process); plus `test_redact.py::test_a_stub_h2_would_still_mean_no_masker`, which
+keeps the probe's stub branch tested now that the real stub is gone.
 
 **Open (proposals in PR 3, for review):**
 - Every business masks with `in` and `generic` until Q4b names the other countries and a
@@ -328,6 +391,28 @@ then also turns the four interim log tests listed in §1 into their H2 versions.
   `call 9999 999 999` is masked now, where the first draft missed it.
 - GSTIN as a `[PAN]`-labelled shape (ananya's review, decided 2026-11-18, shesha: a scope choice
   inside G6's nine types); bank account numbers stay a gap (§2.6). The M7 note records both.
+
+**After ananya-rag's H2 review (2026-11-20). Decided 2026-11-20 (shesha): all four stay recorded
+gaps; the first becomes a small follow-up commit in PR 7, the rest are revisited with real data:**
+- **The log cut and the squeezed view.** `redact.safe_cut` (team code, outside H2's file) still
+  treats a space between two squeezed characters as safe, so a log field over `FIELD_CAP` can
+  keep `99999` + ZWJ of `99999` + ZWJ + space + ZWJ + `99999` (no regression: before H2 all ten
+  stayed). Proposal: compare the nearest character on each side of the space that is not
+  squeezed out, through one predicate shared with `pii` (so widening the set below moves both),
+  as its own commit in H2's PR.
+- **Widen the squeezed view** from the five characters to them plus every combining mark
+  (Unicode Mn, Mc and Me). It would mask digits carrying a strike-through, enclosing circle or
+  grave mark, and Devanagari local parts that end in a sign (§2.6). ananya's scratch run changed
+  0 of the 121 Hindi, Telugu and English lines of `data/sample` (not a result: a check). Cost:
+  the second view is then built for almost every Hindi or Telugu text.
+- **Locale tightenings** (§2.6), each trading recall for false positives in tables and
+  arithmetic: (a) a newline in `SEPARATOR` and `GROUP_SEPARATOR`; (b) a separator run `[ -]{1,3}`
+  (G3's rule 2 still holds: it never overlaps `[0-9]`); (c) PAN's right boundary as "not before
+  a letter" (a PAN ends in a letter, so a digit after it cannot lengthen it; GSTIN unchanged).
+- **The `+` phone after a digit** (§2.8): dropping the digit-before-`+` refusal from
+  `generic.phone_N` only would find every glued `+` phone in pass 1 and mask `1+99999999999`;
+  the cost is that arithmetic such as `100+20000000` becomes `100[PHONE]`. This changes a rule
+  decided on 2026-11-18 (zara's PR 3 mutation check), so it is shesha's call.
 
 ## 6. Explain it back (part of acceptance)
 - Why does shape decide and not the checksum? Give the customer story for each way round.

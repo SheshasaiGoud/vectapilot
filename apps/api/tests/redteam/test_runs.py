@@ -1,8 +1,9 @@
 """M7 PR 2: `redteam run` (dry) and `summarize` (`redteam/runs.py`, `redteam/summary.py`) on the
 real frozen v0.1, with a TEST-ONLY `Io` (no git; the folder goes under tmp_path).
 
-In PR 2 every case is pending. Stand-in runners (TEST-ONLY, never registered) show the other
-statuses reach the summary: passed, missed, over-escalated, not run.
+In PR 2 every case was pending; PR 5's limiter cases are not run in a dry run, and since H2
+(2026-11-20) a dry run scores category E in process. Stand-in runners (TEST-ONLY, never
+registered) show the other statuses reach the summary: passed, missed, over-escalated, not run.
 """
 
 import json
@@ -51,7 +52,7 @@ def lines_of(folder: Path) -> list[ResultLine]:
     return [ResultLine.model_validate_json(line) for line in text.splitlines()]
 
 
-def test_a_dry_run_reports_every_case_pending_but_the_limiters_database_cases(
+def test_a_dry_run_scores_category_e_and_reports_the_rest_pending_but_the_limiters_cases(
     tmp_path: Path,
 ) -> None:
     folder = run_dry(DATASET_DIR, io=fake_io(tmp_path))
@@ -60,8 +61,11 @@ def test_a_dry_run_reports_every_case_pending_but_the_limiters_database_cases(
     lines = lines_of(folder)
     assert [line.id for line in lines] == sorted(CASES)
     # PR 5 registers the limiter: k-002 and k-004 need real Redis, which a dry run never has.
-    not_run = {line.id: line.reason for line in lines if line.status != "pending"}
+    not_run = {line.id: line.reason for line in lines if line.status == "not_run"}
     assert not_run == {"k-002": "database_environment", "k-004": "database_environment"}
+    # H2 is written (2026-11-20): category E runs in process and pure, so a dry run scores it.
+    scored = {line.id: line.status for line in lines if line.status not in ("pending", "not_run")}
+    assert scored == {c.id: "passed" for c in CASES.values() if c.category is Category.E}
     info = RedteamRunInfo.model_validate_json((folder / RUN_FILE).read_text("utf-8"))
     assert (info.dry_run, info.cases, info.cost.total_usd) == (True, 139, Decimal(0))
     assert info.cases_reviewed == 0
@@ -77,13 +81,14 @@ def test_a_dry_run_reports_every_case_pending_but_the_limiters_database_cases(
         REPLAY_LINE,
         "rules version: no data/safety yet",
         "PII generator: redteam-pii.1, seed 20261116",
-        "- pending: 137",
+        "- pending: 119",
         "  - pending:PR 6: 88",
         "- not run: k-002, k-004",
         "with uncommitted changes). CI gate: not checked by this run",
         "Crisis messages: not measured",
+        "- hard passed: 18 of 18 scored (94 not scored)",  # category E, since H2
+        "| mask-several-types | 2 | 0 | 0 |",
         # noah's review: nothing scored reads "not measured", never a zero.
-        "- hard passed: not measured (0 of 112 scored)",
         "- known gaps still failing as listed: not measured (0 of 13 scored)",
         "Leaks: not measured (0 of 10 scored).",
         "Synthetic, agent-drafted (zara-safety): 0 of 139 cases reviewed by a person.",

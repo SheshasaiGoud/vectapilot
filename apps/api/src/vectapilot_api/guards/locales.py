@@ -23,10 +23,15 @@ bad pattern stops the import; `tests/guards/test_locales.py` re-checks every reg
 Rule 2 compares character sets on `PROBE`, a fixed alphabet of the characters the platform's
 texts hold (ASCII, Latin-1 letters, Devanagari, Telugu, general punctuation and fullwidth
 forms): enough for the classes used here, and a new class with a character outside it gets a
-character added there first. With 1-3, each start position costs at most a bounded number of
-steps, so masking is linear in the text by construction; G3's adversarial-input test at the
-cap shows it with a generous bound (a bound, not a measurement). `PiiPattern.anywhere` (the same
-pattern inside a lookahead) finds a match at every start position, each one bounded the same way.
+character added there first. With 1-3, a pattern of more than one item costs at most a bounded
+number of steps per start position, so it is linear in the text by construction. A one-item
+pattern that may reach `MASK_CAP` (rule 3) costs up to `MASK_CAP` steps per start:
+`generic.long_digits` makes masking quadratic within one run of digits, at most about
+`MASK_CAP` squared over 2 characters (18 million) per view H2 searches, and H2 searches two
+views when the text holds a character it squeezes out (`pii.SQUEEZED_OUT`). G3's
+adversarial-input tests at the cap assert a generous time bound (a bound, not a measurement).
+`PiiPattern.anywhere` (the same pattern inside a lookahead) finds a match at every start
+position, each one bounded the same way.
 
 **The ASCII view** (`ascii_view`). Patterns are written over ASCII digits and letters. H2 runs
 them on `ascii_view(text)`: every decimal digit of any script becomes its ASCII digit

@@ -1,10 +1,14 @@
 """H2's contract, executable: `guards.pii.mask_pii` (`[HAND-WRITE]`, D5 (b): written by Claude at
 shesha's request on `m7/pii-masking`; guide `docs/learning/m7-masking.md`).
 
-**One switch.** Every test here runs H2, so the module carries one `pytestmark`: a strict xfail on
-`NotImplementedError`. While H2 is the stub, each shows `xfailed`. Once H2 is written, a test it
-passes shows `XPASS(strict)` (a failure on purpose) and a test it fails shows `FAILED` with the
-assert's diff. When every one is `XPASS(strict)`, delete the `pytestmark` statement below.
+**The switch is gone.** While H2 was the stub, one `pytestmark` (a strict xfail on
+`NotImplementedError`) held every test here. H2 was written on 2026-11-20 (Claude, at shesha's
+request); every case showed `XPASS(strict)` with no expected value changed, and the switch was
+deleted. Section 8 was added with H2: the squeezed view for joiners, variation selectors and
+keycaps (rule 2; the PR 3 open item), its expected values derived by hand as everywhere here.
+After ananya-rag's review and a mutation check, two pass tests (`+` phones glued in a chain) and
+six probes were added, each shown to fail on the mutant it was written for (`abcde`, `aaaab`,
+the cap checked once, a fixed over-cap message, a tie across the two views both ways).
 
 **Expected values are derived by hand** in the comments, never by running a masker. Personal data
 comes only from the red-team generator's types (reserved ranges: `+91 00000`, an Aadhaar starting
@@ -20,7 +24,9 @@ candidate at every start position, spans with their separators; 3. overlapping c
 into one span, labelled by its best candidate: longest, then leftmost, then the earlier pattern;
 4. shape decides, the checksum only picks the label (valid: the pattern's kind, invalid:
 `ID_NUMBER`); 5. placeholders in, everything else kept, counts per label; 6. passes repeat until
-one finds nothing (at most `MAX_PASSES` that replace), so the result is idempotent.
+one finds nothing (at most `MAX_PASSES` that replace), so the result is idempotent. Rule 2 also
+runs every pattern over the view without ZWNJ, ZWJ, VS15, VS16 and the keycap mark, each span
+mapped back to the text and running on to the next character kept; both views' candidates join.
 """
 
 import logging
@@ -49,10 +55,6 @@ from vectapilot_api.redteam.pii import (
     PiiType,
     Placeholder,
     leak_forms,
-)
-
-pytestmark = pytest.mark.xfail(
-    strict=True, raises=NotImplementedError, reason="H2 (mask_pii) is written on m7/pii-masking"
 )
 
 GEN: Final = PiiGenerator()
@@ -295,6 +297,9 @@ AA: Final = PiiPattern("t.aa", PHONE, (Chars("a"), Chars("a")))
 AAB: Final = PiiPattern("t.aab", PiiKind.UPI, (Chars("a"), Chars("a"), Chars("b")))
 BB: Final = PiiPattern("t.bb", PiiKind.PASSPORT, (Chars("b"), Chars("b")))
 BCC: Final = PiiPattern("t.bcc", PiiKind.IFSC, (Chars("b"), Chars("c"), Chars("c")))
+ABC: Final = PiiPattern("t.abc", PHONE, (Chars("a"), Chars("b"), Chars("c")))
+CDE: Final = PiiPattern("t.cde", EMAIL, (Chars("c"), Chars("d"), Chars("e")))
+D: Final = PiiPattern("t.d", CARD, (Chars("d"),))
 """TEST-ONLY patterns (plain letters, no personal data) that pin the overlap rule alone."""
 
 
@@ -320,6 +325,14 @@ BCC: Final = PiiPattern("t.bcc", PiiKind.IFSC, (Chars("b"), Chars("c"), Chars("c
         # three join into 0-6. The longest are "aab" and "bcc"; the leftmost, "aab", gives the
         # label, though "bb" is the earlier pattern.
         ((BB, BCC, AAB), "aabbcc", "[UPI]", {PiiKind.UPI: 1}),
+        # "aa" at 0, 1 and 2, and "aab" at 2 (2-5): one span 0-5. When "aab" comes, the span so
+        # far (0-3) is as long as it, but the best so far ("aa", 2) is shorter: the longest,
+        # "aab", gives the label. (Compared with the span, not the best, "aa" kept it.)
+        ((AA, AAB), "aaaab", "[UPI]", {PiiKind.UPI: 1}),
+        # "abc" (0-3), "cde" (2-5) and "d" (3-4) join into 0-5: "d" ends before the joined span
+        # does, and the span still ends at 5, so no "e" is left. "abc" and "cde" tie at three;
+        # the leftmost, "abc", gives the label.
+        ((ABC, CDE, D), "abcde", "[PHONE]", {PHONE: 1}),
     ],
 )
 def test_the_overlap_order_on_test_only_patterns(
@@ -447,6 +460,36 @@ def test_a_text_that_does_not_settle_fails_closed() -> None:
     assert str(raised.value) == str(MaskingIncomplete())
 
 
+def test_glued_plus_phones_take_one_pass_each() -> None:
+    # The registered patterns chain too (ananya's H2 review): a phone never starts right after a
+    # digit, so a `+` glued to a number waits for it. Ten nines (0-10), "+" and eleven nines
+    # (10-22), a PAN (22-32), twenty ones (32-52). Pass 1: the bare mobile (0-10; a `+` after it
+    # is no digit) and `generic.long_digits` (32-52; the next start has 19 ones left). Not the `+`
+    # phone (a nine before it), not the PAN (no whole word: a nine before it, a one after it),
+    # not the eleven nines alone (a mobile's tenth digit has a nine after it; a `+` is no
+    # separator for a 13-19 digit run). Pass 2, on "[PHONE]+<eleven nines><PAN>[ID_NUMBER]": a
+    # `]` before the `+`, a letter after the eleventh nine: `generic.phone_11`. Pass 3: a `]`
+    # either side of the PAN, a whole word. Three passes that replace; the check finds nothing.
+    masked = mask("9999999999+99999999999" + value(PiiType.PAN) + "1" * 20)
+
+    assert masked.text == "[PHONE][PHONE][PAN][ID_NUMBER]"
+    assert masked.counts == {PHONE: 2, PiiKind.PAN: 1, ID_NUMBER: 1}
+
+
+def test_a_fourth_glued_plus_phone_fails_closed() -> None:
+    # Ten nines, then "+" and eleven nines three times (46 characters). Each pass frees only the
+    # next `+` phone, as above: pass 1 the mobile, passes 2 and 3 one `+` phone each. After three
+    # passes "[PHONE][PHONE][PHONE]+<eleven nines>" still holds one: MaskingIncomplete, with its
+    # fixed message (fail closed: a hand-off, never the rest of the text).
+    text = "9999999999" + ("+" + "9" * 11) * 3
+    assert len(text) == 46
+
+    with pytest.raises(MaskingIncomplete) as raised:
+        mask(text)
+
+    assert str(raised.value) == str(MaskingIncomplete())
+
+
 @pytest.mark.parametrize("kind", [PiiType.PHONE_IN, PiiType.EMAIL, PiiType.CARD, PiiType.PAN])
 def test_masking_a_masked_text_changes_nothing(kind: PiiType) -> None:
     once = mask(f"value {value(kind)} here")
@@ -497,6 +540,20 @@ def test_over_the_cap_fails_closed_and_the_error_holds_no_value() -> None:
     assert all(form not in shown for form in leak_forms(phone))
 
 
+def test_the_over_cap_error_is_the_same_for_any_text() -> None:
+    # Rule 1: a fixed message, so two texts over the cap give the same error wherever the phone
+    # sits (the test above puts it first; a message holding the text's end would pass there).
+    phone = value(PiiType.PHONE_IN)
+    shown = []
+    for text in (f"call {phone} " + "x" * MASK_CAP, "x" * MASK_CAP + f" call {phone}"):
+        with pytest.raises(OverCap) as raised:
+            mask(text)
+        shown.append((str(raised.value), raised.value.args))
+
+    assert shown[0] == shown[1]
+    assert all(form not in repr(shown) for form in leak_forms(phone))
+
+
 def test_a_valid_hindi_message_at_the_message_cap_is_masked() -> None:
     # G1 counts 2,000 characters on the raw text; `clean` (NFC) splits each precomposed nukta
     # letter (U+095E) into two, so this message is 2,010 characters when masked: within
@@ -518,6 +575,32 @@ def test_exactly_at_the_cap_is_masked() -> None:
     assert len(text) == MASK_CAP
 
     assert mask(text).text.startswith("call [PHONE] x")
+
+
+def test_the_cap_is_checked_once_so_a_pass_may_grow_past_it() -> None:
+    # Rule 1: the cap is checked once, on the text. 666 passports, each with a space (9 x 666 =
+    # 5,994), and six "x": 6,000 characters. Each 8-character passport (a letter and seven
+    # digits, a whole word) becomes the 10-character [PASSPORT], so the next pass reads 7,332
+    # characters: masked, never an OverCap.
+    passport = value(PiiType.PASSPORT)
+    assert len(passport) == 8
+    text = f"{passport} " * 666 + "x" * 6
+    assert len(clean(text)) == MASK_CAP
+
+    masked = mask(text)
+
+    assert masked.text == "[PASSPORT] " * 666 + "x" * 6
+    assert masked.counts == {PiiKind.PASSPORT: 666}
+
+
+def test_one_character_over_the_cap_fails_closed() -> None:
+    # The guide's §3 row: 6,001 characters is an OverCap (6,000 is masked, above). Added with
+    # H2: a cap one character too generous passed every other test here (a mutation check).
+    text = "x" * (MASK_CAP + 1)
+    assert len(clean(text)) == MASK_CAP + 1
+
+    with pytest.raises(OverCap):
+        mask(text)
 
 
 def test_no_locale_is_refused_and_the_error_holds_no_value() -> None:
@@ -571,4 +654,154 @@ def test_adversarial_inputs_at_the_cap_stay_within_a_generous_bound() -> None:
 
     assert all(len(text) == MASK_CAP for text in inputs)
     assert all(result.total >= 0 for result in results)
+    assert elapsed < GENEROUS_SECONDS
+
+
+# ── 8. Joiners, variation selectors and keycaps: the squeezed view (rule 2) ──────────────────
+# The PR 3 open item, handled with H2 (2026-11-20). `clean` keeps ZWNJ and ZWJ (Indic conjuncts,
+# emoji sequences) and VS15 and VS16, and a keycap digit is a digit, VS16 and U+20E3. None of them
+# is a separator in any pattern, so on the ASCII view alone each one hid the number it sat in.
+# Rule 2 also runs every pattern over the view without them; a span found there starts at its
+# first character and runs on to the next character that view kept (or the end).
+
+ZWNJ: Final = chr(0x200C)
+ZWJ: Final = chr(0x200D)
+VS15: Final = chr(0xFE0E)
+VS16: Final = chr(0xFE0F)
+KEYCAP: Final = chr(0x20E3)
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        f"99999{ZWJ}99999",
+        f"99999{ZWNJ}99999",
+        "".join(f"9{VS15}" for _ in range(10)),
+        f"9{VS16}{KEYCAP}" * 10,
+        f"9{KEYCAP}" * 10,
+        " ".join([f"9{VS16}{KEYCAP}"] * 10),
+        in_script("99999", DEVANAGARI_ZERO) + ZWJ + in_script("99999", DEVANAGARI_ZERO),
+    ],
+    ids=["zwj", "zwnj", "vs15", "keycaps", "keycaps-without-vs16", "keycaps-spaced", "devanagari"],
+)
+def test_a_mobile_joined_by_invisible_characters_is_one_phone(written: str) -> None:
+    # Squeezed, each is ten nines, as a bare mobile (or, spaced, one digit at a time: a single
+    # space between any two digits, `spaced_digits`); the Devanagari digits are ASCII in the view
+    # before anything is squeezed out. The span runs from the first nine to the space before
+    # "now", so a keycap's marks after the last nine are masked with it.
+    masked = mask(f"call {written} now")
+
+    assert masked.text == "call [PHONE] now"
+    assert masked.counts == {PHONE: 1}
+
+
+@pytest.mark.parametrize(
+    ("written", "kind"),
+    [
+        (value(PiiType.AADHAAR).replace(" ", ZWJ), AADHAAR),
+        (value(PiiType.AADHAAR_MISTYPED).replace(" ", ZWNJ), ID_NUMBER),
+        (TEST_CARDS[0].replace(" ", ZWJ), CARD),
+    ],
+    ids=["aadhaar-zwj", "aadhaar-mistyped-zwnj", "card-zwj"],
+)
+def test_the_checksum_reads_the_digits_between_the_joiners(written: str, kind: PiiKind) -> None:
+    # Squeezed: 12 digits in a row (Aadhaar's ungrouped shape) or 16 (`generic.digits_16`; no
+    # 12-digit window there, since a digit follows it). The label comes from the span's own
+    # decimal digits in the text, joiners skipped: Verhoeff holds for the generator's Aadhaar and
+    # fails for its mistyped one; Luhn holds for the published card.
+    assert mask(f"ID {written} ok").text == f"ID {p(kind)} ok"
+
+
+def test_the_squeezed_view_only_adds_spans() -> None:
+    # "x", a ZWJ, a PAN. On the ASCII view the ZWJ is no ASCII letter or digit, so the PAN is a
+    # whole word and is found. On the squeezed view "x" sits right before it, so it is not. Both
+    # views' candidates count: the PAN is masked, and the "x" and the ZWJ stay.
+    masked = mask(f"x{ZWJ}{value(PiiType.PAN)} ok")
+
+    assert masked.text == f"x{ZWJ}[PAN] ok"
+    assert masked.counts == {PiiKind.PAN: 1}
+
+
+@pytest.mark.parametrize(
+    ("written", "expected"),
+    [
+        # A ZWJ before the number: the squeezed span starts at the first nine; the ZWJ stays.
+        (f"{ZWJ}9999999999", f"{ZWJ}[PHONE]"),
+        # A VS16 after it: the ASCII view finds the ten nines (5-15), the squeezed view the same
+        # nines running on to the space (5-16). Both start at 5; the longer names the span, so the
+        # VS16 is masked with it.
+        (f"9999999999{VS16}", "[PHONE]"),
+    ],
+    ids=["zwj-before", "vs16-after"],
+)
+def test_a_squeezed_span_runs_on_to_the_next_character_kept(written: str, expected: str) -> None:
+    assert mask(f"call {written} now").text == f"call {expected} now"
+
+
+A_ZWJ_B: Final = PiiPattern("t.a_zwj_b", EMAIL, (Chars("a"), Chars(ZWJ), Chars("b")))
+"""TEST-ONLY: "a", a ZWJ, "b", found on the ASCII view only; `AB` finds the same text squeezed."""
+
+
+@pytest.mark.parametrize(
+    ("patterns", "expected", "counts"),
+    [((AB, A_ZWJ_B), "[PHONE]", {PHONE: 1}), ((A_ZWJ_B, AB), "[EMAIL]", {EMAIL: 1})],
+    ids=["squeezed-first", "ascii-first"],
+)
+def test_a_tie_across_the_two_views_goes_to_the_earlier_pattern(
+    patterns: tuple[PiiPattern, ...], expected: str, counts: dict[PiiKind, int]
+) -> None:
+    # "a", ZWJ, "b": `A_ZWJ_B` matches on the ASCII view (0-3); squeezed, the text is "ab" and
+    # `AB` matches 0-2, mapped back to 0-3. The same span from two patterns: the earlier
+    # pattern's label (rule 3), whichever view found it. (The registered patterns cannot tie
+    # this way, since none of their classes matches a squeezed character; rule 3 holds for any.)
+    masked = mask(f"a{ZWJ}b", (Locale("t", patterns),))
+
+    assert masked.text == expected
+    assert masked.counts == counts
+
+
+def test_two_mobiles_glued_by_a_zwj_read_as_one_run() -> None:
+    # The ASCII view finds two bare mobiles (0-10 and 11-21: a ZWJ is not a digit). Squeezed, the
+    # text is twenty nines: `generic.long_digits` from the first start position only (the next
+    # has 19 digits left), mapped back to 0-21; no 13-19 digit window and no mobile, since each
+    # would need a non-digit after it inside the run. All join into 0-21; the longest candidate
+    # is the run (21 characters) -> one [ID_NUMBER].
+    masked = mask(f"9999999999{ZWJ}9999999999")
+
+    assert masked.text == "[ID_NUMBER]"
+    assert masked.counts == {ID_NUMBER: 1}
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (f"कृपया क्{ZWJ}ष वाली पर्ची भेजें", None),  # a conjunct that needs its ZWJ
+        (f"{chr(0x2764)}{VS16}{ZWJ}{chr(0x1F525)} on fire", None),  # an emoji ZWJ sequence
+        (
+            f"{chr(0x2764)}{VS16}{ZWJ}{chr(0x1F525)} call 9999999999",
+            f"{chr(0x2764)}{VS16}{ZWJ}{chr(0x1F525)} call [PHONE]",
+        ),
+    ],
+    ids=["hindi-conjunct", "emoji", "emoji-then-phone"],
+)
+def test_joiners_outside_a_number_are_kept_exactly(text: str, expected: str | None) -> None:
+    # Squeezed, the conjunct and the emoji hold no shape, so nothing is added; the phone is a
+    # bare mobile in both views, and the emoji before it stays as it was written.
+    masked = mask(text)
+
+    assert masked.text == (clean(text) if expected is None else expected)
+    assert masked.counts == ({} if expected is None else {PHONE: 1})
+
+
+def test_joiners_at_the_cap_are_one_span_within_a_generous_bound() -> None:
+    # "9" + ZWJ, 3,000 times, and a keycap nine, 2,000 times: 6,000 characters each. The ASCII
+    # view holds no two digits in a row; squeezed, each is a run of nines (`generic.long_digits`)
+    # mapped back from its first nine to the end -> one [ID_NUMBER] each.
+    inputs = (f"9{ZWJ}" * (MASK_CAP // 2), f"9{VS16}{KEYCAP}" * (MASK_CAP // 3))
+    started = time.perf_counter()
+    results = [mask(text) for text in inputs]
+    elapsed = time.perf_counter() - started
+
+    assert all(len(clean(text)) == MASK_CAP for text in inputs)
+    assert [result.text for result in results] == ["[ID_NUMBER]", "[ID_NUMBER]"]
     assert elapsed < GENEROUS_SECONDS

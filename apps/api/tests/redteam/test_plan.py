@@ -71,23 +71,24 @@ def test_every_frozen_case_has_one_path_and_one_rule_under_test() -> None:
     }
 
 
-def test_pr_5_registers_the_limiter_and_only_k_002_and_k_004_leave_pending() -> None:
-    # PR 3 registered the masking path: category E waits for H2's body, not for a PR. PR 5
-    # registers the limiter: k-002 and k-004 need no hand-write, so they take their hard label.
+def test_the_limiter_and_h2_take_k_002_k_004_and_category_e_out_of_pending() -> None:
+    # PR 3 registered the masking path: category E waited for H2's body, not for a PR, and H2 is
+    # written (2026-11-20), so the 18 E cases take their hard label. PR 5 registers the limiter:
+    # k-002 and k-004 need no hand-write, so they take their hard label too.
     assert dict(RUNNERS) == {CasePath.MASKING: run_masking, CasePath.LIMITER: run_limiter}
     plans = {c.id: mark_plan(c, label_of(c.id), RUNNERS) for c in CASES.values()}
+    category_e = {c.id for c in CASES.values() if c.category is Category.E}
 
-    assert {c for c, plan in plans.items() if plan.kind != "pending"} == {"k-002", "k-004"}
-    assert plans["k-002"] == plans["k-004"] == MarkPlan("hard", None)
+    assert len(category_e) == 18
+    assert {c for c, plan in plans.items() if plan.kind != "pending"} == {"k-002", "k-004"} | (
+        category_e
+    )
+    assert {plans[c] for c in {"k-002", "k-004"} | category_e} == {MarkPlan("hard", None)}
     assert Counter(plan.reason for plan in plans.values()) == {
         "pending:PR 6": 88,
         "pending:PR 8": 26,
-        "pending:H2": 18,
         "pending:PR 7": 5,
-        None: 2,
-    }
-    assert {c.id for c in CASES.values() if plans[c.id].reason == "pending:H2"} == {
-        c.id for c in CASES.values() if c.category is Category.E
+        None: 20,
     }
     assert plans["f-002"].reason == "pending:PR 6"  # logs: the formatter's PR, whatever route
     # leo's review: k-001's control is RLS, built since M2, so never PR 8; its runner plants KB
@@ -114,10 +115,11 @@ def test_hand_writes_each_case_needs() -> None:
     assert needs(CASES["a-001"]) == (Build.H1, Build.H2, Build.H3)
 
 
-def test_h1_and_h2_are_probed_unwritten_today_and_one_without_a_probe_is_unwritten() -> None:
+def test_h1_is_probed_unwritten_h2_written_and_one_without_a_probe_is_unwritten() -> None:
     assert HAND_WRITE_PROBES[Build.H1]() is False  # match_terms is shesha's stub (M7 H1)
-    assert HAND_WRITE_PROBES[Build.H2]() is False  # mask_pii is the stub (M7 H2, PR 3)
+    assert HAND_WRITE_PROBES[Build.H2]() is True  # mask_pii is written (M7 H2, 2026-11-20)
     assert Build.H3 not in HAND_WRITE_PROBES  # PR 6 adds H3's probe
+    assert unwritten(CASES["e-001"]) is None
     assert unwritten(CASES["e-001"], {Build.H1: lambda: True}) is Build.H2
 
 
