@@ -607,12 +607,16 @@ def masked_everything(text: str) -> str:
 def test_every_line_but_the_servers_own_is_todays_line(
     route: tuple[str, str], kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # M7 PR 3's interim (H2 is the stub, so no masker): the app's formatter changes only the
-    # server's two lines. And whatever a masker would do, a metadata record never reaches it.
+    # With H2 written (2026-11-20) the app's formatter masks free text. A line whose free text
+    # holds a G6 shape is no longer today's line (the positive control below); the lines these
+    # routes write of their own hold none, so each is still today's, byte for byte, and only the
+    # server's two lines change. Whatever a masker would do, a metadata record never reaches it
+    # (M3's window: `llm_call` and the other records stay byte-identical).
     logged = run(ROUTES[route](kind, settings, monkeypatch))
     [handler] = logging.getLogger().handlers
     app_formatter = handler.formatter
-    assert isinstance(app_formatter, RedactingJsonFormatter) and app_formatter.masker is None
+    assert isinstance(app_formatter, RedactingJsonFormatter) and app_formatter.masker is not None
+    assert app_formatter.text(f"call {PHONE}") == "call [PHONE]"
     hostile = RedactingJsonFormatter(masked_everything)
 
     ours = [r for r in logged.records if not r.name.startswith("uvicorn.")]

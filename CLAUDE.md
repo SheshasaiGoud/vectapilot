@@ -272,8 +272,10 @@ Planned: `scripts/`.
   them (G13).
 - **M7 remaining, shesha only:** H1 (`match_terms`, guide `docs/learning/m7-term-matching.md`,
   time-box 2 h; 58 strict xfails in `tests/guards/test_match.py`), then the explain-backs.
-  H2 (`mask_pii`, guide `docs/learning/m7-masking.md`) is Claude's at shesha's request (D5 (b));
-  its explain-back is shesha's.
+  H2 (`mask_pii`, guide `docs/learning/m7-masking.md`) was written by Claude at shesha's request
+  (D5 (b)) on `m7/pii-masking`, 2026-11-20, for shesha's review: log masking is on and the 18
+  category E red-team cases are hard passes; reviewed by ananya-rag and mutation-checked (fixes
+  applied; four open questions in the guide's §5); its explain-back is shesha's and due.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still
