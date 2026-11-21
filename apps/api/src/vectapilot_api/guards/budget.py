@@ -25,6 +25,20 @@ it adds to the same `BudgetTally` (a context variable, copied into the tasks the
 so a turn's reservations sum across the `small` step gateway and the `large` answer gateway, and
 the `guard` record carries `reserved_micro_usd`, `settled_micro_usd` and `budget_refused`.
 
+**The router's fallback** (`RefusalAsRouterFailure`, kenji's PR 6 review; G2 over G9's
+"refusals raise `GuardRefused`"): M4's router calls its LLM fallback on the agent's budgeted
+gateway. A refusal there (the day spent after the turn's pre-check, or Redis failing) becomes
+`FallbackRefused`, an ordinary failure of the router: `route_message` lets it through (its
+contract, step 5) and `AgentService._route` hands off `router_failed` (`_router_failed`), which
+by its contract fails closed exactly as `route_message`'s step 4 would, at the classifier's top-1
+priority, with the guidance an urgent hand-off shows, H1 written or not. Left as `GuardRefused`
+it would cross the router as a guard refusal (`propagate`), and the route would answer `budget`
+or `guard_error` at the after-the-screen priority: an emergency top-1 dropped from urgent to high
+or normal. It is not a `GatewayError` on purpose: M4's tests enumerate every `GatewayError`
+class in the package (`tests/intents/test_decide_types.py`, `tests/intenteval/test_llmrun.py`),
+and a gateway error raised here would be a model failure that never happened. The refusal is
+still counted (`BudgetTally.refused`); no provider call is made.
+
 **Builders.** `build_budgeted_agent_gateway` mirrors `agent.llm.build_agent_gateway` argument for
 argument (a test pins it), and `build_budgeted_gateway` mirrors `gateway.build_gateway` (the
 agent's own `AnswerService`, `large`), each plus the limiter. Nothing here imports `evalrun`:
@@ -48,6 +62,8 @@ from vectapilot_api.gateway.gateway import LLMGateway, StructuredResult, build_p
 from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.gateway.types import LLMRequest, LLMResult, RetryPolicy
 from vectapilot_api.guards.limits import GuardRefused, Limiter, Reserved, micro_usd
+from vectapilot_api.intents.fallback import IntentFallback
+from vectapilot_api.intents.taxonomy import Intent
 from vectapilot_api.measure.budget import request_reservation
 
 
@@ -233,3 +249,30 @@ async def build_budgeted_gateway(
         yield gateway
     finally:
         await gateway.aclose()
+
+
+# ── The router's fallback (module docstring) ────────────────────────────────────────────────
+
+
+class FallbackRefused(Exception):
+    """The router fallback's call was refused by the budget or Redis (module docstring): a
+    failure of the router, never a guard refusal the route answers, and never a `GatewayError`.
+    Its message is fixed (no text of the request); it is raised with no cause."""
+
+    def __init__(self) -> None:
+        super().__init__("the router's fallback call was refused")
+
+
+class RefusalAsRouterFailure:
+    """An `IntentFallback` whose `GuardRefused` is raised as `FallbackRefused` (module
+    docstring). Every other exception, a cancel included, passes unchanged."""
+
+    def __init__(self, fallback: IntentFallback) -> None:
+        self._fallback = fallback
+
+    async def __call__(self, message: str, *, business_id: str, trace_id: str) -> Intent:
+        try:
+            return await self._fallback(message, business_id=business_id, trace_id=trace_id)
+        except GuardRefused:
+            pass
+        raise FallbackRefused  # outside `except`: no chained refusal

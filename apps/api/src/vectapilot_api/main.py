@@ -6,7 +6,7 @@ Or directly:  uv run uvicorn --factory vectapilot_api.main:create_app
 
 import logging
 from collections.abc import AsyncIterator, Mapping
-from contextlib import asynccontextmanager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager, nullcontext
 from typing import Final
 
 from fastapi import FastAPI
@@ -18,14 +18,14 @@ from vectapilot_api.actions.confirm import ConfirmService
 from vectapilot_api.actions.pending import PendingActionStore
 from vectapilot_api.actions.router import router as actions_router
 from vectapilot_api.agent.llm import build_agent_gateway
-from vectapilot_api.agent.profiles import build_profiles, business_types
+from vectapilot_api.agent.profiles import AgentProfile, build_profiles, business_types
 from vectapilot_api.agent.router import router as agent_router
 from vectapilot_api.agent.routing import ClassifierRouter, load_router_model
-from vectapilot_api.agent.service import AgentService, ProposalStore
+from vectapilot_api.agent.service import AgentService, AnswerSource, ProposalStore
 from vectapilot_api.agent.types import LoopLimits
 from vectapilot_api.answer.router import router as answer_router
 from vectapilot_api.answer.service import ANSWER_ALIAS, AnswerService, RagConfig
-from vectapilot_api.config import Settings
+from vectapilot_api.config import GUARD_OFF_ENVIRONMENTS, Settings
 from vectapilot_api.db import Database, create_api_engine
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.factory import build_embedder
@@ -36,15 +36,31 @@ from vectapilot_api.extraction.router import router as extraction_router
 from vectapilot_api.extraction.service import ExtractionService, page_reader
 from vectapilot_api.extraction.store import PostgresExtractionStore
 from vectapilot_api.gateway.catalog import load_catalog
-from vectapilot_api.gateway.gateway import build_gateway
+from vectapilot_api.gateway.gateway import LLMGateway, build_gateway
 from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.gateway.providers.fake import FakeProvider
+from vectapilot_api.gateway.types import BusinessId
+from vectapilot_api.guards.agent import AgentGuard, read_only_tools
+from vectapilot_api.guards.budget import (
+    BudgetedGateway,
+    RefusalAsRouterFailure,
+    build_budgeted_agent_gateway,
+    build_budgeted_gateway,
+)
 from vectapilot_api.guards.config import load_guard_dir
-from vectapilot_api.guards.limits import Limiter, LimitPolicy, RedisLimiter
+from vectapilot_api.guards.executor import screening_profiles
+from vectapilot_api.guards.limits import GuardRefused, Limiter, LimitPolicy, RedisLimiter
+from vectapilot_api.guards.match import match_terms
+from vectapilot_api.guards.output import Matcher
 from vectapilot_api.guards.redact import RequestScope
+from vectapilot_api.guards.routes import RouteLimits
+from vectapilot_api.guards.screens import GUARD_PROPAGATE
+from vectapilot_api.guards.search import ScreeningSearchService
 from vectapilot_api.guards.selftest import SelftestStatus, run_selftest
+from vectapilot_api.guards.store import ScreeningProposalStore
+from vectapilot_api.guards.types import RouteSlug
 from vectapilot_api.health import router as health_router
-from vectapilot_api.intents.fallback import LLMIntentFallback
+from vectapilot_api.intents.fallback import IntentFallback, LLMIntentFallback
 from vectapilot_api.intents.policy import HEALTH_TYPES, BusinessType
 from vectapilot_api.kb.errors import install_error_handlers
 from vectapilot_api.kb.router import router as kb_router
@@ -100,6 +116,37 @@ def build_action_services(
     )
 
 
+MATCHER_SEAM_REFUSED: Final = "create_app's matcher seam is for tests only (local, test and ci)"
+
+
+def _agent_gateway(
+    settings: Settings, provider: Provider | None, limiter: Limiter, *, guarded: bool
+) -> AbstractAsyncContextManager[LLMGateway]:
+    """The agent's step gateway: a `BudgetedGateway` on the limiter while `guard_routes` is on
+    (G9; the router's fallback uses it too), else exactly M5's (`build_agent_gateway`)."""
+    if guarded:
+        return build_budgeted_agent_gateway(settings, provider=provider, limiter=limiter)
+    return build_agent_gateway(settings, provider=provider)
+
+
+def _agent_answer_gateway(
+    settings: Settings, provider: Provider | None, limiter: Limiter, *, guarded: bool
+) -> AbstractAsyncContextManager[BudgetedGateway | None]:
+    """The gateway of the agent's own `AnswerService` (`large`, G9), only while `guard_routes`
+    is on; M3's `AnswerService` keeps its own gateway either way (G11)."""
+    if guarded:
+        return build_budgeted_gateway(settings, provider=provider, limiter=limiter)
+    return nullcontext(None)
+
+
+def _router_fallback(gateway: LLMGateway, *, guarded: bool) -> IntentFallback:
+    """M4's LLM fallback on the agent's gateway. While `guard_routes` is on, that gateway is
+    budgeted, and a refusal is raised as a failure of the router, so it fails closed at its top-1
+    priority instead of the route lowering it (`guards.budget.RefusalAsRouterFailure`, G2)."""
+    fallback = LLMIntentFallback(gateway)
+    return RefusalAsRouterFailure(fallback) if guarded else fallback
+
+
 def create_app(
     settings: Settings | None = None,
     *,
@@ -107,6 +154,7 @@ def create_app(
     agent_provider: Provider | None = None,
     extraction_provider: FakeProvider | None = None,
     limiter: Limiter | None = None,
+    matcher: Matcher | None = None,
 ) -> FastAPI:
     """Build the app. A factory (not a module-level `app`) so tests can pass their own settings.
 
@@ -124,13 +172,33 @@ def create_app(
     `limiter` replaces the Redis limiter and budget (M7 PR 5, G9), as `llm_provider` replaces the
     provider: unit tests pass `guards.fake_limiter.FakeLimiter`, since they run with a dead Redis.
     Without it, `RedisLimiter` is built on the app's lazy Redis client in the lifespan (no
-    connection at startup). Nothing reads it until PR 6 wires the routes.
+    connection at startup). `/v1/agent` reads it while `guard_routes` is on (M7 PR 6).
+
+    `matcher` replaces H1's `match_terms` in the routes' screens (M7 PR 6, G13): a test-only
+    stand-in, refused outside local, test and ci, so guarded behaviour is tested before H1 is
+    written. The startup self-test (G14) always runs H1 itself, never the stand-in.
+
+    **`/v1/agent` with `guard_routes = "on"`** (M7 PR 6, G13): the route calls `AgentGuard` in G1's
+    order; the agent's gateway is a `BudgetedGateway`, and M4's router fallback on it raises a
+    refusal as a failure of the router, so it fails closed at its top-1 priority
+    (`_router_fallback`, G2); its `answers` source is a second
+    `AnswerService` over the chunk-screening search and its own `BudgetedGateway` (reachable only
+    under `agent_router = on`; M3's instance is untouched); its store screens a ticket's text
+    and stores a withheld one already expired; each profile's executor screens its tool results'
+    free text (`guards.executor`); and a read-only `AgentService`, equal in every constructor
+    argument but its profiles, serves messages with an injection signal. The confirm route and
+    `/v1/extractions` check their limits first (`guards.routes.RouteLimits`, G15). With `"off"`
+    every one of these is exactly as before M7.
 
     Every paid provider in Settings (`llm_provider`, `embeddings_provider`) needs
     `api_allow_paid_llm` (ADR 0006 Exposure, 2026-10-22 and D9 2026-10-23), injected provider or
     not: the rule reads Settings only.
     """
     settings = settings or Settings()  # values come from the environment
+    if matcher is not None and settings.environment not in GUARD_OFF_ENVIRONMENTS:
+        raise ValueError(MATCHER_SEAM_REFUSED)
+    guarded = settings.guard_routes == "on"
+    screen_matcher: Matcher = match_terms if matcher is None else matcher
     # E11 (M6 PR 3): the extraction route's model is the fake provider, never one Settings name.
     if extraction_provider is not None and not isinstance(extraction_provider, FakeProvider):
         raise TypeError("the extraction route's provider is a FakeProvider in M6 (E11)")
@@ -178,22 +246,26 @@ def create_app(
     # resolved against its corpus manifest (and the type its guarded route reads), and every term
     # must pass the self-test, or the app stops here (GuardConfigError). While H1 is a stub the
     # self-test reports the matcher unavailable and the app starts (the routes hand off, G3).
+    # The businesses a guarded route serves, with the type that route reads (tools.json, the
+    # extraction business file): a served health business needs a guard file. Both already match
+    # the corpus manifest (`business_types`, `load_extraction_dir` refuse a mismatch above); the
+    # guard loader still takes the union, as defence in depth, and so do the confirm and
+    # extraction routes' limits (M7 PR 6: a health business's 429 carries its guidance).
+    served: dict[str, BusinessType] = {
+        business_id: loaded.config.business_type for business_id, loaded in (tools or {}).items()
+    }
+    for business_id, extracted in (extraction.businesses if extraction else {}).items():
+        if extracted.file.business_type in HEALTH_TYPES or business_id not in served:
+            served[business_id] = extracted.file.business_type
+    tool_guidance = {
+        business_id: loaded.config.emergency_guidance
+        for business_id, loaded in (tools or {}).items()
+    }
     guards = None
     guard_selftest = None
     if settings.guard_config_dir is not None:
         if settings.corpus_dir is None:  # pragma: no cover (Settings refuses it)
             raise ValueError("corpus_dir is required with guard_config_dir")
-        # The businesses a guarded route serves, with the type that route reads (tools.json, the
-        # extraction business file): a served health business needs a guard file. Both already
-        # match the corpus manifest (`business_types`, `load_extraction_dir` refuse a mismatch
-        # above); the guard loader still takes the union, as defence in depth.
-        served: dict[str, BusinessType] = {
-            business_id: loaded.config.business_type
-            for business_id, loaded in (tools or {}).items()
-        }
-        for business_id, extracted in (extraction.businesses if extraction else {}).items():
-            if extracted.file.business_type in HEALTH_TYPES or business_id not in served:
-                served[business_id] = extracted.file.business_type
         guards = load_guard_dir(settings.guard_config_dir, settings.corpus_dir, served=served)
         guard_selftest = run_selftest(guards)
         if guard_selftest.status is SelftestStatus.MATCHER_UNAVAILABLE:
@@ -263,9 +335,15 @@ def create_app(
         app.state.pending_actions, app.state.confirm_service = build_action_services(
             database, tool_configs, lifetime_s=settings.action_lifetime_seconds
         )
+        limiter_in_use: Limiter = app.state.limiter
         async with (
             build_gateway(settings, provider=llm_provider) as gateway,
-            build_agent_gateway(settings, provider=agent_provider) as agent_gateway,
+            _agent_gateway(
+                settings, agent_provider, limiter_in_use, guarded=guarded
+            ) as agent_gateway,
+            _agent_answer_gateway(
+                settings, llm_provider, limiter_in_use, guarded=guarded
+            ) as agent_answer_gateway,
             build_extraction_gateway(settings, provider=extraction_fake) as extraction_gateway,
             page_reader() as extraction_reader,
         ):
@@ -276,19 +354,98 @@ def create_app(
             # router (when on) embeds with the API's runner and falls back on the agent's gateway.
             router = None
             if router_model is not None:
-                router = ClassifierRouter(runner, router_model, LLMIntentFallback(agent_gateway))
-            app.state.agent_service = AgentService(
-                build_profiles(database, tools or {}, corpus_types or {}),
-                gateway=agent_gateway,
-                store=app.state.pending_actions,
-                answers=app.state.answer_service,
-                limits=LoopLimits(max_steps=settings.agent_max_steps),
-                turn_timeout_s=settings.agent_turn_timeout_seconds,
-                routing=settings.agent_router,
-                router=router,
-                router_timeout_s=settings.agent_router_timeout_seconds,
-                router_artifact=None if router_model is None else router_model.artifact_sha256,
-            )
+                fallback = _router_fallback(agent_gateway, guarded=guarded)
+                router = ClassifierRouter(runner, router_model, fallback)
+            profiles = build_profiles(database, tools or {}, corpus_types or {})
+            loop_limits = LoopLimits(max_steps=settings.agent_max_steps)
+
+            def agent_service(
+                served: Mapping[BusinessId, AgentProfile],
+                *,
+                store: ProposalStore,
+                answers: AnswerSource,
+                propagate: tuple[type[Exception], ...] = (),
+            ) -> AgentService:
+                # One construction for both guarded services: every argument but `profiles` is
+                # the same object (G13).
+                return AgentService(
+                    served,
+                    gateway=agent_gateway,
+                    store=store,
+                    answers=answers,
+                    limits=loop_limits,
+                    turn_timeout_s=settings.agent_turn_timeout_seconds,
+                    routing=settings.agent_router,
+                    router=router,
+                    router_timeout_s=settings.agent_router_timeout_seconds,
+                    router_artifact=None if router_model is None else router_model.artifact_sha256,
+                    propagate=propagate,
+                )
+
+            app.state.agent_guard = None
+            app.state.read_only_agent_service = None
+            app.state.confirm_limits = None
+            app.state.extraction_limits = None
+            if not guarded:
+                app.state.agent_service = agent_service(
+                    profiles, store=app.state.pending_actions, answers=app.state.answer_service
+                )
+            else:
+                # M7 PR 6 (G1, G7, G9, G13): the seams around the same services (docstring).
+                if not isinstance(agent_gateway, BudgetedGateway) or agent_answer_gateway is None:
+                    raise RuntimeError("guarded routes need budgeted gateways")  # pragma: no cover
+                screening = ScreeningSearchService(
+                    database,
+                    runner,
+                    matcher=screen_matcher,
+                    retrieval=RetrievalConfig.from_settings(settings),
+                )
+                pending: object = app.state.pending_actions
+                if not isinstance(pending, PendingActionStore):  # pragma: no cover
+                    raise RuntimeError("the guarded store wraps the pending-action store")
+                guarded_store = ScreeningProposalStore(pending, matcher=screen_matcher)
+                guarded_answers = AnswerService(
+                    screening, agent_answer_gateway, RagConfig.from_settings(settings)
+                )
+                propagate: tuple[type[Exception], ...] = (GuardRefused, *GUARD_PROPAGATE)
+                full_profiles = screening_profiles(profiles, database, matcher=screen_matcher)
+                app.state.agent_service = agent_service(
+                    full_profiles, store=guarded_store, answers=guarded_answers, propagate=propagate
+                )
+                read_only_profiles = screening_profiles(
+                    build_profiles(database, read_only_tools(tools or {}), corpus_types or {}),
+                    database,
+                    matcher=screen_matcher,
+                )
+                app.state.read_only_agent_service = agent_service(
+                    read_only_profiles,
+                    store=guarded_store,
+                    answers=guarded_answers,
+                    propagate=propagate,
+                )
+                app.state.agent_guard = AgentGuard(
+                    config=guards,
+                    limiter=limiter_in_use,
+                    matcher=screen_matcher,
+                    profiles=full_profiles,
+                    gateway=agent_gateway,
+                    max_steps=settings.agent_max_steps,
+                )
+
+                def route_limits(route: RouteSlug, max_retry_after_s: int | None) -> RouteLimits:
+                    return RouteLimits(
+                        route=route,
+                        config=guards,
+                        limiter=limiter_in_use,
+                        types=served,
+                        guidance=tool_guidance,
+                        max_retry_after_s=max_retry_after_s,
+                    )
+
+                # G15: a 429's Retry-After stays below the action's lifetime.
+                lifetime_cap = max(1, settings.action_lifetime_seconds - 1)
+                app.state.confirm_limits = route_limits(RouteSlug.CONFIRM, lifetime_cap)
+                app.state.extraction_limits = route_limits(RouteSlug.EXTRACTION, None)
             # M6 PR 3: `POST /v1/extractions` (ADR 0017 decisions 3-6) on the extraction's own
             # gateway (the fake provider, E11), with H1's `route_fields` (fail closed until it is
             # written) and the store under RLS. PDFs are read in the app's own reading thread, so

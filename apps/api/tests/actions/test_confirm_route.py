@@ -11,6 +11,9 @@ is a stand-in, so each rule of the route is pinned on its own; the real service 
 - **Responses:** `executed` is 200, `failed` is 409 with the same body shape, every refusal is the
   one 404 body, a rollback and an unknown outcome are 503s with their own codes, each with
   `X-Trace-Id`; a bug is a 500, never a typed error.
+
+M5's route, as before M7 (`guard_routes = "off"`, the `settings` fixture below); its limiter
+pre-check (G15) is tests/guards/test_route_limits.py.
 """
 
 import json
@@ -90,6 +93,12 @@ def served(
     with TestClient(app, raise_server_exceptions=False) as client:
         app.state.confirm_service = stand_in
         yield client, stand_in
+
+
+@pytest.fixture
+def settings() -> Settings:
+    """The route as before M7 (module docstring)."""
+    return make_settings(guard_routes="off")
 
 
 @pytest.fixture

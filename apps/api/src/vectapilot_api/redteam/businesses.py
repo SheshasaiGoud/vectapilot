@@ -13,6 +13,11 @@ Everything is read through the real parsers (`parse_tools_config`, `parse_seed`,
 `seed_problems`), and the fixture's type must agree with its corpus manifest (W11's rule,
 `agent/profiles.py`), so a fixture the API would refuse is refused here first.
 
+**The guard folder** (M7 PR 6, leo's PR 2 review): with `safety_dir`, `write_app_folders` also
+writes a guard folder, `data/safety/` copied whole plus each fixture business's `safety.json` as
+`businesses/<id>.json` (rt-shop's guidance lines), so the served app and the in-process runner
+load the guards exactly as `create_app` does (`guards.config.load_guard_dir`).
+
 **Which customer a case runs as** (`customer_ref_for`) [proposal, leo's PR 2 review]: orders are
 customer-scoped (`tools/order_status.py`), so a case's turn runs as the seed owner of the first
 order or booking its scripted steps name, else as the seed's first customer. Derived from the
@@ -34,6 +39,9 @@ from vectapilot_api.tools.sandbox import SandboxSeed, parse_seed, seed_problems
 TOOLS_DIR_NAME: Final = "tools"
 RECORD_ARGUMENTS: Final = ("order_id", "booking_id")
 CORPUS_DIR_NAME: Final = "corpus"
+GUARD_DIR_NAME: Final = "safety"
+SAFETY_FILE: Final = "safety.json"
+"""A fixture business's guard file (`fixtures/<id>/safety.json`)."""
 
 
 def fixture_business_tools(dataset_dir: Path, business_id: str) -> BusinessTools:
@@ -61,10 +69,12 @@ def fixture_business_tools(dataset_dir: Path, business_id: str) -> BusinessTools
 
 @dataclass(frozen=True)
 class AppFolders:
-    """`tools_config_dir` and `corpus_dir` for a served app (module docstring)."""
+    """`tools_config_dir`, `corpus_dir` and (with a safety folder) `guard_config_dir` for a served
+    app (module docstring)."""
 
     tools_dir: Path
     corpus_dir: Path
+    guard_dir: Path | None = None
 
 
 def write_app_folders(
@@ -74,10 +84,12 @@ def write_app_folders(
     sandbox_dir: Path,
     corpus_dir: Path,
     fixture_businesses: Iterable[str],
+    safety_dir: Path | None = None,
 ) -> AppFolders:
     """Copy every sample business with a sandbox (its two tool files and its corpus folder) and
     every fixture business (its tool files, validated, and its fixture folder as its corpus) into
-    `into`. Reads only; writes only under `into`."""
+    `into`; with `safety_dir`, the guard folder too (module docstring). Reads only; writes only
+    under `into`."""
     tools, corpus = into / TOOLS_DIR_NAME, into / CORPUS_DIR_NAME
     tools.mkdir(parents=True)
     corpus.mkdir(parents=True)
@@ -92,7 +104,15 @@ def write_app_folders(
         )
         (tools / business_id / SEED_FILE).write_text(business_tools.seed.model_dump_json(), "utf-8")
         shutil.copytree(dataset_dir / FIXTURES_DIR / business_id, corpus / business_id)
-    return AppFolders(tools_dir=tools, corpus_dir=corpus)
+    if safety_dir is None:
+        return AppFolders(tools_dir=tools, corpus_dir=corpus)
+    guard = shutil.copytree(safety_dir, into / GUARD_DIR_NAME)
+    for business_id in fixture_businesses:
+        shutil.copyfile(
+            dataset_dir / FIXTURES_DIR / business_id / SAFETY_FILE,
+            guard / "businesses" / f"{business_id}.json",
+        )
+    return AppFolders(tools_dir=tools, corpus_dir=corpus, guard_dir=guard)
 
 
 def customer_ref_for(case: Case, seed: SandboxSeed) -> str:

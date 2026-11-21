@@ -91,6 +91,7 @@ from vectapilot_api.db import Database
 from vectapilot_api.extraction.extractor import FieldExtractor
 from vectapilot_api.extraction.service import ExtractionService
 from vectapilot_api.gateway.providers.fake import FakeProvider
+from vectapilot_api.guards.fake_limiter import FakeLimiter
 from vectapilot_api.guards.redact import METADATA_RECORDS, UNMATCHED, RedactingJsonFormatter
 from vectapilot_api.guards.selftest import SelftestStatus
 from vectapilot_api.health import CheckResult
@@ -400,7 +401,11 @@ def step_and_tool_loop(result: TurnOutcome) -> TurnLoop:
 
 
 def agent(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Exchange:
-    app = create_app(settings, agent_provider=FakeProvider())
+    # The service's own records on M5's route (guards off, as every pre-M7 route test runs); the
+    # guarded route's `guard` record is metadata only by construction (`GuardRecord`), and
+    # tests/guards/test_agent_route.py checks its lines hold no message text.
+    unguarded = settings.model_copy(update={"guard_routes": "off"})
+    app = create_app(unguarded, agent_provider=FakeProvider())
     reply = TurnReply(f"Noted: {CANARY}")
     loop = {
         "success": step_and_tool_loop(reply),
@@ -435,7 +440,9 @@ def agent(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Ex
 
 
 def confirm(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Exchange:
-    app = create_app(settings)
+    # Guarded (M7 PR 6, G15): the limiter pre-check runs first, on the fake (a dead Redis here),
+    # and writes its `guard` record before the service.
+    app = create_app(settings, limiter=FakeLimiter())
     # The success path on the route's stand-in; the refusal (an unknown business: no tools) and
     # the bug on the real service over a scripted connection, so its own `tool_call` record runs.
     service: object = {
@@ -469,7 +476,7 @@ def extractions(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch)
     )
     provider = FakeProvider([reply(referral(), answer)])
     store = ExtractionStore(error=RuntimeError(FORCED) if kind == "forced" else None)
-    app = create_app(settings)
+    app = create_app(settings, limiter=FakeLimiter())  # M7 PR 6: its limits, on the fake
 
     def started(app: FastAPI) -> None:
         app.state.extraction_service = ExtractionService(

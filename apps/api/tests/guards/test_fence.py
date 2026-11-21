@@ -20,6 +20,10 @@ fenced paths (an acceptance check, not a test):
    service from it, so a guard slipped in there would reach the eval. The sha256 of its
    `inspect.getsource` is pinned (equal to `main`'s at 5c001e1). M7 pins no file hash: shesha's
    H1s in fenced files land as planned.
+4. **`AgentService.respond_unrouted` keeps its source, and the guarded route never calls it**
+   (M7 PR 6, the M5 fence): it is the eval harness's `router=none` path, and M5's tool-call eval
+   measures through it. Its method source is pinned (equal to `main`'s at 35c3f4f; M5's H1 lands
+   in `agent/loop.py`, not here), and `AgentGuard` runs a message on `respond` only.
 """
 
 import asyncio
@@ -66,6 +70,7 @@ EXTRACTION_ROUTE: Final = EXTRACTION / "router.py"
 BUILD_ACTION_SERVICES_SHA256: Final = (
     "681a69b87785f6d70696df61f06190a34892d728a78b868f3b352f9b4be79592"
 )
+RESPOND_UNROUTED_SHA256: Final = "168c74fcfb0181c45d3b2e33605cd39986672d8643afa685fb3e761240cbca57"
 TRACE: Final = "4bf92f3577b34da6a3ce929d0e0e4736"
 
 
@@ -238,3 +243,53 @@ def test_build_action_services_keeps_its_source() -> None:
     source = inspect.getsource(main.build_action_services)
 
     assert hashlib.sha256(source.encode("utf-8")).hexdigest() == BUILD_ACTION_SERVICES_SHA256
+
+
+# ── 4. respond_unrouted keeps its source and stays off the guarded route ─────────────────────
+
+
+def test_respond_unrouted_keeps_its_source() -> None:
+    source = inspect.getsource(AgentService.respond_unrouted)
+
+    assert hashlib.sha256(source.encode("utf-8")).hexdigest() == RESPOND_UNROUTED_SHA256
+
+
+def test_the_guarded_route_runs_a_message_on_respond_never_respond_unrouted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from tests.agent.fakes import canned_loop
+    from tests.agent.test_service import CannedAnswers
+    from tests.guards.agent_helpers import (
+        CUSTOMER,
+        SHOP,
+        FixedCheck,
+        IdentityMask,
+        WithholdingRecorder,
+        guarded,
+    )
+    from vectapilot_api.agent.responses import ReplyResponse
+    from vectapilot_api.agent.types import TurnReply
+
+    async def never(*args: object, **kwargs: object) -> AgentRun:
+        raise AssertionError("the guarded route called respond_unrouted")
+
+    monkeypatch.setattr(AgentService, "respond_unrouted", never)
+    built = guarded(
+        loop=canned_loop(TurnReply("We open at nine.")),
+        store=WithholdingRecorder(),
+        answers=CannedAnswers(),
+        mask=IdentityMask(),
+        check=FixedCheck(),
+    )
+    response = asyncio.run(
+        built.guard.respond(
+            SHOP,
+            AgentRequest(message="When do you open?", customer_ref=CUSTOMER),
+            trace_id=TRACE,
+            service=built.service,
+            read_only=built.read_only,
+        )
+    )
+    assert isinstance(response, ReplyResponse)  # the turn ran, on `respond`
+    assert response.text == "We open at nine."
+    assert built.provider.calls == []  # the canned loop asks no model: nothing else ran

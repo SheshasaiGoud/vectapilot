@@ -7,10 +7,13 @@ module's JUnit results: every frozen id exactly once, no plain skip, only closed
 over-escalations within the frozen ceiling, and with `--final` no pending reason but
 `pending:M5-H1`.
 
-In PR 2 no guard is built, so every case is pending on the PR that registers its path's runner
-(`redteam.plan.FRONTIER`); each turns into its gate label when that PR lands. The pure categories
-(A, E, G, H, I, L) will run in process against the guard objects; F, J, K and one end-to-end case
-per surface through the module-scoped served app (`served.py`), behind the `integration` mark.
+A case whose path has no runner yet is pending on the PR that registers it
+(`redteam.plan.FRONTIER`); a case whose guard reaches an unwritten hand-write is pending on it
+(`pending:H1`, `H2`, `H3`). The pure categories (A, E, G, H, I, L) run in process against the
+guard objects; F, J, K and one end-to-end case per surface through the module-scoped served app
+(`served.py`), behind the `integration` mark. A pending database case never asks for the served
+app: `run_case` makes it pending on its first unwritten hand-write without it (M7 PR 6), so a
+unit-only run needs no Postgres and reports no plain skip.
 """
 
 from collections.abc import Iterator
@@ -19,7 +22,7 @@ import pytest
 
 from tests.redteam.marks import record_outcome, redteam_param
 from tests.redteam.served import ServedSuite, served_suite
-from tests.redteam.suite import CASES, END_TO_END, GENERATOR, label_of
+from tests.redteam.suite import CASES, DATASET_DIR, END_TO_END, GENERATOR, label_of
 from vectapilot_api.redteam.harness import RUNNERS, RunEnv, run_case
 from vectapilot_api.redteam.plan import environment_of, mark_plan, path_of
 
@@ -44,10 +47,11 @@ def test_case(case_id: str, request: pytest.FixtureRequest) -> None:
     case = CASES[case_id]
     label = label_of(case_id)
     environment = environment_of(case, END_TO_END)
-    runnable = path_of(case) in RUNNERS
-    app = request.getfixturevalue("redteam_app") if runnable and environment == "database" else None
+    scored_here = mark_plan(case, label, RUNNERS).kind != "pending"
+    served = scored_here and path_of(case) in RUNNERS and environment == "database"
+    app = request.getfixturevalue("redteam_app") if served else None
 
-    scored = run_case(case, label, RunEnv(GENERATOR, environment, app))
+    scored = run_case(case, label, RunEnv(GENERATOR, environment, app, DATASET_DIR))
 
     if label == "soft":
         record_outcome(request, scored.result.outcome)

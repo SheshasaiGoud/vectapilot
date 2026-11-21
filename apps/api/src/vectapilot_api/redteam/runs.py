@@ -8,7 +8,8 @@ codes per case, `summary.ResultLine`), `run.json` (`runinfo.RedteamRunInfo`, the
 a case whose runner needs the database (F, J, K and one end-to-end case per surface,
 `plan.environment_of`) is reported `not_run` with the reason `database_environment`, because
 those run in CI's integration suite (`tests/redteam/test_cases.py`), never against shesha's
-local stack from here [proposal]. In PR 2 no guard is built, so every case is `pending`.
+local stack from here [proposal]. Since PR 6 the in-process agent cases run through the real
+guards; while H1 is the stub each one reaches it first and is `pending:H1`.
 
 **A live run is refused in M7 PR 2:** D7's raw arm (the input screens bypassed in the harness only,
 one model call per model-facing case) belongs to the close-out (plan PR 9), after M5's H1 and
@@ -218,7 +219,7 @@ def run_dry(
     name = folder_name(live=False, started=started)
     out = run_dir(git.root, dataset.manifest.version, name, live=False)
     out.mkdir(parents=True, exist_ok=False)
-    env = RunEnv(generator_of(dataset), "in_process")
+    env = RunEnv(generator_of(dataset), "in_process", dataset_dir=dataset_dir)
     end_to_end = end_to_end_ids(dataset.cases)
     labels = dataset.gates.labels
     lines = [

@@ -234,7 +234,9 @@ split over en, hi and code-mixed hi, so each language cell holds about 5 cases.
     conditional reserve script (GET, compare with the cap passed as ARGV, INCRBY, set the TTL if
     none); never INCRBY, then check, then DECRBY. A settle uses the key captured at reservation,
     so a call crossing UTC midnight settles the right day. A route pre-check returns `budget`
-    before the service when the day's remainder is below one turn's worst case.
+    before the service when the day's remainder is below `agent_max_steps` × the turn's
+    first-step reservation, a lower bound of its worst case (amended 2026-11-21, shesha);
+    each call's own reservation stays the control.
   - **`BudgetedGateway`** in `guards/` subclasses `LLMGateway`, as `CappedGateway` does
     (`evalrun/budget.py:176`), and overrides `complete` and `complete_structured`. It reserves the
     worst case with `measure.budget.request_reservation` (`measure/budget.py:127`), keyed by the
@@ -934,6 +936,47 @@ human steps are not M7's.
   - A lookup by a phone-like record id on `rt-shop` still succeeds through the wrapper.
   - Every model-facing test asserts the fake provider was called (non-vacuity).
   - `respond_unrouted` and `build_action_services` are unchanged (the M5 fence, G13).
+- **Review findings applied (leo, kenji; 2026-11-21; accepted by shesha the same day):**
+  - **The router's fallback** runs on the agent's budgeted gateway; a refusal there (the day spent
+    after the pre-check, or Redis failing) is raised as a failure of the router
+    (`guards.budget.RefusalAsRouterFailure`), so the service's `router_failed` fails closed at the
+    top-1's priority, as M4's step 4 would. This departs from G9's "a refusal raises
+    `GuardRefused`" for that one call, because G2 wins: left as a refusal, an emergency top-1
+    fell from urgent to high or normal. Not a `GatewayError`: M4's tests enumerate those.
+  - **A screened observation over the byte cap** keeps W10's row rule on the screened copy (rows
+    dropped, `truncated`); only a tool without rows reads `unavailable`.
+  - **b-007 and b-008** stay on the `agent` path (their frozen route), pending on PR 8
+    (`redteam.plan.waiting_on`).
+- **Decided 2026-11-21 (shesha, each as recommended):**
+  - **G9's pre-check** reserves `agent_max_steps` × the first step's exact `BudgetedGateway`
+    reservation (`guards.agent.turn_precheck_micro_usd`), a lower bound: it never refuses a turn
+    that could have finished. It models loop turns only (a router-on RAG turn spends a `small`
+    and a `large` call); G9 is amended above.
+  - **G13 fence part 3:** D3 (i) changed one assertion in `tests/tooleval/test_harness_units.py`
+    (M5's summary lists the new reasons). Recorded as the one deviation; `tooleval/summary.py`
+    is unchanged.
+  - **`PENDING_HAND_WRITE`** lists `check_reply` next to `match_terms` and `run_turn`; H1's and
+    H3's PRs each remove their own name.
+  - **A withheld ticket** (G7, "expire at once") is stored already expired (one microsecond, the
+    least migration 0006's CHECK allows), audited `withheld`; its real token gets confirm's one
+    404. No migration.
+  - **The router-on priority cap** (a professional-judgement-only hit or an uncovered script
+    hands off at most high under `agent_router = on`) stays a known gap, pinned by
+    `test_known_gap_under_the_router_a_pre_service_handoff_caps_at_high`; decided in the PR that
+    turns the router on.
+  - **The dose vocabulary** stays in `guards/output.py`, as the PII patterns stay in
+    `guards/locales.py` (platform language data, not a business's configuration).
+  - **The builders' smaller proposals** stand as built: rule precedence for `decided_by`, the
+    Retry-After clamp, no guidance in a 503, `/v1/extractions`' limits after the 404 and 415
+    checks and before the body read, `boundary_lines` as prompt sentences of at least 4 words,
+    the served suite on a `FakeLimiter`, and a database case run without its app pending on its
+    first unwritten hand-write.
+  - **Graduating known gaps (g-015, g-030 once H1 lands):** a code-side graduated list in
+    `redteam/`, read by both the case marks and `scripts/redteam_gate.py`; the frozen dataset
+    (`gates.json` included) never changes. Claude adds it before H1's PR merges (with PR 7, or on
+    its own if H1 comes first).
+- **Until H1 lands, `/v1/agent` hands off every message** (the red-flag screen fails closed:
+  urgent for a health business, high otherwise). M5's measurements use the harness, not the route.
 
 ## PR 7 — `m7/document-scan` (zara; ananya reviews) · M · after PR 6
 - **In `extraction/router.py` only, after `service.extract` and before `store.save`.**
@@ -970,6 +1013,10 @@ human steps are not M7's.
     in a cited chunk of the same business).
 - **A red-flag hit returns `AnswerSafetyHandoff`** (G11); the route's response becomes a union.
   `AnswerResponse` is unchanged. A red-flag hit on search is recorded only.
+- **b-007 and b-008** [proposal, kenji's PR 6 review]: the chunk runner drives them through
+  `/v1/agent` with `agent_router = on` and a stub router (the agent's own `AnswerService` over the
+  chunk screen), never through `/v1/answer`. Registering the `answer` path ends their
+  `pending:PR 8` (`redteam.plan.waiting_on`), so the agent runner must take them in the same PR.
 - **The byte-identical test (G11).** Golden responses, headers and `rag_answer` and `llm_call`
   records are recorded on the base commit for a fixed set of requests (fake provider and
   embedder), and replayed with `guard_answer = off` under G11's normalisation, with a dead Redis

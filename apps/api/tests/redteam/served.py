@@ -1,31 +1,38 @@
-"""The red-team suite's database environment (M7 PR 2): the real app, as the app role, serving the
-sample businesses and the fixture business `rt-shop`, once per module (CI time).
+"""The red-team suite's database environment (M7 PR 2, reworked by PR 6): the real app, as the app
+role, with the guards on, serving the sample businesses and the fixture business `rt-shop`, once
+per module (CI time).
 
-`rt-shop` is created as the canary creates its RETAIL businesses (`tests/canary/write_paths.py`):
-its tool files and corpus folder come from the dataset's `fixtures/` (`redteam.businesses`).
-As the owner role, its `businesses` row is inserted when missing and its sandbox is reseeded from
-its `seed.json` through the real reset (`tests/tools/sandbox_db.seed_business`), so its tool
-calls see the seed's orders and slots (leo's PR 2 review). Afterwards, only when this fixture
-inserted the row, everything of it is removed in the sandbox tests' order (`uproot`: `tool_audit`
-and the sandbox tables before `businesses`, which no foreign key cascades to). Nothing is ever
-written under `data/`.
+**The folders** come from `redteam.businesses.write_app_folders`: the sample businesses' tool
+files and corpus, `rt-shop`'s from the dataset's `fixtures/`, and since PR 6 the guard folder
+(`data/safety/` plus `fixtures/rt-shop/safety.json`, leo's PR 2 review), with the committed
+extraction folder (`data/extraction/`, F's extraction route). Nothing is ever written under
+`data/`.
 
-Each case scripts its own model: `replay_service` builds an `AgentService` as `create_app` does
-but for the loop (the replay stand-in for M5's H1, `redteam.replay`) and the fake provider, and
-`serving` overrides the app's `get_agent_service` with it for one case, then removes the override.
-A case runs as `customer_for(case)` (`redteam.businesses.customer_ref_for`).
+**The app** is `create_app` with `guard_routes = "on"` and one seam: an allowing in-memory limiter
+(`guards.fake_limiter.FakeLimiter`), so the suite never writes a key on the stack's own Redis
+database [proposal, PR 6]: the cases that test Redis run on the isolated logical database 15
+(`redteam.limiter`, k-002, k-004; `redteam.agent`, k-003), and J arms its outages on its own
+in-memory limiter. Each agent case's guarded services are built by the agent runner exactly as
+`create_app` builds them and answer the route for that one request (`redteam.agent.overriding`):
+the route, the business lookup, the database, the tools and the pending-action store are the
+app's own.
 
-[proposal for PR 6, leo's PR 2 review] This hand-built copy has no router and cannot reach the
-read-only service that G13 has `create_app` build. PR 6 adds a test-only `create_app(...,
-agent_loop=...)` seam, as `agent_provider` is, that both services receive, and a `guard_dir` in
-`AppFolders` (`data/safety/` plus `fixtures/rt-shop/safety.json`), so this module stops
-hand-building `AgentService`.
+**Rows, as the owner role.** Every served business's `businesses` row is inserted when missing
+(the sample businesses have no seed migration), and `rt-shop`'s sandbox is reseeded from its
+`seed.json` through the real reset (leo's PR 2 review). k-001's arrangement (PR 5's decision:
+planting and owner-role cleanup belong here) plants, for each sample business, one approved,
+public document titled with that business's own canary, whose one chunk is k-001's question
+under the configured (fake) embedding model with the fake embedder's vector of it: a search that
+leaked across businesses would return the other one at score 1.0. Afterwards, in a `finally`,
+exactly the planted documents go (their chunks with them), and a business inserted here is
+uprooted; a business that existed before keeps everything it had: no row is ever left for
+`sunrise-clinic` or `paws-and-co`.
 """
 
 import asyncio
+import secrets
 import tempfile
 from collections.abc import Iterator, Mapping
-from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
@@ -34,16 +41,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from tests.answer.apps import gateway_for
-from tests.redteam.suite import DATASET, DATASET_DIR
+from tests.guards.helpers import SAFETY_DIR, SAMPLE_EXTRACTION_DIR
+from tests.redteam.suite import CASES, DATASET, DATASET_DIR
 from tests.tools.helpers import CORPUS_DIR, SANDBOX_DIR
 from tests.tools.sandbox_db import fresh_engine, owner_url, seed_business, uproot
-from vectapilot_api.agent.profiles import build_profiles, business_types
-from vectapilot_api.agent.router import get_agent_service
-from vectapilot_api.agent.service import AgentService
-from vectapilot_api.agent.types import LoopLimits
 from vectapilot_api.config import Settings
-from vectapilot_api.gateway.providers.fake import FakeProvider, FakeReply
+from vectapilot_api.db import business_transaction
+from vectapilot_api.embeddings.catalog import load_embedding_catalog
+from vectapilot_api.embeddings.fake import fake_vector
+from vectapilot_api.guards.fake_limiter import FakeLimiter
+from vectapilot_api.ingestion.language_map import text_search_config
+from vectapilot_api.kb.store import vector_literal
 from vectapilot_api.main import create_app
 from vectapilot_api.redteam.businesses import (
     AppFolders,
@@ -52,25 +60,46 @@ from vectapilot_api.redteam.businesses import (
     write_app_folders,
 )
 from vectapilot_api.redteam.cases import Case
-from vectapilot_api.redteam.harness import FilledCase
-from vectapilot_api.redteam.replay import agent_steps, replay_loop, step_replies
 from vectapilot_api.tools.files import load_tools_dir
 from vectapilot_api.tools.sandbox import SandboxSeed
 
+SEARCH_CASE: Final = "k-001"
+PLANT_LANGUAGE: Final = "en"
 _INSERT: Final = text(
     "INSERT INTO businesses (business_id) VALUES (:b) ON CONFLICT DO NOTHING RETURNING business_id"
 )
+_PLANT_DOCUMENT: Final = text(
+    "INSERT INTO documents (business_id, source_id, version, title, source_type,"
+    " content_kind, language, status, audience, content_sha256)"
+    " VALUES (:b, :source, '1', :canary, 'markdown', 'faq', :language, 'approved', 'public',"
+    " repeat('e', 64))"
+)
+_PLANT_CHUNK: Final = text(
+    "INSERT INTO chunks (business_id, document_id, chunk_index, content, embedding,"
+    " embedding_model, embedding_dim, ts_config)"
+    " SELECT :b, id, 0, :content, CAST(:embedding AS vector), :model,"
+    " CAST(:dimension AS integer), CAST(:ts_config AS regconfig)"
+    " FROM documents WHERE business_id = :b AND source_id = :source"
+)
+_REMOVE_PLANTED: Final = text(
+    "DELETE FROM documents WHERE business_id = :b AND source_id = :source"
+)  # its chunks go with it
 
 
-async def _arrange(seed: SandboxSeed) -> bool:
-    """As the owner: insert the business's row when missing, then reseed its sandbox. True when
-    this call inserted the row."""
+async def _insert_business(business_id: str) -> bool:
+    """As the owner: the business's row when missing. True when this call inserted it."""
     owner = fresh_engine(owner_url())
     try:
         async with owner.begin() as connection:
-            inserted = (await connection.execute(_INSERT, {"b": seed.business_id})).first()
+            return (await connection.execute(_INSERT, {"b": business_id})).first() is not None
+    finally:
+        await owner.dispose()
+
+
+async def _seed(seed: SandboxSeed) -> None:
+    owner = fresh_engine(owner_url())
+    try:
         await seed_business(owner, seed)
-        return inserted is not None
     finally:
         await owner.dispose()
 
@@ -84,12 +113,61 @@ async def _remove(business_id: str) -> None:
 
 
 @dataclass(frozen=True)
+class Planted:
+    business_id: str
+    source_id: str
+    canary: str
+
+
+async def _plant(business_id: str, question: str, settings: Settings) -> Planted:
+    """k-001's planted document for one business (module docstring), as the owner."""
+    spec = load_embedding_catalog().resolve(
+        settings.embeddings_provider, settings.embeddings_model, settings.embeddings_dimension
+    )
+    planted = Planted(
+        business_id, f"redteam-k001-{secrets.token_hex(4)}", f"canary-{secrets.token_hex(8)}"
+    )
+    params = {
+        "b": business_id,
+        "source": planted.source_id,
+        "canary": planted.canary,
+        "language": PLANT_LANGUAGE,
+        "content": question,
+        "embedding": vector_literal(fake_vector(question, spec.dimension)),
+        "model": spec.model,
+        "dimension": spec.dimension,
+        "ts_config": text_search_config(PLANT_LANGUAGE),
+    }
+    owner = fresh_engine(owner_url())
+    try:
+        async with business_transaction(owner, business_id) as connection:
+            await connection.execute(_PLANT_DOCUMENT, params)
+            await connection.execute(_PLANT_CHUNK, params)
+    finally:
+        await owner.dispose()
+    return planted
+
+
+async def _unplant(planted: Planted) -> None:
+    owner = fresh_engine(owner_url())
+    try:
+        async with business_transaction(owner, planted.business_id) as connection:
+            await connection.execute(
+                _REMOVE_PLANTED, {"b": planted.business_id, "source": planted.source_id}
+            )
+    finally:
+        await owner.dispose()
+
+
+@dataclass(frozen=True)
 class ServedSuite:
     client: TestClient
     app: FastAPI
     folders: AppFolders
     seeds: Mapping[str, SandboxSeed]
     """Every served business's sandbox seed, by business id."""
+    kb_canaries: Mapping[str, str]
+    """k-001's planted canary per sample business (`redteam.search`)."""
 
     def customer_for(self, case: Case) -> str:
         return customer_ref_for(case, self.seeds[case.business_id])
@@ -97,7 +175,8 @@ class ServedSuite:
 
 def served_suite() -> Iterator[ServedSuite]:
     """The module's served app (module docstring); a generator for a module-scoped fixture."""
-    created: list[str] = []
+    inserted: list[str] = []
+    planted: list[Planted] = []
     fixtures = {
         business_id: fixture_business_tools(DATASET_DIR, business_id).seed
         for business_id in DATASET.manifest.fixture_businesses
@@ -109,52 +188,39 @@ def served_suite() -> Iterator[ServedSuite]:
             sandbox_dir=SANDBOX_DIR,
             corpus_dir=CORPUS_DIR,
             fixture_businesses=DATASET.manifest.fixture_businesses,
+            safety_dir=SAFETY_DIR,
         )
         seeds = {
             business_id: t.seed for business_id, t in load_tools_dir(folders.tools_dir).items()
         }
+        # From the environment, as the canary's served apps: the integration database.
+        settings = Settings(
+            tools_config_dir=folders.tools_dir,
+            corpus_dir=folders.corpus_dir,
+            guard_config_dir=folders.guard_dir,
+            extraction_config_dir=SAMPLE_EXTRACTION_DIR,
+            guard_routes="on",
+        )
         try:
+            for business_id in sorted(seeds):
+                if asyncio.run(_insert_business(business_id)):
+                    inserted.append(business_id)
             for seed in fixtures.values():
-                if asyncio.run(_arrange(seed)):
-                    created.append(seed.business_id)
-            # From the environment, as the canary's served apps: the integration database.
-            settings = Settings(tools_config_dir=folders.tools_dir, corpus_dir=folders.corpus_dir)
-            app = create_app(settings)
+                asyncio.run(_seed(seed))
+            question = CASES[SEARCH_CASE].input
+            for business_id in sorted(set(seeds) - set(fixtures)):
+                planted.append(asyncio.run(_plant(business_id, question, settings)))
+            app = create_app(settings, limiter=FakeLimiter())
             with TestClient(app) as client:
-                yield ServedSuite(client=client, app=app, folders=folders, seeds=seeds)
+                yield ServedSuite(
+                    client=client,
+                    app=app,
+                    folders=folders,
+                    seeds=seeds,
+                    kb_canaries={p.business_id: p.canary for p in planted},
+                )
         finally:
-            for business_id in created:
+            for row in planted:
+                asyncio.run(_unplant(row))
+            for business_id in inserted:
                 asyncio.run(_remove(business_id))
-
-
-def replay_service(
-    served: ServedSuite, filled: FilledCase, *, read_only: bool = False
-) -> tuple[AgentService, FakeProvider]:
-    """An `AgentService` built as `create_app` builds it, but on the replay of `filled`'s steps
-    and a fake provider scripted with the same steps (module docstring)."""
-    steps = agent_steps(filled.case)
-    replies = step_replies(steps, filled.text, read_only=read_only)
-    provider = FakeProvider([FakeReply(text=reply) for reply in replies])
-    tools = load_tools_dir(served.folders.tools_dir)
-    state = served.app.state
-    settings = state.settings
-    service = AgentService(
-        build_profiles(state.database, tools, business_types(tools, served.folders.corpus_dir)),
-        gateway=gateway_for(provider),
-        store=state.pending_actions,
-        answers=state.answer_service,
-        limits=LoopLimits(max_steps=settings.agent_max_steps),
-        turn_timeout_s=settings.agent_turn_timeout_seconds,
-        loop=replay_loop(steps, filled.text, read_only=read_only),
-    )
-    return service, provider
-
-
-@contextmanager
-def serving(served: ServedSuite, service: AgentService) -> Iterator[None]:
-    """`service` answers the app's agent route for one case; the override is always removed."""
-    served.app.dependency_overrides[get_agent_service] = lambda: service
-    try:
-        yield
-    finally:
-        served.app.dependency_overrides.pop(get_agent_service, None)

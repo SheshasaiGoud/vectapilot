@@ -114,7 +114,9 @@ def app_for(tmp_path: Path, original: str, business_id: str) -> Iterator[TestCli
     business (its `tools.json` and a corpus manifest of the same type)."""
     folder = copy_sandbox(tmp_path / "sandbox", {original: business_id})
     corpus = corpus_matching(tmp_path / "corpus", folder)
-    with TestClient(create_app(Settings(tools_config_dir=folder, corpus_dir=corpus))) as client:
+    # M7 PR 6: the route as M5 built it (guard_routes off, allowed in local, test and ci).
+    settings = Settings(tools_config_dir=folder, corpus_dir=corpus, guard_routes="off")
+    with TestClient(create_app(settings)) as client:
         yield client
 
 

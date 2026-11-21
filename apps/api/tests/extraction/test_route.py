@@ -17,6 +17,9 @@ test needs values back; the one test that runs H1 through the route waits for it
 - **No quote, no value** (E2, decided 2026-11-13): a value E2 did not verify comes back in review
   with its reasons and without value, level, page or span.
 - **E11:** the route's model is a `FakeProvider` whatever Settings say.
+
+M6's route, as before M7 (`guard_routes = "off"`); its limits (M7 PR 6) are
+tests/guards/test_route_limits.py.
 """
 
 import hashlib
@@ -79,7 +82,9 @@ from vectapilot_api.gateway.providers.fake import FakeProvider, FakeReply
 from vectapilot_api.kb import errors as kb_errors
 from vectapilot_api.log import JsonFormatter
 
-CONFIGURED: Final = make_settings(extraction_config_dir=EXTRACTION_DIR, corpus_dir=CORPUS_DIR)
+CONFIGURED: Final = make_settings(
+    extraction_config_dir=EXTRACTION_DIR, corpus_dir=CORPUS_DIR, guard_routes="off"
+)
 REFERRAL_PDF: Final = pdf(list(REFERRAL_LINES))
 """The made-up referral; its last line (no field) holds the canary, which must never come back."""
 FILLER: Final = "Filler line " + "x" * 88
@@ -318,7 +323,7 @@ def test_the_businesss_own_retention_reaches_the_store_and_the_expiry(tmp_path: 
     folder, corpus = extraction_folder(tmp_path, {SUNRISE_ID: "sunrise-clinic"})
     business_file = folder / BUSINESSES / f"{SUNRISE_ID}.json"
     write_json(business_file, read_json(business_file) | {"retention_days": 7})  # not the default
-    settings = make_settings(extraction_config_dir=folder, corpus_dir=corpus)
+    settings = make_settings(extraction_config_dir=folder, corpus_dir=corpus, guard_routes="off")
     response, store, _ = post(settings=settings)
 
     assert response.status_code == 201, response.text

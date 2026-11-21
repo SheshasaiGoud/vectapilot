@@ -178,7 +178,8 @@ async def businesses(
     try:
         for business_id in ids:
             await register(owner, business_id)
-        yield Settings(extraction_config_dir=folder, corpus_dir=corpus), ids
+        # M6's route as before M7 (its limits are tests/guards/test_route_limits.py).
+        yield Settings(extraction_config_dir=folder, corpus_dir=corpus, guard_routes="off"), ids
     finally:
         for business_id in ids:
             await uproot(owner, business_id)
