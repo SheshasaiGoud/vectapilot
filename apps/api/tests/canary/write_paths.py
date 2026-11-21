@@ -27,6 +27,16 @@ the strict xfail `pending_hand_writes` makes (`write_path_params`), and it runs 
 the stub's name is removed. The planted business is served as a `retail` business: W11 hands a
 health business off before any tool, so a clinic could never reach the write.
 
+**M7 PR 6 guards that route** (`guard_routes = "on"`, the default): the planted businesses get a
+guard folder (`guard_folder`: the real platform and type term files, `data/safety/`, and a business
+file per planted business), so the path runs the guarded pipeline as production does. It then
+also runs M7's hand-writes H1 (`match_terms`, the screens) and H3 (`check_reply`, on the
+proposal's ticket text), and H2's `mask_pii` (written 2026-11-20); while H1 or H3 is a stub the
+route fails closed into a `guard_error` hand-off, which `surface_pending_loop` re-raises the same
+way. The confirm
+and extraction paths are guarded too: their limits run first on the real Redis (G15; each test's
+planted business has fresh windows), and nothing else of M7 changes their writes.
+
 **M6 PR 3's `POST /v1/extractions`** needs the business's extraction file: `served_with_extraction`
 writes the committed templates and a copy of Paws & Co's file under the planted id into a
 temporary folder, with a matching corpus manifest, and serves the real app from it (as
@@ -37,8 +47,9 @@ extraction and its fields) happens either way, and the path is checked now, not 
 """
 
 import json
+import shutil
 import tempfile
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -62,12 +73,13 @@ from tests.extraction.fakes import vaccination
 from tests.extraction.served import PATH as EXTRACTIONS
 from tests.extraction.served import PDF, extraction_folder
 from tests.extraction.standins import VACCINATION_ANSWER, VACCINATION_LINES, pdf, reply
+from tests.guards.helpers import SAFETY_DIR
 from tests.tools.helpers import write_corpus
 from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import Settings
 from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.gateway.providers.fake import FakeProvider, FakeReply
-from vectapilot_api.intents.policy import BusinessType
+from vectapilot_api.intents.policy import HEALTH_TYPES, BusinessType
 from vectapilot_api.main import create_app
 from vectapilot_api.tools.config import SEED_FILE, TOOLS_FILE
 from vectapilot_api.tools.sandbox import SandboxSeed, SeedOrder
@@ -161,9 +173,12 @@ def served_with_tools(
     `business_type` for each planted business; `agent_provider` scripts the agent's model."""
     with tempfile.TemporaryDirectory() as directory:
         folder = Path(directory) / "sandbox"
+        guidance: dict[str, tuple[str, ...]] = {}
         for business_id in business_ids:
             (folder / business_id).mkdir(parents=True)
             config = bait_tools(business_id).model_copy(update={"business_type": business_type})
+            if business_type in HEALTH_TYPES:  # a guarded health business needs its lines (G4)
+                guidance[business_id] = config.emergency_guidance
             (folder / business_id / TOOLS_FILE).write_text(
                 config.model_dump_json(), encoding="utf-8"
             )
@@ -173,7 +188,8 @@ def served_with_tools(
         corpus = write_corpus(
             Path(directory) / "corpus", dict.fromkeys(business_ids, business_type.value)
         )
-        settings = Settings(tools_config_dir=folder, corpus_dir=corpus)
+        guards = guard_folder(Path(directory), business_ids, guidance)
+        settings = Settings(tools_config_dir=folder, corpus_dir=corpus, guard_config_dir=guards)
         with TestClient(create_app(settings, agent_provider=agent_provider)) as client:
             yield client
 
@@ -211,14 +227,47 @@ def post_agent(client: TestClient, business_id: str | None) -> httpx2.Response:
     )
 
 
+GUARD_STUBS: Final = frozenset({"match_terms", "check_reply"})
+"""M7's hand-writes the guarded `POST /v1/agent` runs that are still stubs (module docstring;
+H2's `mask_pii` is written)."""
+
+
 def surface_pending_loop(response: httpx2.Response) -> None:
-    """Re-raise the pending stub's `NotImplementedError` that the agent service turned into a
-    hand-off (module docstring); nothing once `run_turn` is written."""
-    if "run_turn" not in PENDING_HAND_WRITE or not response.is_success:
+    """Re-raise the pending stub's `NotImplementedError` that the agent service or its guards
+    turned into a hand-off (module docstring); nothing once every stub the path runs is written.
+    A guard's hand-off names no stub, so any `guard_error` counts while one of M7's is pending."""
+    if not response.is_success:
         return
     body = response.json()
-    if body.get("kind") == "handoff" and body.get("reason") == "agent_error":
+    reason = body.get("reason") if body.get("kind") == "handoff" else None
+    if reason == "agent_error" and "run_turn" in PENDING_HAND_WRITE:
         raise NotImplementedError("run_turn (M5 H1) is pending: the agent service handed off")
+    if reason == "guard_error" and GUARD_STUBS & PENDING_HAND_WRITE:
+        raise NotImplementedError("an M7 hand-write is pending: the guarded route handed off")
+
+
+def guard_folder(
+    destination: Path,
+    business_ids: Iterable[str],
+    guidance: Mapping[str, Sequence[str]] | None = None,
+) -> Path:
+    """A guard folder for planted businesses (module docstring): `data/safety/`'s platform and type
+    files, and one business file each (synthetic, no added terms). A `retail` business needs no
+    guidance lines; a health one carries its `tools.json`'s (`guidance`, G4)."""
+    folder = destination / "safety"
+    (folder / "types").mkdir(parents=True)
+    (folder / "businesses").mkdir()
+    shutil.copy(SAFETY_DIR / "platform.json", folder)
+    for path in sorted((SAFETY_DIR / "types").glob("*.json")):
+        shutil.copy(path, folder / "types")
+    for business_id in business_ids:
+        business: dict[str, object] = {"business_id": business_id, "synthetic": True}
+        if guidance and business_id in guidance:
+            business["guidance"] = list(guidance[business_id])
+        (folder / "businesses" / f"{business_id}.json").write_text(
+            json.dumps(business), encoding="utf-8"
+        )
+    return folder
 
 
 def propose_through_the_agent(client: TestClient, business_id: str | None) -> httpx2.Response:
@@ -290,7 +339,7 @@ WRITE_PATHS: Final[dict[str, WritePath]] = {
 
 
 WRITE_NEEDS_HAND_WRITE: Final[Mapping[str, frozenset[str]]] = {
-    "POST /v1/agent": frozenset({"run_turn"}),
+    "POST /v1/agent": frozenset({"run_turn"}) | GUARD_STUBS,
 }
 """The [HAND-WRITE] stubs each write path runs (as `read_paths.NEEDS_HAND_WRITE`)."""
 

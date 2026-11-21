@@ -28,6 +28,18 @@
 A caller's bug (a context for a business without tools, a disabled or read tool, arguments that
 do not validate) raises `ValueError` before anything is sent. Database errors propagate after
 their record: PR 4's service turns any exception into a hand-off.
+
+**A withheld proposal** (M7 PR 6, G7 as amended 2026-11-17): `create_withheld` stores a proposal
+a guard withheld (an injection signal or an output check in `create_ticket`'s text) through the
+same INSERT and audit row, but already expired: its lifetime is `WITHHELD_LIFETIME_S`, one
+microsecond, the smallest migration 0006's CHECK (`expires_at > created_at`) allows at
+`timestamptz`'s resolution. Confirm judges the expiry on `clock_timestamp()` (`actions/confirm.py`,
+W6), so every confirm of it, with its real token included, is the same 404 as an unknown id, and
+there is no moment between storing and expiring (no second statement that could fail and leave a
+live row). The app role cannot expire a stored row any other way without a migration: 0006 grants
+it no UPDATE on `expires_at` or the token hash, and no DELETE. Its audit outcome is `withheld`, so
+staff see what was stopped, and the guard that withheld it never returns the token (the whole
+response becomes a hand-off naming the action id in the `guard` record, `guards.store`).
 """
 
 import asyncio
@@ -67,6 +79,10 @@ MAX_LIFETIME_S: Final = 3600
 """Migration 0006's `expires_at <= created_at + interval '1 hour'`."""
 STORED: Final = "stored"
 """The audit outcome of a stored pending action."""
+WITHHELD: Final = "withheld"
+"""The audit outcome of a proposal a guard withheld, stored already expired (module docstring)."""
+WITHHELD_LIFETIME_S: Final = 1e-6
+"""One microsecond: a withheld proposal's lifetime (module docstring)."""
 
 INSERT_ACTION: Final = text(
     "INSERT INTO pending_actions (business_id, tool, arguments, customer_ref,"
@@ -123,6 +139,16 @@ class PendingActionStore:
 
     async def create(self, proposal: WriteProposal, context: ToolContext) -> PendingAction:
         """Store `proposal` for `context`'s business and customer; the action and its token."""
+        return await self._store(proposal, context, float(self._lifetime_s), STORED)
+
+    async def create_withheld(self, proposal: WriteProposal, context: ToolContext) -> PendingAction:
+        """Store `proposal` as a withheld action, already expired (module docstring): audited as
+        `withheld`, never confirmable. The caller drops the token."""
+        return await self._store(proposal, context, WITHHELD_LIFETIME_S, WITHHELD)
+
+    async def _store(
+        self, proposal: WriteProposal, context: ToolContext, lifetime_s: float, outcome: str
+    ) -> PendingAction:
         arguments = self._arguments(proposal, context)
         token = new_confirm_token()
         started = self._clock()
@@ -156,13 +182,13 @@ class PendingActionStore:
                             "customer_ref": context.customer_ref,
                             "token_sha256": token_sha256(token),
                             "trace_id": context.trace_id,
-                            "lifetime_s": float(self._lifetime_s),
+                            "lifetime_s": lifetime_s,
                         },
                     )
                 ).one()
                 if row.business_id != context.business_id:  # pragma: no cover (RLS, the clause)
                     raise RuntimeError("a pending action was stored for another business")
-                stored = call(STORED, row.id)
+                stored = call(outcome, row.id)
                 entry = stored.audit_entry()
                 if entry is None:  # pragma: no cover (the tool is known here)
                     raise RuntimeError("a stored action's audit row needs its tool")

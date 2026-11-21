@@ -1,15 +1,18 @@
 """M7 PR 2: `redteam run` (dry) and `summarize` (`redteam/runs.py`, `redteam/summary.py`) on the
 real frozen v0.1, with a TEST-ONLY `Io` (no git; the folder goes under tmp_path).
 
-In PR 2 every case was pending; PR 5's limiter cases are not run in a dry run, and since H2
-(2026-11-20) a dry run scores category E in process. Stand-in runners (TEST-ONLY, never
-registered) show the other statuses reach the summary: passed, missed, over-escalated, not run.
+Since H2 (2026-11-20) a dry run scores category E in process; since PR 6 the in-process agent
+cases run and reach H1's stub (pending), and every registered database case is "not run".
+Stand-in runners (TEST-ONLY, never registered) show the other statuses reach the summary:
+passed, missed, over-escalated, not run.
 """
 
 import json
+from collections import Counter
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
+from typing import Final
 
 import pytest
 
@@ -52,7 +55,16 @@ def lines_of(folder: Path) -> list[ResultLine]:
     return [ResultLine.model_validate_json(line) for line in text.splitlines()]
 
 
-def test_a_dry_run_scores_category_e_and_reports_the_rest_pending_but_the_limiters_cases(
+DATABASE_REGISTERED: Final = frozenset(
+    {"a-001", "c-001", "c-007", "c-008", "k-001", "k-002", "k-003", "k-004"}
+    | {f"f-00{n}" for n in range(1, 7)}
+    | {f"j-00{n}" for n in range(1, 9)}
+)
+"""Every case whose runner is registered (PR 5's limiter; PR 6's agent, logs and search leg) and
+that runs in the database environment: F, J, K and the end-to-end cases of the agent's surfaces."""
+
+
+def test_a_dry_run_runs_the_in_process_cases_and_leaves_the_database_ones(
     tmp_path: Path,
 ) -> None:
     folder = run_dry(DATASET_DIR, io=fake_io(tmp_path))
@@ -60,12 +72,18 @@ def test_a_dry_run_scores_category_e_and_reports_the_rest_pending_but_the_limite
     assert folder == tmp_path / "evals/reports/tmp/redteam/20261117T090000Z-fake-redteam"
     lines = lines_of(folder)
     assert [line.id for line in lines] == sorted(CASES)
-    # PR 5 registers the limiter: k-002 and k-004 need real Redis, which a dry run never has.
+    # A dry run never has Postgres or Redis: every registered database case is "not run".
     not_run = {line.id: line.reason for line in lines if line.status == "not_run"}
-    assert not_run == {"k-002": "database_environment", "k-004": "database_environment"}
+    assert not_run == dict.fromkeys(DATABASE_REGISTERED, "database_environment")
     # H2 is written (2026-11-20): category E runs in process and pure, so a dry run scores it.
     scored = {line.id: line.status for line in lines if line.status not in ("pending", "not_run")}
     assert scored == {c.id: "passed" for c in CASES.values() if c.category is Category.E}
+    # M7 PR 6: the in-process agent cases ran through the real guards and reached H1's stub:
+    # 80 agent-path cases less the 14 that run in the database (a-001, c-001, c-007, c-008,
+    # f-006, j-001 to j-008, k-003) is 66.
+    pending = Counter(line.reason for line in lines if line.status == "pending")
+    assert pending == {"pending:H1": 66, "pending:PR 8": 28, "pending:PR 7": 5}
+    assert (len(not_run), len(scored), pending.total()) == (22, 18, 99)
     info = RedteamRunInfo.model_validate_json((folder / RUN_FILE).read_text("utf-8"))
     assert (info.dry_run, info.cases, info.cost.total_usd) == (True, 139, Decimal(0))
     assert info.cases_reviewed == 0
@@ -81,11 +99,13 @@ def test_a_dry_run_scores_category_e_and_reports_the_rest_pending_but_the_limite
         REPLAY_LINE,
         "rules version: no data/safety yet",
         "PII generator: redteam-pii.1, seed 20261116",
-        "- pending: 119",
-        "  - pending:PR 6: 88",
-        "- not run: k-002, k-004",
+        "- pending: 99",
+        "  - pending:H1: 66 (a-002,",
+        "- not run: a-001, c-001, c-007, c-008, f-001,",
         "with uncommitted changes). CI gate: not checked by this run",
         "Crisis messages: not measured",
+        # The plan's "Not in M7": the MCP server's results are a listed gap (leo's PR 6 review).
+        "MCP results: not screened (known_gap:mcp_unscreened;",
         "- hard passed: 18 of 18 scored (94 not scored)",  # category E, since H2
         "| mask-several-types | 2 | 0 | 0 |",
         # noah's review: nothing scored reads "not measured", never a zero.

@@ -77,6 +77,31 @@ class HandoffReason(StrEnum):
     ROUTER_FAILED = "router_failed"
     """`agent_router = on`: the router failed closed, or raised. For a health business the
     safety step did not clear the message, so the guidance is shown."""
+    # M7's guards, at the route (ADR 0018; D3 (i), decided 2026-11-16). A red-flag hit reuses
+    # `safety`. Each of these is a refusal, never a decision about the message's intent.
+    GUARD_ERROR = "guard_error"
+    """A guard raised, timed out or is a pending stub: fail closed (G3)."""
+    GUARD_OUTPUT = "guard_output"
+    """An output check (H3) or the ticket-text screen withheld the model's text (G7, G8)."""
+    BUDGET = "budget"
+    """The business's day's model budget cannot cover the turn (G9)."""
+    GUARDS_NOT_CONFIGURED = "guards_not_configured"
+    """Guarded routes serve businesses without a guard folder (local, test and ci only, G4)."""
+    NOT_COVERED_LANGUAGE = "not_covered_language"
+    """A health business's message in a script whose terms nobody reviewed (D3 (i))."""
+
+
+GUARD_HANDOFF_REASONS: Final[frozenset[HandoffReason]] = frozenset(
+    {
+        HandoffReason.GUARD_ERROR,
+        HandoffReason.GUARD_OUTPUT,
+        HandoffReason.BUDGET,
+        HandoffReason.GUARDS_NOT_CONFIGURED,
+        HandoffReason.NOT_COVERED_LANGUAGE,
+    }
+)
+"""The reasons only M7's guards give (D3 (i)): refusals, sorted with the infrastructure reasons by
+the tool-call eval (`tooleval.metrics`), which never runs a guard."""
 
 
 def handoff_reason(reason: ModelHandoffReason | LoopHandoffReason) -> HandoffReason:

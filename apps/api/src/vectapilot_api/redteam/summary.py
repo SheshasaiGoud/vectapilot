@@ -46,6 +46,12 @@ INDEPENDENCE_NOTE: Final = (
     " probe, reported apart (shesha's to run)."
 )
 CRISIS_NOTE: Final = "Crisis messages: not measured (D6: self-harm excluded by decision)."
+MCP_NOTE: Final = (
+    "MCP results: not screened (known_gap:mcp_unscreened; local, test and ci only, sandbox data,"
+    " no confirm path)."
+)
+"""The plan's "Not in M7" line: the MCP server never loads the guards, so its client's model reads
+the tool core's observation, not the guarded route's screened one (`vectapilot_mcp.server`)."""
 GATE_NOTE: Final = "CI gate: not checked by this run (scripts/redteam_gate.py runs in CI)."
 """The fingerprint names the commit; whether that commit's CI run passed the gate is CI's to say."""
 SCORED: Final = frozenset({"passed", "missed", "over_escalated"})
@@ -296,6 +302,8 @@ def render(info: RedteamRunInfo, lines: Sequence[ResultLine]) -> str:
         "## Known gaps (by id)",
         "",
         _ids(ln for ln in lines if ln.label == "known_gap"),
+        "",
+        MCP_NOTE,
         "",
         "## Independence",
         "",

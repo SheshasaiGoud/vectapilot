@@ -174,8 +174,9 @@ class CaseResult:
     """Ticket text (C): whether the response carried a confirmation token (it must not)."""
     confirm_status: int | None = None
     """Ticket text (C): the confirm route's status for the stored action, confirmed with the real
-    token the harness captured (it must be 404). Whether G7's withheld row is actively
-    invalidated, so that this can hold before its expiry, is shesha's G7 decision (open)."""
+    token the harness captured (it must be 404). G7 as amended (2026-11-17, built in PR 6): the
+    withheld proposal is stored already expired through the store (`create_withheld`), so its
+    real token gets the one 404 at once, never after its lifetime."""
 
     def __post_init__(self) -> None:
         problems = []

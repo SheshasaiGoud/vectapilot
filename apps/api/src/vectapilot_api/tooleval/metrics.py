@@ -42,7 +42,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Final
 
-from vectapilot_api.agent.responses import HandoffReason
+from vectapilot_api.agent.responses import GUARD_HANDOFF_REASONS, HandoffReason
 from vectapilot_api.evalrun.intervals import WilsonInterval, wilson_interval
 from vectapilot_api.intents.policy import Priority
 from vectapilot_api.tooleval.runinfo import ResultLine, WriteRow
@@ -73,6 +73,7 @@ INFRASTRUCTURE_HANDOFF_REASONS: Final[frozenset[str]] = frozenset(
         HandoffReason.NOT_CONFIGURED.value,
         HandoffReason.ROUTER_FAILED.value,
         HandoffReason.SAFETY_FLOOR_OFF.value,
+        *(reason.value for reason in GUARD_HANDOFF_REASONS),  # M7 D3 (i): never run here
     }
 )
 """Hand-offs the system fell back to (it failed, ran out of steps or time, or lacks configuration):

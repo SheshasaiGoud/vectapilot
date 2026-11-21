@@ -12,6 +12,8 @@ The real INSERT, the database-set expiry and the stored hash are in `test_confir
   `cancelled`, `error` for a bug. A failure is logged only, never audited (there is no action id
   to name), and no record holds the token.
 - **The lifetime is checked again** by the constructor, for a store built by hand.
+- **A withheld proposal** (M7 PR 6, G7 as amended) goes through the same INSERT and audit row,
+  with a lifetime of one microsecond and the audit outcome `withheld`; `create` is unchanged.
 """
 
 import asyncio
@@ -25,7 +27,7 @@ from pydantic import field_validator
 
 from tests.actions.fakes import ACTION, ScriptedSource
 from tests.tools.core import PAWS, TRACE, config_for
-from vectapilot_api.actions.pending import PendingActionStore
+from vectapilot_api.actions.pending import WITHHELD, WITHHELD_LIFETIME_S, PendingActionStore
 from vectapilot_api.actions.tokens import token_sha256
 from vectapilot_api.log import JsonFormatter
 from vectapilot_api.tools.book import BookInput
@@ -81,6 +83,27 @@ async def test_a_stored_proposal_and_its_audit_row_share_one_transaction(
     assert [(r["outcome"], r["audited"], r["action_id"]) for r in records(caplog)] == [
         ("stored", True, str(ACTION))
     ]
+
+
+async def test_a_withheld_proposal_is_stored_already_expired_and_audited_withheld(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    ticket = WriteProposal(
+        tool=ToolName.CREATE_TICKET,
+        arguments={"category": "order", "summary": "Please call me back."},
+        summary="Create a ticket.",
+    )
+    source = ScriptedSource(script=[stored_row(), []])
+
+    action = await store(source).create_withheld(ticket, CONTEXT)
+
+    assert source.transactions == [(BUSINESS, False, True)]  # the same one transaction
+    [insert] = source.params_of("INSERT INTO pending_actions")
+    assert insert["lifetime_s"] == WITHHELD_LIFETIME_S == 1e-6
+    assert insert["token_sha256"] == token_sha256(action.confirm_token)
+    [audit] = source.main_audits()
+    assert (audit["phase"], audit["outcome"], audit["action_id"]) == ("propose", WITHHELD, ACTION)
+    assert [(r["outcome"], r["audited"]) for r in records(caplog)] == [(WITHHELD, True)]
 
 
 class Normalizing(BookInput):

@@ -276,6 +276,9 @@ Planned: `scripts/`.
   (D5 (b)) on `m7/pii-masking`, 2026-11-20, for shesha's review: log masking is on and the 18
   category E red-team cases are hard passes; reviewed by ananya-rag and mutation-checked (fixes
   applied; four open questions in the guide's §5); its explain-back is shesha's and due.
+  Since PR 6 (`m7/agent-guards`) the guards are on for `/v1/agent`, its confirm route and
+  `/v1/extractions`; until H1 lands, `/v1/agent` hands off every message (the red-flag screen
+  fails closed). H3 (`check_reply`, guide `docs/learning/m7-output-checks.md`) is a stub.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

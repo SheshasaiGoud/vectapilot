@@ -15,10 +15,16 @@ schema.
   name and arguments are caller text: they choose a tool and its arguments, never the business or
   the customer.
 - **The result is the observation** (`ToolEnvelope.observation`): the typed result or typed error
-  as compact JSON, one text block, the same text the agent's model reads. Tool output stays data:
-  free text from the sandbox (an order note, a slot label) is a JSON string value inside it, never
-  a separate block, a prompt or an instruction (rule 5, W10). The envelope's business ids are for
+  as compact JSON, one text block, as the tool core renders it. Tool output stays data: free text
+  from the sandbox (an order note, a slot label) is a JSON string value inside it, never a
+  separate block, a prompt or an instruction (rule 5, W10). The envelope's business ids are for
   the eval's leak check and never leave.
+- **Not M7's screened text.** Since M7 PR 6 the guarded `/v1/agent` route's model reads a
+  *screened* observation (`vectapilot_api.guards.executor`: a free-text field with an injection
+  signal reads `[withheld]`, the others are cleaned and masked). This process never loads the
+  guards (tests/test_loaded_modules.py), so an MCP client gets the core's observation, unscreened:
+  the MCP client's model must treat it as data. The red-team summary lists it as
+  `known_gap:mcp_unscreened` (`vectapilot_api.redteam.summary.MCP_NOTE`).
 - **A proposal is not confirmable here.** Its result is the summary with `confirmation_required`
   plus one fixed sentence saying nothing was stored. There is no action id and no token, and no
   pending action exists (the executor's `propose` writes only its audit row).

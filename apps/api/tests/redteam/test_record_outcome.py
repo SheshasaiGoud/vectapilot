@@ -8,7 +8,8 @@ records one outcome; its JUnit report must hold `<property name="outcome" value=
 exactly what `scripts/redteam_gate.py` reads. The red proof: the same child without the call has
 no such property.
 
-In PR 2 every case is pending, so `test_cases.test_case`'s own soft branch never runs; the last
+While every soft case is pending (H1 is the stub), `test_cases.test_case`'s own soft branch never
+runs; the last
 test here calls it with a scored soft result to pin that it records the outcome (the mutation
 check). It lives here, not in the parametrised module, whose every test must be a case.
 """

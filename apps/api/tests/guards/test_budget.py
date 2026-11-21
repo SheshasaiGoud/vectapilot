@@ -25,6 +25,8 @@ from vectapilot_api.gateway.types import LLMRequest, RetryPolicy, Usage
 from vectapilot_api.guards.budget import (
     BudgetedGateway,
     BudgetTally,
+    FallbackRefused,
+    RefusalAsRouterFailure,
     build_budgeted_agent_gateway,
     build_budgeted_gateway,
     prompt_bytes,
@@ -433,3 +435,68 @@ def test_every_model_calling_method_of_the_gateway_is_overridden() -> None:
     assert public == {"complete", "complete_structured", "aclose"}
     for name in public - {"aclose"}:
         assert getattr(BudgetedGateway, name) is not getattr(LLMGateway, name)
+
+
+# ── The router's fallback (kenji's PR 6 review, G2) ──────────────────────────────────────────
+
+
+class StubFallback:
+    """NOT M4's fallback: answers `intent`, or raises `error`."""
+
+    def __init__(self, intent: Any = None, error: BaseException | None = None) -> None:
+        self.intent, self.error = intent, error
+
+    async def __call__(self, message: str, *, business_id: str, trace_id: str) -> Any:
+        if self.error is not None:
+            raise self.error
+        return self.intent
+
+
+@pytest.mark.parametrize("kind", [RefusalKind.BUDGET, RefusalKind.UNAVAILABLE])
+async def test_a_refused_fallback_is_raised_as_a_router_failure_with_nothing_chained(
+    kind: RefusalKind,
+) -> None:
+    error_type = "ConnectionError" if kind is RefusalKind.UNAVAILABLE else None
+    refused = GuardRefused(kind, error_type=error_type)
+    fallback = RefusalAsRouterFailure(StubFallback(error=refused))
+
+    with pytest.raises(FallbackRefused) as raised:
+        await fallback("Is it open?", business_id="rt-shop", trace_id="0" * 32)
+
+    # Neither a guard refusal the route answers nor a model failure M4 enumerates.
+    assert not isinstance(raised.value, GuardRefused | GatewayError)
+    assert (raised.value.__context__, raised.value.__cause__) == (None, None)
+    assert str(raised.value) == "the router's fallback call was refused"
+
+
+async def test_every_other_answer_of_the_fallback_passes_unchanged() -> None:
+    from vectapilot_api.intents.taxonomy import Intent
+
+    assert (
+        await RefusalAsRouterFailure(StubFallback(Intent.QUESTION))(
+            "Is it open?", business_id="rt-shop", trace_id="0" * 32
+        )
+        is Intent.QUESTION
+    )
+    for error in (InvalidRequest(), ValueError("a caller bug"), asyncio.CancelledError()):
+        with pytest.raises(type(error)) as raised:
+            await RefusalAsRouterFailure(StubFallback(error=error))(
+                "Is it open?", business_id="rt-shop", trace_id="0" * 32
+            )
+        assert raised.value is error
+
+
+def test_create_app_wraps_the_router_fallback_only_while_the_guards_are_on() -> None:
+    from vectapilot_api.intents.fallback import LLMIntentFallback
+    from vectapilot_api.main import _router_fallback
+
+    gateway = budgeted(FakeProvider(), FakeLimiter())
+
+    guarded = _router_fallback(gateway, guarded=True)
+    plain = _router_fallback(gateway, guarded=False)
+
+    assert type(guarded) is RefusalAsRouterFailure
+    assert type(guarded._fallback) is LLMIntentFallback
+    assert guarded._fallback._gateway is gateway
+    assert type(plain) is LLMIntentFallback
+    assert plain._gateway is gateway

@@ -11,10 +11,16 @@ object or route its attack goes through. A later PR registers a runner for a pat
   waits for PR 8 [leo's PR 2 review], but its runner needs planted KB rows for the two sample
   businesses, removed afterwards as the owner, in the served suite that PR 6 reworks
   (`tests/redteam/served.py`'s note): PR 6 [proposal, moved from PR 5 by PR 5];
-- `agent` (`/v1/agent` and its confirm route: A, C, G and H on the agent, I, J, L, k-003): PR 6;
+- `agent` (`/v1/agent` and its confirm route: A, B on the agent route, C, G and H on the agent,
+  I, J, L, k-003): PR 6. B on the agent route (b-007, b-008) stays on its frozen route (the
+  scoring rules: a router-on configuration with a stub router), but its poisoned chunk reaches
+  the agent only through `agent_router = on`, a stub router and the agent's own `AnswerService`
+  over the chunk screen, an answer step PR 8's chunk runner builds: until PR 8 registers the
+  `answer` path it is pending on PR 8 (`waiting_on`) [kenji's PR 6 review, proposal];
 - `log` (F's forced exceptions on every route, through the app's `RedactingJsonFormatter`):
   PR 6, with the route stand-ins and database fixtures its runner shares with the agent path.
-  The formatter itself is built in PR 3 (it masks once H2 is written, `guards/redact.py`);
+  The formatter itself is built in PR 3 (it masks since H2 was written, 2026-11-20,
+  `guards/redact.py`);
 - `document` (D, `/v1/extractions`' page screens): PR 7;
 - `answer` (`/v1/answer` and `/v1/kb/search` with `guard_answer = on` in tests): PR 8.
 
@@ -23,8 +29,8 @@ object or route its attack goes through. A later PR registers a runner for a pat
 it needs (`needs`): a red-flag case only H1; E and F's logs only H2; D H1; K's limiter none; every
 other agent or answer case H1, H2 and H3 (a guarded route hands off everything while one of them
 is a stub, plan "Risks"). Whether a hand-write is written is probed (`HAND_WRITE_PROBES`): H1's
-`match_terms` and, since PR 3, H2's `mask_pii`; PR 6 adds H3's. A hand-write without a probe
-counts as unwritten.
+`match_terms`, since PR 3 H2's `mask_pii`, and since PR 6 H3's `check_reply`. A hand-write
+without a probe counts as unwritten.
 
 **Mark plans** (`mark_plan`): pending first (`pending:<PR n|Hn>` from `PENDING_REASONS`, a closed
 list that also holds `pending:M5-H1` for the real-loop pass, D8 (i)), then the gate label: `hard`
@@ -46,8 +52,9 @@ from typing import Final, Literal
 
 from vectapilot_api.guards.locales import locales
 from vectapilot_api.guards.match import match_terms
+from vectapilot_api.guards.output import OutputContext, OutputKind, check_reply
 from vectapilot_api.guards.pii import mask_pii
-from vectapilot_api.guards.types import Clean, Folded, TermSet
+from vectapilot_api.guards.types import Clean, Folded, TermHit, TermSet
 from vectapilot_api.redteam.cases import Case, Category, Label, Route, Surface
 from vectapilot_api.redteam.scoring import Environment as Environment
 
@@ -118,6 +125,15 @@ def path_of(case: Case) -> CasePath:
     return CasePath.AGENT
 
 
+def waiting_on(case: Case, registered: Iterable[CasePath]) -> Build | None:
+    """The PR a case waits for although its path is registered (module docstring), or None:
+    B on the agent route waits for PR 8's chunk runner, which registers the `answer` path."""
+    agent_chunk = case.category is Category.B and path_of(case) is CasePath.AGENT
+    if agent_chunk and CasePath.ANSWER not in set(registered):
+        return Build.PR8
+    return None
+
+
 def needs(case: Case) -> tuple[HandWrite, ...]:
     """The hand-writes the case's guard reaches, in the order they are reported."""
     path = path_of(case)
@@ -146,10 +162,35 @@ def _h2_written() -> bool:
     return True
 
 
+def _no_hits(text: Folded, terms: TermSet) -> tuple[TermHit, ...]:
+    return ()
+
+
+def _h3_written() -> bool:
+    context = OutputContext(
+        business_type=None,
+        health=True,
+        message=Clean(""),
+        kind=OutputKind.REPLY,
+        cited=(),
+        guidance=(),
+        terms=TermSet(()),
+        matcher=_no_hits,
+        boundary_lines=(),
+        locales=locales(),
+    )
+    try:
+        check_reply("", context)
+    except NotImplementedError:
+        return False
+    return True
+
+
 HAND_WRITE_PROBES: Final[Mapping[Build, Callable[[], bool]]] = MappingProxyType(
-    {Build.H1: _h1_written, Build.H2: _h2_written}
+    {Build.H1: _h1_written, Build.H2: _h2_written, Build.H3: _h3_written}
 )
-"""Whether each hand-write is written (module docstring). PR 6 adds H3's."""
+"""Whether each hand-write is written (module docstring): H1's and H2's since PR 2 and PR 3, H3's
+since PR 6 (an empty reply with no terms, as each probe asks its stub the smallest question)."""
 
 
 def unwritten(
@@ -210,8 +251,12 @@ def mark_plan(
 ) -> MarkPlan:
     """The case's mark: pending on its path's PR or a hand-write, else its gate label."""
     path = path_of(case)
-    if path not in set(registered):
+    registered = set(registered)
+    if path not in registered:
         return MarkPlan("pending", pending_reason(FRONTIER[path]))
+    waiting = waiting_on(case, registered)
+    if waiting is not None:
+        return MarkPlan("pending", pending_reason(waiting))
     hand_write = unwritten(case, probes)
     if hand_write is not None:
         return MarkPlan("pending", pending_reason(hand_write))

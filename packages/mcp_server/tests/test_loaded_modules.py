@@ -15,8 +15,10 @@ LOAD: Final = (
     "import sys, vectapilot_mcp.cli, vectapilot_mcp.server, vectapilot_mcp.startup;"
     " print('\\n'.join(sorted(sys.modules)))"
 )
-NEVER_LOADED: Final = ("vectapilot_api.actions", "vectapilot_api.agent")
-"""Prefixes: the confirm service and tokens (W2), and the agent loop (another caller entirely)."""
+NEVER_LOADED: Final = ("vectapilot_api.actions", "vectapilot_api.agent", "vectapilot_api.guards")
+"""Prefixes: the confirm service and tokens (W2), the agent loop (another caller entirely), and
+M7's guards (PR 6: the server's results are the core's observation, never the guarded route's
+screened copy, so `server.py`'s docstring can say so)."""
 EXECUTE: Final = "vectapilot_api.tools.execute"
 """The only module that executes a write (W1)."""
 

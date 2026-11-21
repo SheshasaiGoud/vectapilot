@@ -95,7 +95,8 @@ async def served(owner: AsyncEngine, tmp_path: Path) -> AsyncIterator[Served]:
     try:
         await seed_business(owner, seed_for(business_id, PAWS.seed))
         corpus = corpus_matching(tmp_path / "corpus", folder)
-        settings = Settings(tools_config_dir=folder, corpus_dir=corpus)
+        # M5's route as before M7 (its limiter pre-check is tests/guards/test_route_limits.py).
+        settings = Settings(tools_config_dir=folder, corpus_dir=corpus, guard_routes="off")
         with TestClient(create_app(settings)) as client:
             yield Served(
                 business_id=business_id,

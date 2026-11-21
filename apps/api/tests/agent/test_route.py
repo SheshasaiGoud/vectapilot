@@ -34,7 +34,11 @@ from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.router import TRACE_HEADER
 
 SRC: Final = REPO_ROOT / "apps" / "api" / "src" / "vectapilot_api"
-SETTINGS: Final = make_settings(tools_config_dir=SANDBOX_DIR, corpus_dir=CORPUS_DIR)
+SETTINGS: Final = make_settings(
+    tools_config_dir=SANDBOX_DIR, corpus_dir=CORPUS_DIR, guard_routes="off"
+)
+"""M5's route as it was: M7's guards off (local, test and ci only); tests/guards/test_agent_route.py
+tests the guarded route."""
 
 
 @contextmanager

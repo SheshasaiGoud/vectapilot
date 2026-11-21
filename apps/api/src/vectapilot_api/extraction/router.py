@@ -9,9 +9,12 @@ documents only until Q4c and M7 (ADR 0017 decision 6).
 **Order of checks:** the business (400) → the query (422, echoing nothing) → the kind (404: an
 unknown kind and one the business does not enable are the same answer, E8; with no extraction
 folder configured, every kind is unknown) → the format (415: `Content-Type` must be
-`application/pdf`) → the size (413, while the body streams in) → extract (PR 2's service: E12's
-page and text limits are 413s, a body that is no PDF a 415, an encrypted or unreadable one a 422,
-each before any model call and with nothing stored) → store in one transaction → 201.
+`application/pdf`) → with `guard_routes = "on"` (the default), M7's limits (`guards.routes`: the
+business's window, before the body is read, so a limited caller never costs a body read or a PDF
+parse; a 429 with `Retry-After`, or a typed 503 `limits_unavailable` when Redis is down, nothing
+read, extracted or stored) → the size (413, while the body streams in) → extract (PR 2's service:
+E12's page and text limits are 413s, a body that is no PDF a 415, an encrypted or unreadable one a
+422, each before any model call and with nothing stored) → store in one transaction → 201.
 
 **The model is always the fake provider in M6 (E11).** `create_app` builds the extraction's
 gateway on a `FakeProvider` whatever Settings say, and refuses any other provider; unscripted, the
@@ -42,6 +45,7 @@ from typing import Annotated, Final
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -53,6 +57,7 @@ from vectapilot_api.extraction.service import ExtractionOutcome, ExtractionServi
 from vectapilot_api.extraction.store import ExtractionStore, StoredExtraction, ordered
 from vectapilot_api.extraction.text import MAX_BYTES, DocumentRefused, RefusalReason
 from vectapilot_api.gateway.types import BusinessId
+from vectapilot_api.guards.routes import RouteLimits
 from vectapilot_api.kb.router import read_body
 from vectapilot_api.kb.types import KbError
 from vectapilot_api.retrieval.router import TRACE_HEADER
@@ -177,6 +182,13 @@ def get_extraction_store(request: Request) -> ExtractionStore:
     return store
 
 
+def get_extraction_limits(request: Request) -> RouteLimits | None:
+    """The route's limits (M7 PR 6, G13: an object the route calls, never a screening
+    dependency); None while `guard_routes` is off."""
+    limits: RouteLimits | None = request.app.state.extraction_limits
+    return limits
+
+
 def find_kind(request: Request, business_id: str, kind: str) -> KindConfig:
     """The business's configuration for `kind`, or the one 404 (E8)."""
     config: ExtractionConfig | None = request.app.state.extraction
@@ -202,10 +214,20 @@ EXTRACTION_RESPONSES: Final[dict[int | str, dict[str, object]]] = {
     201: {"description": "stored", "headers": _TRACE},
     **{code: {"description": _TYPED_ERROR} for code in (400, 404, 422)},
     **{code: {"description": _TYPED_ERROR, "headers": _TRACE} for code in (413, 415, 503)},
+    429: {
+        "description": "a full rate window (M7): `{detail, error, retry_after_seconds,"
+        " guidance}`, with `Retry-After`; nothing was read or stored",
+        "headers": _TRACE,
+    },
 }
 
 
-@router.post("/extractions", status_code=status.HTTP_201_CREATED, responses=EXTRACTION_RESPONSES)
+@router.post(
+    "/extractions",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ExtractionResponse,
+    responses=EXTRACTION_RESPONSES,
+)
 async def create_extraction(
     request: Request,
     response: Response,
@@ -213,13 +235,22 @@ async def create_extraction(
     params: Annotated[ExtractionParams, Query()],
     service: Annotated[ExtractionService, Depends(get_extraction_service)],
     store: Annotated[ExtractionStore, Depends(get_extraction_store)],
-) -> ExtractionResponse:
+    limits: Annotated[RouteLimits | None, Depends(get_extraction_limits)],
+) -> ExtractionResponse | JSONResponse:
     """Extract one PDF (the raw body) as the business's `kind`, store the result and return it:
     every field accepted, in review or absent, with its level and reasons (module docstring)."""
     kind = find_kind(request, business_id, params.kind)
     require_pdf(request.headers.get("content-type"))
+    trace_id: str | None = None
+    if limits is not None:  # M7 PR 6: before the body is read (module docstring)
+        trace_id = new_trace_id()  # the guard record's, then the extraction's
+        limited = await limits.admit(business_id, trace_id=trace_id)
+        if limited is not None:
+            limited.headers[TRACE_HEADER] = trace_id
+            return limited
     data = await read_body(request, MAX_BYTES)
-    trace_id = new_trace_id()  # before the service: a typed error carries it too
+    if trace_id is None:
+        trace_id = new_trace_id()  # before the service: a typed error carries it too
     file_sha256 = hashlib.sha256(data).hexdigest()
     outcome: ExtractionOutcome | None = None
     stored: StoredExtraction | None = None

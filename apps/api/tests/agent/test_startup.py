@@ -562,8 +562,9 @@ def test_the_app_wires_the_agents_settings_and_its_own_gateway() -> None:
         assert (service.routing, service._router, service._router_artifact) == ("off", None, None)
 
 
+@pytest.mark.parametrize("guard_routes", ["off", "on"])
 def test_the_app_starts_on_with_the_router_on_the_agents_gateway(
-    world: tuple[FakeRepo, Path, Now], monkeypatch: pytest.MonkeyPatch
+    world: tuple[FakeRepo, Path, Now], monkeypatch: pytest.MonkeyPatch, guard_routes: str
 ) -> None:
     # M01, M05. The pinned model is voyage-4's and tests embed with the fake, so startup's check
     # is run with voyage-4's spec (load_router_model is tested above); no message is routed, so
@@ -580,6 +581,7 @@ def test_the_app_starts_on_with_the_router_on_the_agents_gateway(
         agent_router="on",
         agent_router_model_dir=folder,
         agent_router_timeout_seconds=12.5,
+        guard_routes=guard_routes,
         **WITH_TOOLS,
     )
     app = create_app(settings)
@@ -589,8 +591,14 @@ def test_the_app_starts_on_with_the_router_on_the_agents_gateway(
         assert service._router_timeout_s == 12.5
         assert isinstance(service._router, ClassifierRouter)
         assert service._router._model is model
-        assert isinstance(service._router._fallback, LLMIntentFallback)
-        assert service._router._fallback._gateway is service._gateway
+        fallback = service._router._fallback
+        if guard_routes == "on":  # M7 PR 6: a budget refusal fails closed through M4 (G2)
+            from vectapilot_api.guards.budget import RefusalAsRouterFailure
+
+            assert isinstance(fallback, RefusalAsRouterFailure)
+            fallback = fallback._fallback
+        assert isinstance(fallback, LLMIntentFallback)
+        assert fallback._gateway is service._gateway
         assert service._router_artifact == model.artifact_sha256
 
 
