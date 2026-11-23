@@ -7,7 +7,9 @@ Kept outside tests/canary/ on purpose: scripts/canary_gate.py must not count the
 """
 
 import ast
+import functools
 import html
+import json
 import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -45,6 +47,7 @@ from tests.canary.read_paths import (
     BAIT,
     BAIT_SLOT_IDS,
     BAIT_WORD,
+    GUARDED_LIMITS,
     NEEDED_OUTSIDE_READ_PATHS,
     NEEDS_HAND_WRITE,
     OWNER_CONNECTION_PATHS,
@@ -53,6 +56,8 @@ from tests.canary.read_paths import (
     TOOL_PATHS,
     answer_through_the_api,
     answer_through_the_api_hybrid,
+    answer_through_the_guarded_api,
+    answer_through_the_guarded_api_hybrid,
     bait_slots,
     hybrid_search_as_staff,
     pending_hand_write,
@@ -60,14 +65,19 @@ from tests.canary.read_paths import (
     read_path_params,
     search_through_the_api,
     search_through_the_api_hybrid,
+    search_through_the_guarded_api,
+    search_through_the_guarded_api_hybrid,
 )
 from tests.canary.write_paths import WRITE_NEEDS_HAND_WRITE, WRITE_PATHS
 from tests.conftest import make_settings
 from tests.retrieval.standins import FakeDatabase, StandInFuse, hit
+from vectapilot_api.config import Settings
 from vectapilot_api.db import Database
 from vectapilot_api.embeddings.fake import fake_vector
+from vectapilot_api.guards.fake_limiter import FakeLimiter
 from vectapilot_api.kb.service import KbService
 from vectapilot_api.kb.types import ReindexResult
+from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.types import SearchHit, TextQuery, VectorQuery
 
 PRINTED: Final = "(business_id = NULLIF(current_setting('app.business_id'::text, true), ''::text))"
@@ -338,12 +348,21 @@ def test_every_stub_dependency_names_a_read_path_and_every_pending_stub_is_used(
     assert not NEEDED_OUTSIDE_READ_PATHS.keys() & run_by_read_paths
     # PR 6's routes run M2 H1: they wait for the same switch as its own read path. M3 PR 4's
     # hybrid paths run both legs and H2, so each waits for every one of the three switches, and
-    # rrf_fuse is no longer needed outside the read paths.
-    hybrid = {"hybrid_search", "GET /v1/kb/search (hybrid)", "POST /v1/answer (hybrid)"}
+    # rrf_fuse is no longer needed outside the read paths. M7's guarded routes (guard_answer on,
+    # a PR 10 precondition) run the same legs, and M7's H1 and H3 as stand-ins: no M7 stub here.
+    hybrid = {
+        "hybrid_search",
+        "GET /v1/kb/search (hybrid)",
+        "POST /v1/answer (hybrid)",
+        "GET /v1/kb/search (hybrid, guarded)",
+        "POST /v1/answer (hybrid, guarded)",
+    }
     assert runs("vector_search") == {
         "vector_search",
         "GET /v1/kb/search",
         "POST /v1/answer",
+        "GET /v1/kb/search (guarded)",
+        "POST /v1/answer (guarded)",
         *hybrid,
     }
     assert runs("text_search") == {"text_search", *hybrid}
@@ -546,13 +565,27 @@ def test_red_proof_a_second_pending_helper_elsewhere_is_found() -> None:
 
 
 ApiReadPath = Callable[[AsyncEngine, Planted], Awaitable[Mapping[str, str]]]
-VECTOR_API_READ_PATHS: Final[list[ApiReadPath]] = [search_through_the_api, answer_through_the_api]
+VECTOR_API_READ_PATHS: Final[list[ApiReadPath]] = [
+    search_through_the_api,
+    answer_through_the_api,
+    search_through_the_guarded_api,
+    answer_through_the_guarded_api,
+]
 HYBRID_API_READ_PATHS: Final[list[ApiReadPath]] = [
     search_through_the_api_hybrid,
     answer_through_the_api_hybrid,
+    search_through_the_guarded_api_hybrid,
+    answer_through_the_guarded_api_hybrid,
 ]
 """M3 PR 4: the same two routes with `rag_retrieval_mode=hybrid` (both legs and the fusion)."""
 API_READ_PATHS: Final[list[ApiReadPath]] = [*VECTOR_API_READ_PATHS, *HYBRID_API_READ_PATHS]
+GUARDED_API_READ_PATHS: Final[list[ApiReadPath]] = [
+    search_through_the_guarded_api,
+    answer_through_the_guarded_api,
+    search_through_the_guarded_api_hybrid,
+    answer_through_the_guarded_api_hybrid,
+]
+"""M7's guarded routes (`guard_answer = "on"`, a PR 10 precondition), in both modes."""
 
 
 @pytest.fixture
@@ -560,8 +593,9 @@ def app_without_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
     """PR 6's API read paths run the real app; here everything that would reach Postgres is
     replaced (the registry, the reindex, the transaction, the stored models); each test replaces
     H1's `vector_search` itself, and for M3 PR 4's hybrid routes M3 H1's `text_search` and M3 H2's
-    `rrf_fuse` (team-side stand-ins: both are pending [HAND-WRITE]s). The same paths run against
-    Postgres in CI."""
+    `rrf_fuse` (team-side stand-ins: both are pending [HAND-WRITE]s). M7's guarded routes reach
+    Redis for their limits and budget, so their limiter is the in-memory fake (unit tests run with
+    a dead Redis). The same paths run against Postgres and Redis in CI."""
 
     async def business_exists(self: Database, business_id: str) -> bool:
         return True
@@ -579,6 +613,8 @@ def app_without_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Database, "business_transaction", FakeDatabase().business_transaction)
     monkeypatch.setattr(KbService, "reindex", reindex)
     monkeypatch.setattr("vectapilot_api.retrieval.search.stored_models_in", one_model)
+    without_redis = functools.partial(create_app, limiter=FakeLimiter())
+    monkeypatch.setattr("tests.canary.read_paths.create_app", without_redis)
 
 
 def search_returning(
@@ -664,8 +700,24 @@ LEAKS: Final = [
     pytest.param(answer_through_the_api_hybrid, "vector", id="POST (hybrid), vector leg"),
     pytest.param(search_through_the_api_hybrid, "text", id="GET (hybrid), full-text leg"),
     pytest.param(answer_through_the_api_hybrid, "text", id="POST (hybrid), full-text leg"),
+    pytest.param(search_through_the_guarded_api, "vector", id="GET (guarded), vector leg"),
+    pytest.param(answer_through_the_guarded_api, "vector", id="POST (guarded), vector leg"),
+    pytest.param(
+        search_through_the_guarded_api_hybrid, "vector", id="GET (hybrid, guarded), vector leg"
+    ),
+    pytest.param(
+        answer_through_the_guarded_api_hybrid, "vector", id="POST (hybrid, guarded), vector leg"
+    ),
+    pytest.param(
+        search_through_the_guarded_api_hybrid, "text", id="GET (hybrid, guarded), full-text leg"
+    ),
+    pytest.param(
+        answer_through_the_guarded_api_hybrid, "text", id="POST (hybrid, guarded), full-text leg"
+    ),
 ]
-"""Every API read path with each leg it runs leaking in turn, the other leg clean (M3 PR 4)."""
+"""Every API read path with each leg it runs leaking in turn, the other leg clean (M3 PR 4). On
+M7's guarded routes the no-hit matcher lets the other business's bait through the chunk screen,
+as a screen that found nothing would: the guards are not an isolation layer, the search is."""
 
 
 @pytest.mark.anyio
@@ -684,6 +736,87 @@ async def test_red_proof_an_api_read_path_over_a_leaking_search_is_caught(
     outputs = await path(cast(AsyncEngine, None), A)
 
     assert any(B.canary in problem for problem in canary_leaks(outputs, A, B))
+
+
+GUARDED_ANSWER_PATHS: Final = (
+    answer_through_the_guarded_api,
+    answer_through_the_guarded_api_hybrid,
+)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", GUARDED_API_READ_PATHS)
+@pytest.mark.usefixtures("app_without_postgres")
+async def test_a_guarded_read_paths_records_are_the_requests_and_all_its_businesss(
+    path: ApiReadPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The `(records)` output the leak check reads: every metadata record the request logged, one
+    # JSON object per line, each named by its record. One `guard` record, and every record that
+    # names a business names `me` (the answer's model call and `rag_answer` included).
+    hits = {A.business_id: [bait(A)]}
+    use_legs(monkeypatch, hits, hits)
+
+    outputs = await path(cast(AsyncEngine, None), A)
+
+    [records] = [text for label, text in outputs.items() if label.endswith(" (records)")]
+    logged: list[dict[str, dict[str, object]]] = [json.loads(line) for line in records.splitlines()]
+    names = [name for line in logged for name in line]
+    businesses = {f["business_id"] for line in logged for f in line.values() if "business_id" in f}
+    assert names.count("guard") == 1
+    assert businesses == {A.business_id}
+    if path in GUARDED_ANSWER_PATHS:
+        assert {"llm_call", "rag_answer"} <= set(names)
+    else:
+        assert "llm_call" not in names
+
+
+def guards_off(**overrides: object) -> Settings:
+    """`make_settings` that keeps `guard_answer` off whatever the read path asks."""
+    return make_settings(**(overrides | {"guard_answer": "off"}))
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", GUARDED_API_READ_PATHS)
+@pytest.mark.usefixtures("app_without_postgres")
+async def test_red_proof_a_guarded_read_path_served_without_its_guards_is_refused(
+    path: ApiReadPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With `guard_answer` off, M3's service answers the same bait with no leak, so the leak check
+    # alone would pass for the wrong reason: the path's own guard-record check must refuse it.
+    hits = {A.business_id: [bait(A)]}
+    use_legs(monkeypatch, hits, hits)
+    monkeypatch.setattr("tests.canary.read_paths.Settings", guards_off)
+
+    with pytest.raises(AssertionError, match="0 guard records"):
+        await path(cast(AsyncEngine, None), A)
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("path", API_READ_PATHS)
+@pytest.mark.usefixtures("app_without_postgres")
+async def test_every_api_read_path_pins_guard_answer_and_a_guarded_one_its_limits(
+    path: ApiReadPath, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unit tests build hermetic settings (`make_settings`: guard_answer off), so they cannot show
+    # what the integration run would read from a `.env` or a later default. Record what each path
+    # asks for instead: M3's entries and their guarded twins are off and on by construction, and a
+    # guarded one never takes a `.env`'s limits or budget (a `budget` hand-off is not a leak).
+    asked: list[dict[str, object]] = []
+
+    def recorded(**overrides: object) -> Settings:
+        asked.append(overrides)
+        return make_settings(**overrides)
+
+    hits = {A.business_id: [bait(A)]}
+    use_legs(monkeypatch, hits, hits)
+    monkeypatch.setattr("tests.canary.read_paths.Settings", recorded)
+
+    await path(cast(AsyncEngine, None), A)
+
+    [overrides] = asked
+    guarded = path in GUARDED_API_READ_PATHS
+    assert overrides["guard_answer"] == ("on" if guarded else "off")
+    assert (GUARDED_LIMITS.items() <= overrides.items()) is guarded
 
 
 class ModelsConnection:

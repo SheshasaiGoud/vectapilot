@@ -1217,10 +1217,23 @@ human steps are not M7's.
     PR 10 precondition: the longest answer in M2/M3's live dev results fits under it.
   - **Screening `/v1/kb/search`'s hits** waits for M8's customer surface.
   - **PR 10 precondition:** a canary `READ_PATHS` entry for `/v1/answer` and `/v1/kb/search` with
-    `guard_answer = on`, added after PR 7 and PR 8 merge, passes before the switch.
+    `guard_answer = on`, added after PR 7 and PR 8 merge, passes before the switch. **Done** in
+    the follow-up (`m7/agent-followups`): `test_no_read_path_shows_another_businesss_canary`'s
+    entries `GET /v1/kb/search (guarded)`, `POST /v1/answer (guarded)` and their `(hybrid,
+    guarded)` twins, H1 and H3 as stand-ins, limits and budget pinned to the test suite's, and
+    M3's unguarded entries pinned to `guard_answer = off`. Local integration run of 2026-11-23
+    (on 8be0156 plus the follow-up): 8 of 8 ids passed, canary gate 147 passed; CI's canary gate
+    on the follow-up PR is the second witness. PR 10 runs it again with H1 and H3 written.
   - **A small `/v1/agent` follow-up PR** after PR 7 and PR 8: H3's boundary lines for the answer
     kind (above), and G3's priority for a Redis failure on a message in an uncovered script (high
-    for a non-health business, as `/v1/answer` does; unreachable with today's data).
+    for a non-health business, as `/v1/answer` does; unreachable with today's data). **Done** in
+    that follow-up (`m7/agent-followups`): the answer prompt's lines alone, not the union.
+  - **Decided with the follow-up (shesha, 2026-11-23, leo's review):** on `/v1/agent`, a full
+    window on a message the red-flag screen never cleared stays a 429 (a hand-off would let any
+    caller skip the window by writing in an uncovered script); revisit when `agent_router = on`
+    reaches a business that lists an uncovered language. **For M8's plan:** once a transcript
+    feeds the loop's own text into a `rag` question, H3 checks an answer kind against the union
+    of both prompts' boundary lines.
 
 ## H1 — `m7/term-matching` (`[HAND-WRITE]`, [D5]; time-box 2 h, decided 2026-11-16) · S
 `match_terms(text: Folded, terms: TermSet) -> tuple[TermHit, ...]`. Pure: no I/O, no logging,

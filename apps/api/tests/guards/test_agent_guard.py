@@ -56,13 +56,22 @@ from vectapilot_api.answer.types import AnswerResponse, AnswerRun, Confidence
 from vectapilot_api.gateway.providers.fake import FakeProvider, FakeReply
 from vectapilot_api.gateway.types import BusinessId
 from vectapilot_api.guards.agent import (
+    _Turn,
     read_only_tools,
     red_flag_priority,
     turn_precheck_micro_usd,
 )
-from vectapilot_api.guards.fake_limiter import FakeLimiter
-from vectapilot_api.guards.screens import current_screens
-from vectapilot_api.guards.types import GUARD_RECORD, Finding, TermCategory, TermHit, TermSet
+from vectapilot_api.guards.fake_limiter import REDIS_DOWN, FakeLimiter
+from vectapilot_api.guards.limits import GuardRefused, RefusalKind
+from vectapilot_api.guards.screens import ANSWER_BOUNDARY_LINES, BOUNDARY_LINES, current_screens
+from vectapilot_api.guards.types import (
+    GUARD_RECORD,
+    DecidedBy,
+    Finding,
+    TermCategory,
+    TermHit,
+    TermSet,
+)
 from vectapilot_api.intents.policy import BusinessType, Priority
 from vectapilot_api.intents.taxonomy import Intent
 from vectapilot_api.retrieval.search import Citation
@@ -520,6 +529,130 @@ def test_a_guard_failing_on_an_uncovered_script_keeps_the_before_the_screen_prio
 
     assert (response.reason, response.priority) == (HandoffReason.GUARD_ERROR, priority)
     assert the_record(caplog)["error_type"] == "RuntimeError"
+
+
+@pytest.mark.parametrize(
+    ("limiter", "message", "priority", "failed_at"),
+    [
+        (FakeLimiter(limit="raise"), TELUGU, Priority.HIGH, "admit"),
+        (FakeLimiter(budget="raise"), TELUGU, Priority.HIGH, "remaining"),
+        (FakeLimiter(budget=["allow", "raise"]), TELUGU, Priority.HIGH, "reserve"),
+        (FakeLimiter(limit="raise"), BENIGN, Priority.NORMAL, "admit"),
+    ],
+    ids=[
+        "admit: never cleared",
+        "the pre-check: never cleared",
+        "a call inside the turn: never cleared",
+        "admit: cleared",
+    ],
+)
+def test_redis_failing_on_an_uncovered_script_keeps_the_before_the_screen_priority(
+    caplog: pytest.LogCaptureFixture,
+    limiter: FakeLimiter,
+    message: str,
+    priority: Priority,
+    failed_at: str,
+) -> None:
+    # G3 (the /v1/agent follow-up after PR 8): Redis failing is a guard failing, so a message the
+    # red-flag screen never cleared (a shop's Telugu one) keeps the before-the-screen priority,
+    # high, as on /v1/answer; `refusal_decision` alone says normal, which a cleared message keeps.
+    # Unreachable with today's data (only paws-and-co lists an uncovered language: health).
+    config = with_not_covered(load_fixtures(), SHOP, frozenset({"te"}))
+    built = build(
+        must_run_not(),
+        read_only_loop=one_step_stand_in(TurnReply("never")),
+        config=config,
+        limiter=limiter,
+        mask=IdentityMask(),
+        check=FixedCheck(),
+    )
+
+    response = handoff(respond(built, SHOP, message))
+
+    assert (response.reason, response.priority, response.guidance) == (
+        HandoffReason.GUARD_ERROR,
+        priority,
+        (),
+    )
+    assert built.limiter.calls[-1].operation == failed_at  # where Redis failed
+    assert built.provider.calls == []
+    record = the_record(caplog)
+    assert (record["action"], record["decided_by"], record["priority"]) == (
+        "handoff",
+        "guard_error",
+        priority.value,
+    )
+    assert record["error_type"] == REDIS_DOWN
+
+
+@pytest.mark.parametrize(
+    ("limiter", "reason", "failed_at"),
+    [
+        (FakeLimiter(budget="refuse"), HandoffReason.BUDGET, "remaining"),
+        (FakeLimiter(budget=["allow", "refuse"]), HandoffReason.BUDGET, "reserve"),
+        (FakeLimiter(limit="refuse", retry_after_s=17), None, "admit"),
+    ],
+    ids=["the pre-check", "a call inside the turn", "a full window"],
+)
+def test_on_an_uncovered_script_the_budget_and_a_full_window_keep_their_outcome(
+    caplog: pytest.LogCaptureFixture,
+    limiter: FakeLimiter,
+    reason: HandoffReason | None,
+    failed_at: str,
+) -> None:
+    # Only Redis failing is G3's failure (`AgentGuard._refused`): an exhausted budget and a full
+    # window are the limiter deciding (G9), so a never-cleared message gets what any other does,
+    # the shop's guidance included: none (leo's follow-up review: the shop has lines to show).
+    assert SHOP_GUIDANCE  # so "no guidance" below is a real check, never an empty tuple's
+    config = with_not_covered(load_fixtures(), SHOP, frozenset({"te"}))
+    built = build(
+        must_run_not(),
+        read_only_loop=one_step_stand_in(TurnReply("never")),
+        config=config,
+        limiter=limiter,
+        mask=IdentityMask(),
+        check=FixedCheck(),
+    )
+
+    response = respond(built, SHOP, TELUGU)
+
+    assert built.limiter.calls[-1].operation == failed_at  # where the limiter refused
+    assert built.provider.calls == []
+    record = the_record(caplog)
+    assert (record["error_type"], record["guidance"]) == (None, False)
+    if reason is None:
+        assert isinstance(response, JSONResponse)
+        assert (response.status_code, response.headers["Retry-After"]) == (429, "17")
+        assert json.loads(bytes(response.body))["guidance"] == []
+        assert record["decided_by"] == "limit"
+        return
+    assert (handoff(response).reason, handoff(response).priority, handoff(response).guidance) == (
+        reason,
+        Priority.NORMAL,
+        (),
+    )
+    assert (record["decided_by"], record["priority"]) == ("budget", "normal")
+
+
+def test_redis_failing_on_a_never_cleared_health_message_stays_urgent() -> None:
+    # Unreachable through `respond` today (step 4 hands a health business's uncovered script
+    # off): pins `_refused`'s route through `_failed` should step 4 ever change (the router PR's
+    # option (b), kenji's PR 6 review). A probe from the follow-up's mutation check.
+    built = build(must_run_not())
+    guard = built.guard
+    turn = _Turn(guard._business(CLINIC))  # cleared stays False: the screen never cleared it
+    assert not turn.cleared
+    refusal = GuardRefused(RefusalKind.UNAVAILABLE, error_type=REDIS_DOWN)
+
+    response = guard._refused(refusal, TRACE, turn).response
+
+    assert isinstance(response, HandoffResponse)
+    assert (response.reason, response.priority, response.guidance) == (
+        HandoffReason.GUARD_ERROR,
+        Priority.URGENT,
+        CLINIC_GUIDANCE,
+    )
+    assert (turn.error_type, turn.first) == (REDIS_DOWN, DecidedBy.GUARD_ERROR)
 
 
 # ── 5. Limits and the budget ─────────────────────────────────────────────────────────────────
@@ -1201,6 +1334,34 @@ def test_h3_reads_the_businesss_health_and_its_clean_unmasked_message() -> None:
     assert (context.health, context.message) == (
         True,
         "Call me on 9876543210, when do you open?",
+    )
+
+
+AGENT_ONLY_LINE: Final = "You are the support assistant of one business."
+ANSWER_ONLY_LINE: Final = "Use only facts stated in the DOCUMENT blocks."
+
+
+@pytest.mark.parametrize("kind", ["reply", "answer", "ticket_text"])
+def test_h3_reads_the_boundary_lines_of_the_prompt_that_wrote_the_text(kind: str) -> None:
+    # The /v1/agent follow-up after PR 8 (ananya's review): an answer kind is written by
+    # `AnswerService` from the answer prompt, so H3 looks for that prompt's echo alone, as on
+    # /v1/answer, never the union; a reply and a ticket's text come from the agent prompt.
+    check = FixedCheck()
+    if kind == "answer":
+        built = routed(ScreenedAnswers(), check)
+    else:
+        outcome = TurnReply("A reply.") if kind == "reply" else ticket()
+        built = build(canned_loop(outcome), mask=IdentityMask(), check=check)
+
+    respond(built, SHOP)
+
+    [(_, context)] = check.asked
+    assert context.kind.value == kind
+    expected = ANSWER_BOUNDARY_LINES if kind == "answer" else BOUNDARY_LINES
+    assert context.boundary_lines == expected
+    assert (AGENT_ONLY_LINE in expected, ANSWER_ONLY_LINE in expected) == (
+        kind != "answer",
+        kind == "answer",
     )
 
 
