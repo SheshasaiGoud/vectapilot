@@ -20,12 +20,20 @@ response from the service step carries it as a header, the typed errors included
 body as `trace_id`), so a failed request can be joined to its `embedding_call` record. A request
 refused before that step (400, or a 422 for the request itself) has no trace id and no header:
 nothing was recorded for it. A bug (500) has none either.
+
+**M7's guards (PR 8; G1, G11, G13)** run only with `guard_answer = "on"`: before the service, the
+route calls `guards.answer.AnswerGuard.search` (an object built in `create_app`), which records a
+red-flag hit only (search returns no model text, so it has no hand-off), checks the business's
+rate window (a 429, or a typed 503) and returns the clean, masked question the search embeds; a
+guard that fails is a typed 503. With `"off"` (the default during M3's measurement window) the
+route is exactly M2's (tests/answer/test_answer_goldens.py: byte-identical).
 """
 
 from collections.abc import Mapping
 from typing import Annotated, Final
 
 from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -34,6 +42,7 @@ from vectapilot_api.embeddings.base import InputTooLarge
 from vectapilot_api.embeddings.guard import ReindexRequired
 from vectapilot_api.gateway.errors import GatewayError, Transient
 from vectapilot_api.gateway.types import BusinessId, TraceId
+from vectapilot_api.guards.answer import AnswerGuard
 from vectapilot_api.kb.types import KbError
 from vectapilot_api.retrieval.search import Citation, Question, SearchService, new_trace_id
 from vectapilot_api.retrieval.types import MAX_K, Reader
@@ -117,19 +126,44 @@ ROUTE_RESPONSES: Final[dict[int | str, dict[str, object]]] = {
 }
 """The OpenAPI responses of `GET /v1/kb/search` and `POST /v1/answer`."""
 
+GUARDED_ROUTE_RESPONSES: Final[dict[int | str, dict[str, object]]] = {
+    **ROUTE_RESPONSES,
+    429: {
+        "description": "`guard_answer = on` only (M7, G9): a full rate window, `{detail, error,"
+        " retry_after_seconds, guidance}`, with `Retry-After`; never instead of a red-flag"
+        " hand-off, which is screened first",
+        "headers": _TRACE_HEADER_DOC,
+    },
+}
+"""`ROUTE_RESPONSES` and the 429 M7's guards add (PR 8), for both routes."""
 
-@router.get("/search", responses=ROUTE_RESPONSES)
+
+def get_search_guard(request: Request) -> AnswerGuard | None:
+    """The route's guards (G13: an object the route calls); None while `guard_answer` is off."""
+    guard: AnswerGuard | None = request.app.state.answer_guard
+    return guard
+
+
+@router.get("/search", response_model=SearchResponse, responses=GUARDED_ROUTE_RESPONSES)
 async def search(
     business_id: Annotated[BusinessId, Depends(get_business_id)],
     params: Annotated[SearchParams, Query()],
     service: Annotated[SearchService, Depends(get_search_service)],
+    guard: Annotated[AnswerGuard | None, Depends(get_search_guard)],
     response: Response,
-) -> SearchResponse:
+) -> SearchResponse | JSONResponse:
     """The business's approved public chunks closest to `q`, best first, at most `k`."""
     trace_id = new_trace_id()  # before the service: a typed error carries it too
+    question = params.q
+    if guard is not None:  # guard_answer = "on" (module docstring)
+        screened = await guard.search(business_id, params.q, trace_id=trace_id)
+        if isinstance(screened, JSONResponse):  # a 429 or a typed 503, returned as built
+            screened.headers[TRACE_HEADER] = trace_id
+            return screened
+        question = screened
     try:
         result = await service.search(
-            business_id, params.q, k=params.k, reader=CUSTOMER, trace_id=trace_id
+            business_id, question, k=params.k, reader=CUSTOMER, trace_id=trace_id
         )
     except Exception as error:
         failure = typed_error(error, SEARCH_ERRORS, trace_id=trace_id)

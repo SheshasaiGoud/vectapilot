@@ -29,7 +29,6 @@ from tests.tools.helpers import REPO_ROOT, SANDBOX_DIR
 from vectapilot_api import main
 from vectapilot_api.business import HEADER_ENVIRONMENTS
 from vectapilot_api.config import (
-    GUARD_ANSWER_NOT_WIRED,
     GUARD_CONFIG_REFUSED,
     GUARD_OFF_ENVIRONMENTS,
     Settings,
@@ -54,12 +53,6 @@ GUARD_ENV: Final = (
     "VECTAPILOT_GUARD_ANSWER",
     "VECTAPILOT_GUARD_CONFIG_DIR",
 )
-
-
-def answer_on(settings: Settings) -> Settings:
-    """`settings` with `guard_answer = "on"`, unvalidated: Settings refuses it until PR 8 wires the
-    answer guards, but `create_app`'s requirement already counts it (PR 8 lifts the refusal)."""
-    return settings.model_copy(update={"guard_answer": "on"})
 
 
 def refused(**overrides: Any) -> str:
@@ -102,11 +95,8 @@ def test_the_settings_are_read_from_the_environment(monkeypatch: pytest.MonkeyPa
     settings = from_env()
     assert settings.guard_config_dir == GUARD_DIR
     assert (settings.guard_routes, settings.guard_answer) == ("off", "off")
-    # `on` is read from the environment too: it is refused (until PR 8), so it was read.
-    monkeypatch.setenv("VECTAPILOT_GUARD_ANSWER", "on")
-    with pytest.raises(ValidationError) as error:
-        from_env()
-    assert str(error.value.errors(include_input=False)[0]["msg"]).endswith(GUARD_ANSWER_NOT_WIRED)
+    monkeypatch.setenv("VECTAPILOT_GUARD_ANSWER", "on")  # accepted since M7 PR 8 wires it
+    assert from_env().guard_answer == "on"
 
 
 def test_guard_routes_off_is_allowed_only_where_the_header_is() -> None:
@@ -124,19 +114,6 @@ def test_only_off_and_on_are_accepted(field: str) -> None:
     with pytest.raises(ValidationError) as error:
         make_settings(**{field: "maybe"})
     assert error.value.errors(include_input=False)[0]["loc"] == (field,)
-
-
-@pytest.mark.parametrize("environment", ["local", "test", "ci", "production"])
-def test_guard_answer_on_is_refused_until_pr_8_wires_it(environment: str) -> None:
-    # Decided 2026-11-16 (shesha): a switch that guards nothing must not look switched on.
-    overrides = PRODUCTION if environment == "production" else {"environment": environment}
-    with pytest.raises(ValidationError) as error:
-        make_settings(**overrides, guard_answer="on")
-
-    (only,) = error.value.errors(include_input=False)
-    assert only["msg"] == f"Value error, {GUARD_ANSWER_NOT_WIRED}"
-    assert "guard_answer" in only["msg"]
-    assert "input_value" not in str(error.value)  # names the field, never a value
 
 
 def test_the_guard_folder_needs_the_corpus_folder() -> None:
@@ -164,10 +141,8 @@ def test_the_guard_folder_needs_the_corpus_folder() -> None:
 def test_when_a_guarded_route_serves_businesses(
     overrides: dict[str, Any], answer: bool, serves: bool
 ) -> None:
-    # `answer`: guard_answer "on", set past Settings' refusal (`answer_on`) until PR 8.
     def built(fields: dict[str, Any]) -> Settings:
-        settings = make_settings(**fields)
-        return answer_on(settings) if answer else settings
+        return make_settings(**fields, guard_answer="on" if answer else "off")
 
     settings = built(overrides)
     assert settings.guarded_routes_serve_businesses() is serves
@@ -184,7 +159,7 @@ def test_when_a_guarded_route_serves_businesses(
     [
         {"tools_config_dir": SANDBOX_DIR, "corpus_dir": SAMPLE_CORPUS},
         {"extraction_config_dir": EXTRACTION_DIR, "corpus_dir": SAMPLE_CORPUS},
-        {},  # guard_answer "on", past Settings' refusal until PR 8
+        {"guard_answer": "on"},
     ],
     ids=["tools", "extraction", "answer"],
 )
@@ -192,8 +167,6 @@ def test_production_refuses_to_start_guarded_routes_without_the_guard_folder(
     serving: dict[str, Any],
 ) -> None:
     settings = make_settings(**PRODUCTION, **serving)
-    if not serving:
-        settings = answer_on(settings)
 
     with pytest.raises(ValidationError) as error:
         create_app(settings)

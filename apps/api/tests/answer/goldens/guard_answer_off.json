@@ -1,0 +1,885 @@
+{
+ "recorded_on": "6572e29da269f55a21bb1b7fd8c5262b9ff2c8d9",
+ "how": "uv run python -m tests.answer.goldens (apps/api); see tests/answer/goldens.py",
+ "exchanges": [
+  {
+   "name": "answered",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "514"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"answered\",\"answer\":\"We open at 10 on Sundays.\",\"sources\":[{\"chunk_id\":\"c1380261-c7b9-5d1a-b579-3989d35def70\",\"document_id\":\"430a2715-45f4-51c2-989b-2758b74e408d\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":1,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On Sundays we open at 10.\",\"score\":0.82}],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"answered\", \"reason\": null, \"error\": null, \"hits\": 4, \"evidence\": 3, \"cited\": 1, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "answered citing two",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "791"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"answered\",\"answer\":\"We open at 10 on Sundays.\",\"sources\":[{\"chunk_id\":\"e09f0022-133f-5775-ae4b-f61242d2b233\",\"document_id\":\"b37f6ff8-6391-51b2-b4b0-c951933d5766\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":null,\"chunk_index\":1,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On weekdays we open at 9.\",\"score\":0.64},{\"chunk_id\":\"c1380261-c7b9-5d1a-b579-3989d35def70\",\"document_id\":\"430a2715-45f4-51c2-989b-2758b74e408d\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":1,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On Sundays we open at 10.\",\"score\":0.82}],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"answered\", \"reason\": null, \"error\": null, \"hits\": 4, \"evidence\": 3, \"cited\": 2, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "answered hybrid",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "517"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"answered\",\"answer\":\"We open at 10 on Sundays.\",\"sources\":[{\"chunk_id\":\"e09f0022-133f-5775-ae4b-f61242d2b233\",\"document_id\":\"b37f6ff8-6391-51b2-b4b0-c951933d5766\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":null,\"chunk_index\":1,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On weekdays we open at 9.\",\"score\":0.64}],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"answered\", \"reason\": null, \"error\": null, \"hits\": 3, \"evidence\": 3, \"cited\": 1, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\", \"retrieval\": {\"mode\": \"hybrid\", \"candidate_k\": 20, \"context_k\": 5, \"rrf_k\": 60, \"vector_hits\": 2, \"text_hits\": 2, \"fused_hits\": 3, \"fts_only_hits\": 1, \"fts_only_evidence\": 1, \"embed_ms\": \"<volatile>\", \"transaction_ms\": \"<volatile>\", \"vector_ms\": \"<volatile>\", \"text_ms\": \"<volatile>\", \"fuse_ms\": \"<volatile>\"}}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "answered pii question",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "514"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"answered\",\"answer\":\"We open at 10 on Sundays.\",\"sources\":[{\"chunk_id\":\"c1380261-c7b9-5d1a-b579-3989d35def70\",\"document_id\":\"430a2715-45f4-51c2-989b-2758b74e408d\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":1,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On Sundays we open at 10.\",\"score\":0.82}],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 65, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"answered\", \"reason\": null, \"error\": null, \"hits\": 4, \"evidence\": 3, \"cited\": 1, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "dont_know no hits",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "219"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"dont_know\",\"answer\":null,\"sources\":[],\"confidence\":{\"value\":null,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"dont_know\", \"reason\": \"no_hits\", \"error\": null, \"hits\": 0, \"evidence\": 0, \"cited\": 0, \"top_score\": null, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "dont_know below threshold",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "219"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"dont_know\",\"answer\":null,\"sources\":[],\"confidence\":{\"value\":0.12,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"dont_know\", \"reason\": \"below_threshold\", \"error\": null, \"hits\": 1, \"evidence\": 0, \"cited\": 0, \"top_score\": 0.12, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "handoff weak evidence",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "217"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"handoff\",\"answer\":null,\"sources\":[],\"confidence\":{\"value\":0.12,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"handoff\", \"reason\": \"below_threshold\", \"error\": null, \"hits\": 1, \"evidence\": 0, \"cited\": 0, \"top_score\": 0.12, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "dont_know model",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "219"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"dont_know\",\"answer\":null,\"sources\":[],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"dont_know\", \"reason\": \"model_dont_know\", \"error\": null, \"hits\": 4, \"evidence\": 3, \"cited\": 0, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "dont_know empty answer",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "219"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"dont_know\",\"answer\":null,\"sources\":[],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"dont_know\", \"reason\": \"empty_answer\", \"error\": null, \"hits\": 4, \"evidence\": 3, \"cited\": 1, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "dont_know no citation",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "219"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"dont_know\",\"answer\":null,\"sources\":[],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"dont_know\", \"reason\": \"no_citation\", \"error\": null, \"hits\": 4, \"evidence\": 3, \"cited\": 0, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "dont_know citation unverified",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "219"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"dont_know\",\"answer\":null,\"sources\":[],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"dont_know\", \"reason\": \"citation_unverified\", \"error\": null, \"hits\": 4, \"evidence\": 3, \"cited\": 1, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "handoff citation unverified",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "217"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"outcome\":\"handoff\",\"answer\":null,\"sources\":[],\"confidence\":{\"value\":0.82,\"basis\":\"top_retrieval_score\",\"calibrated\":false},\"route\":\"rag\",\"trace_id\":\"<volatile>\",\"prompt_version\":\"rag-answer.1\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"ok\", \"stop_reason\": \"end_turn\", \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": true, \"input_tokens\": 10, \"output_tokens\": 5, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00007\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"handoff\", \"reason\": \"citation_unverified\", \"error\": null, \"hits\": 4, \"evidence\": 3, \"cited\": 1, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "model_unavailable retries",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "83"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the answer model is unavailable; try later\",\"error\":\"model_unavailable\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": null, \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": null, \"outcome\": \"transient_exhausted\", \"stop_reason\": null, \"attempts\": 3, \"retries\": 2, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": null, \"input_tokens\": 0, \"output_tokens\": 0, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0\", \"cost_complete\": false, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"ModelUnavailable\", \"hits\": 4, \"evidence\": 3, \"cited\": 0, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "model_unavailable deadline",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "83"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the answer model is unavailable; try later\",\"error\":\"model_unavailable\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": null, \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": null, \"outcome\": \"deadline_exceeded\", \"stop_reason\": null, \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": null, \"input_tokens\": 0, \"output_tokens\": 0, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"ModelUnavailable\", \"hits\": 4, \"evidence\": 3, \"cited\": 0, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "answer_failed refused",
+   "status": 502,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "60"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the answer model failed\",\"error\":\"answer_failed\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": null, \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": null, \"outcome\": \"refusal\", \"stop_reason\": null, \"attempts\": 1, \"retries\": 0, \"repairs\": 0, \"attempt_timeouts\": 0, \"first_try_valid\": null, \"input_tokens\": 0, \"output_tokens\": 0, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"AnswerFailed\", \"hits\": 4, \"evidence\": 3, \"cited\": 0, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "answer_failed invalid twice",
+   "status": 502,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "60"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the answer model failed\",\"error\":\"answer_failed\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.gateway\", \"message\": \"llm_call\", \"llm_call\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"alias\": \"large\", \"model_requested\": \"claude-sonnet-5-5\", \"model_answered\": \"claude-sonnet-5-5\", \"catalog_version\": \"2026-10-14.1\", \"inference_geo\": \"global\", \"outcome\": \"validation_failed\", \"stop_reason\": \"end_turn\", \"attempts\": 2, \"retries\": 0, \"repairs\": 1, \"attempt_timeouts\": 0, \"first_try_valid\": false, \"input_tokens\": 20, \"output_tokens\": 10, \"cache_read_tokens\": 0, \"cache_write_5m_tokens\": 0, \"cache_write_1h_tokens\": 0, \"cost_usd\": \"0.00014\", \"cost_complete\": true, \"cache_hit\": false, \"latency_ms\": \"<volatile>\", \"request_ids\": [\"fake-req-1\", \"fake-req-2\"], \"trace_id\": \"<volatile>\", \"operation\": \"rag-answer\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"AnswerFailed\", \"hits\": 4, \"evidence\": 3, \"cited\": 0, \"top_score\": 0.82, \"min_score\": 0.3, \"model_called\": true, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "reindex_required",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "121"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the knowledge base is being re-indexed for a new embedding model; try again later\",\"error\":\"reindex_required\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"ReindexRequired\", \"hits\": 0, \"evidence\": 0, \"cited\": 0, \"top_score\": null, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "question_too_long",
+   "status": 422,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "86"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the question is longer than the model accepts\",\"error\":\"question_too_long\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": null, \"outcome\": \"invalid_request\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": null, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"InputTooLarge\", \"hits\": 0, \"evidence\": 0, \"cited\": 0, \"top_score\": null, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "embedding_unavailable",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "92"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the embedding service is unavailable; try later\",\"error\":\"embedding_unavailable\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": null, \"outcome\": \"transient_exhausted\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": null, \"attempts\": 3, \"retries\": 2, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"Transient\", \"hits\": 0, \"evidence\": 0, \"cited\": 0, \"top_score\": null, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "embedding_failed",
+   "status": 502,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "68"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the embedding service failed\",\"error\":\"embedding_failed\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": null, \"outcome\": \"auth_failed\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": null, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"AuthenticationFailed\", \"hits\": 0, \"evidence\": 0, \"cited\": 0, \"top_score\": null, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "database_unavailable os",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "88"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the database is unavailable; try again later\",\"error\":\"database_unavailable\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"OSError\", \"hits\": 0, \"evidence\": 0, \"cited\": 0, \"top_score\": null, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "database_unavailable sql",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "88"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the database is unavailable; try again later\",\"error\":\"database_unavailable\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"rag-answer\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}",
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.answer\", \"message\": \"rag_answer\", \"rag_answer\": {\"record_version\": 1, \"business_id\": \"clinic-a\", \"trace_id\": \"<volatile>\", \"prompt_version\": \"rag-answer.1\", \"outcome\": \"error\", \"reason\": null, \"error\": \"SQLAlchemyError\", \"hits\": 0, \"evidence\": 0, \"cited\": 0, \"top_score\": null, \"min_score\": 0.3, \"model_called\": false, \"latency_ms\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "no business",
+   "status": 400,
+   "headers": [
+    [
+     "content-length",
+     "60"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"X-Business-Id must name one registered business\"}",
+   "records": [],
+   "joined": true
+  },
+  {
+   "name": "invalid body empty",
+   "status": 422,
+   "headers": [
+    [
+     "content-length",
+     "154"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the request is invalid: see problems (location, type)\",\"error\":\"invalid_request\",\"problems\":[{\"loc\":[\"body\",\"question\"],\"type\":\"value_error\"}]}",
+   "records": [],
+   "joined": true
+  },
+  {
+   "name": "invalid body extra key",
+   "status": 422,
+   "headers": [
+    [
+     "content-length",
+     "151"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the request is invalid: see problems (location, type)\",\"error\":\"invalid_request\",\"problems\":[{\"loc\":[\"body\",\"x\"],\"type\":\"extra_forbidden\"}]}",
+   "records": [],
+   "joined": true
+  },
+  {
+   "name": "search hits",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "909"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"trace_id\":\"<volatile>\",\"embedding_model\":\"fake-embedding-1024\",\"hits\":[{\"chunk_id\":\"c1380261-c7b9-5d1a-b579-3989d35def70\",\"document_id\":\"430a2715-45f4-51c2-989b-2758b74e408d\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":1,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On Sundays we open at 10.\",\"score\":0.82},{\"chunk_id\":\"e09f0022-133f-5775-ae4b-f61242d2b233\",\"document_id\":\"b37f6ff8-6391-51b2-b4b0-c951933d5766\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":null,\"chunk_index\":1,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On weekdays we open at 9.\",\"score\":0.64},{\"chunk_id\":\"42c76ea6-8b8b-5d8a-9692-37f9b070f5ff\",\"document_id\":\"600c2959-86fa-565e-a7d9-f70b400462bd\",\"source_id\":\"fees\",\"version\":\"1\",\"title\":\"Fees\",\"page\":null,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"A visit costs 500.\",\"score\":0.31}]}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search k one",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "370"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"trace_id\":\"<volatile>\",\"embedding_model\":\"fake-embedding-1024\",\"hits\":[{\"chunk_id\":\"c1380261-c7b9-5d1a-b579-3989d35def70\",\"document_id\":\"430a2715-45f4-51c2-989b-2758b74e408d\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":1,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On Sundays we open at 10.\",\"score\":0.82}]}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search no hits",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "97"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"trace_id\":\"<volatile>\",\"embedding_model\":\"fake-embedding-1024\",\"hits\":[]}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search hybrid",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "909"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"trace_id\":\"<volatile>\",\"embedding_model\":\"fake-embedding-1024\",\"hits\":[{\"chunk_id\":\"c1380261-c7b9-5d1a-b579-3989d35def70\",\"document_id\":\"430a2715-45f4-51c2-989b-2758b74e408d\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":1,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On Sundays we open at 10.\",\"score\":0.82},{\"chunk_id\":\"e09f0022-133f-5775-ae4b-f61242d2b233\",\"document_id\":\"b37f6ff8-6391-51b2-b4b0-c951933d5766\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":null,\"chunk_index\":1,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On weekdays we open at 9.\",\"score\":0.64},{\"chunk_id\":\"42c76ea6-8b8b-5d8a-9692-37f9b070f5ff\",\"document_id\":\"600c2959-86fa-565e-a7d9-f70b400462bd\",\"source_id\":\"fees\",\"version\":\"1\",\"title\":\"Fees\",\"page\":null,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"A visit costs 500.\",\"score\":0.31}]}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search pii question",
+   "status": 200,
+   "headers": [
+    [
+     "content-length",
+     "909"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ],
+    [
+     "x-trace-id",
+     "<volatile>"
+    ]
+   ],
+   "body": "{\"trace_id\":\"<volatile>\",\"embedding_model\":\"fake-embedding-1024\",\"hits\":[{\"chunk_id\":\"c1380261-c7b9-5d1a-b579-3989d35def70\",\"document_id\":\"430a2715-45f4-51c2-989b-2758b74e408d\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":1,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On Sundays we open at 10.\",\"score\":0.82},{\"chunk_id\":\"e09f0022-133f-5775-ae4b-f61242d2b233\",\"document_id\":\"b37f6ff8-6391-51b2-b4b0-c951933d5766\",\"source_id\":\"faq\",\"version\":\"1\",\"title\":\"Opening hours\",\"page\":null,\"chunk_index\":1,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"On weekdays we open at 9.\",\"score\":0.64},{\"chunk_id\":\"42c76ea6-8b8b-5d8a-9692-37f9b070f5ff\",\"document_id\":\"600c2959-86fa-565e-a7d9-f70b400462bd\",\"source_id\":\"fees\",\"version\":\"1\",\"title\":\"Fees\",\"page\":null,\"chunk_index\":0,\"language\":\"en\",\"content_kind\":\"faq\",\"content\":\"A visit costs 500.\",\"score\":0.31}]}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 65, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search reindex_required",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "121"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the knowledge base is being re-indexed for a new embedding model; try again later\",\"error\":\"reindex_required\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search question_too_long",
+   "status": 422,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "86"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the question is longer than the model accepts\",\"error\":\"question_too_long\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": null, \"outcome\": \"invalid_request\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": null, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search embedding_unavailable",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "92"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the embedding service is unavailable; try later\",\"error\":\"embedding_unavailable\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": null, \"outcome\": \"transient_exhausted\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": null, \"attempts\": 3, \"retries\": 2, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search embedding_failed",
+   "status": 502,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "68"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the embedding service failed\",\"error\":\"embedding_failed\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": null, \"outcome\": \"auth_failed\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": null, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search database_unavailable os",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "88"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the database is unavailable; try again later\",\"error\":\"database_unavailable\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search database_unavailable sql",
+   "status": 503,
+   "headers": [
+    [
+     "x-trace-id",
+     "<volatile>"
+    ],
+    [
+     "content-length",
+     "88"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the database is unavailable; try again later\",\"error\":\"database_unavailable\"}",
+   "records": [
+    "{\"time\": \"<volatile>\", \"level\": \"INFO\", \"logger\": \"vectapilot_api.embeddings\", \"message\": \"embedding_call\", \"embedding_call\": {\"business_id\": \"clinic-a\", \"operation\": \"kb-search\", \"input_type\": \"query\", \"model_requested\": \"fake-embedding-1024\", \"model_answered\": \"fake-embedding-1024\", \"outcome\": \"ok\", \"inputs\": 1, \"token_estimate\": 36, \"reported_tokens\": 0, \"attempts\": 1, \"retries\": 0, \"latency_ms\": \"<volatile>\", \"trace_id\": \"<volatile>\"}}"
+   ],
+   "joined": true
+  },
+  {
+   "name": "search no business",
+   "status": 400,
+   "headers": [
+    [
+     "content-length",
+     "60"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"X-Business-Id must name one registered business\"}",
+   "records": [],
+   "joined": true
+  },
+  {
+   "name": "search invalid k",
+   "status": 422,
+   "headers": [
+    [
+     "content-length",
+     "155"
+    ],
+    [
+     "content-type",
+     "application/json"
+    ]
+   ],
+   "body": "{\"detail\":\"the request is invalid: see problems (location, type)\",\"error\":\"invalid_request\",\"problems\":[{\"loc\":[\"query\",\"k\"],\"type\":\"greater_than_equal\"}]}",
+   "records": [],
+   "joined": true
+  }
+ ]
+}

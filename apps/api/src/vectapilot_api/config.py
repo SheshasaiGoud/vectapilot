@@ -67,14 +67,6 @@ GUARD_OFF_ENVIRONMENTS: Final = frozenset({"local", "test", "ci"})
 environments without customers (a test keeps the two equal; `business` imports this module, so it
 cannot be imported here). Anywhere else, and in any environment added later, it is refused."""
 
-GUARD_ANSWER_NOT_WIRED: Final = (
-    "guard_answer may be 'on' only once M7 PR 8 wires the guards into /v1/answer and"
-    " /v1/kb/search; until then nothing reads it"
-)
-"""Settings' refusal of `guard_answer = "on"` before PR 8 (decided 2026-11-16, shesha): a switch
-that guards nothing must not look switched on. PR 8 removes this rule. Fixed text, field names
-only."""
-
 TURN_TIMEOUT_RULE: Final = (
     "agent_turn_timeout_seconds must be >= agent_llm_deadline_seconds x agent_max_steps"
     " + 2 x agent_max_steps x guard_redis_timeout_seconds"
@@ -305,9 +297,10 @@ class Settings(BaseSettings):
     the unguarded path. Wired into those routes by PR 6 and PR 7: until then it changes nothing."""
     guard_answer: Literal["off", "on"] = "off"
     """`VECTAPILOT_GUARD_ANSWER`: the guards on `/v1/answer` and `/v1/kb/search`, off during M3's
-    measurement window (G11). Wired by PR 8 (byte-identical while off); PR 10 turns it on after
-    shesha's last M3 live answer run. Until PR 8, Settings refuses `on` (`GUARD_ANSWER_NOT_WIRED`):
-    nothing reads it yet."""
+    measurement window (G11). Wired by PR 8 (`guards.answer`): while off both routes are
+    byte-identical to the base commit and M3's `AnswerService` serves; `on` builds a separate one
+    over the chunk-screening search and a `BudgetedGateway`. PR 10 turns it on after shesha's last
+    M3 live answer run (and then refuses `off` in production)."""
     guard_config_dir: Path | None = None
     """`VECTAPILOT_GUARD_CONFIG_DIR`: the guard folder (`data/safety/` from PR 4; a read-only mount
     under compose). When set, `create_app` reads and validates it and runs the term self-test
@@ -431,8 +424,6 @@ class Settings(BaseSettings):
         problems: list[str] = []
         if self.guard_routes == "off" and self.environment not in GUARD_OFF_ENVIRONMENTS:
             problems.append("guard_routes may be 'off' only when environment is local, test or ci")
-        if self.guard_answer == "on":  # until PR 8 (GUARD_ANSWER_NOT_WIRED)
-            problems.append(GUARD_ANSWER_NOT_WIRED)
         if self.guard_config_dir is not None and self.corpus_dir is None:
             problems.append(
                 "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with guard_config_dir: each"

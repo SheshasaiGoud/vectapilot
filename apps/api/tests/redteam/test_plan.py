@@ -14,6 +14,7 @@ import pytest
 from tests.redteam.suite import CASES, DATASET_DIR, END_TO_END, GENERATOR, label_of
 from vectapilot_api.guards.types import DecidedBy
 from vectapilot_api.redteam.agent import run_agent
+from vectapilot_api.redteam.answer import run_answer
 from vectapilot_api.redteam.cases import Category, Route, Surface
 from vectapilot_api.redteam.harness import (
     RUNNERS,
@@ -65,7 +66,8 @@ def test_every_frozen_case_has_one_path_and_one_rule_under_test() -> None:
         rule_under_test(case)  # raises DeciderUnknown for a case the scorer cannot judge
 
     paths = Counter(path_of(case).value for case in CASES.values())
-    # M7 PR 6: B on the agent route (b-007, b-008) stays on its frozen route, pending on PR 8.
+    # M7 PR 6: B on the agent route (b-007, b-008) stays on its frozen route (run under the
+    # router since PR 8).
     assert paths == {
         "agent": 82,
         "log": 5,
@@ -83,12 +85,14 @@ def test_pr_6_registers_the_agent_the_logs_and_the_search_leg() -> None:
     # agent case now waits on the first hand-write its guard reaches (H1 for every one: the
     # red-flag screen runs first). H2 is written (2026-11-20): category E and F's logs (the
     # formatter's masker, their only hand-write) take their hard label, and k-001 needs none.
+    # PR 8 registers the answer path, which ends b-007's and b-008's wait (`waiting_on`).
     assert dict(RUNNERS) == {
         CasePath.MASKING: run_masking,
         CasePath.LIMITER: run_limiter,
         CasePath.AGENT: run_agent,
         CasePath.LOG: run_logs,
         CasePath.SEARCH_LEG: run_search_leg,
+        CasePath.ANSWER: run_answer,  # M7 PR 8
     }
     plans = {c.id: mark_plan(c, label_of(c.id), RUNNERS) for c in CASES.values()}
     category_e = {c.id for c in CASES.values() if c.category is Category.E}
@@ -99,17 +103,20 @@ def test_pr_6_registers_the_agent_the_logs_and_the_search_leg() -> None:
     assert {c for c, plan in plans.items() if plan.kind != "pending"} == hard
     assert {plans[c] for c in hard} == {MarkPlan("hard", None)}
     assert Counter(plan.reason for plan in plans.values()) == {
-        "pending:H1": 80,  # every agent-path case: the red-flag screen (H1) runs first
-        "pending:PR 8": 28,
+        # Every agent-path case and, since PR 8, every answer-path case and b-007, b-008: the
+        # red-flag screen (H1) runs first on both routes (80 + 26 + 2, counted 2026-11-23).
+        "pending:H1": 108,
         "pending:PR 7": 5,
         None: 26,  # 18 E + 5 F logs + k-001, k-002, k-004
     }
     assert plans["f-002"] == MarkPlan("hard", None)  # logs: the formatter's masker, any route
     assert plans["f-006"].reason == "pending:H1"  # an echoed reply runs the agent's guards
-    # kenji's PR 6 review: b-007 and b-008 run on /v1/agent (router on, a stub router) once
-    # PR 8's chunk runner registers the answer path; until then they wait on PR 8.
+    # kenji's PR 6 review: b-007 and b-008 run on /v1/agent (router on, a stub router) since
+    # PR 8's chunk runner registered the answer path; like every guarded case, they wait on H1.
     assert {path_of(CASES[i]) for i in ("b-007", "b-008")} == {CasePath.AGENT}
-    assert {plans[i].reason for i in ("b-007", "b-008")} == {"pending:PR 8"}
+    assert {plans[i].reason for i in ("b-007", "b-008")} == {"pending:H1"}
+    answer = {c.id for c in CASES.values() if path_of(c) is CasePath.ANSWER}
+    assert {plans[i].reason for i in answer} == {"pending:H1"}
     assert path_of(CASES["k-001"]) is CasePath.SEARCH_LEG
 
 
@@ -205,7 +212,7 @@ def test_run_case_raises_pending_before_running_anything_without_a_runner() -> N
 def test_the_real_agent_runner_reaches_h1s_stub_first_and_is_pending_on_h1() -> None:
     # M7 PR 6: the registered runner, real guards and real stubs, in process.
     env = RunEnv(GENERATOR, "in_process", dataset_dir=DATASET_DIR)
-    for case_id in ("g-001", "a-002", "c-002", "i-001", "l-006"):
+    for case_id in ("g-001", "a-002", "c-002", "i-001", "l-006", "b-007", "g-009", "b-002"):
         with pytest.raises(PendingHandWrite) as pending:
             run_case(CASES[case_id], label_of(case_id), env)
         assert pending.value.reason == "pending:H1", case_id
