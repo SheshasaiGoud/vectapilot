@@ -15,8 +15,9 @@ runs it), before the route's service and outside it.
   transaction), and no masking or H3 runs on its response: 200, 409, 404 and 503 bodies pass byte
   for byte.
 - **`/v1/extractions`** (PR 6): the business's window only (an upload names no customer), checked
-  before `read_body`, so a limited caller never costs a body read or a PDF parse. PR 7 adds the
-  document screen after the extraction.
+  before `read_body`, so a limited caller never costs a body read or a PDF parse. PR 7's document
+  screen (`guards.document.ExtractionGuard`) calls `check` and writes the request's one record
+  itself, after the screen.
 
 **Responses.** None: the route goes on. A full window: a 429 with `Retry-After` whose body carries
 the business's guidance for a health business (G3, `limits.refusal_decision`). Redis down, a
@@ -25,9 +26,10 @@ timeout or any other failure of the check (G3: fail closed): a typed 503 `limits
 stored extraction; no guidance (PR 5's `GuardDecision`: guidance goes only with a hand-off or a
 429). The route adds `X-Trace-Id`.
 
-**One metadata-only `guard` record per request** (G10), written here, before the route's service
-runs: the route, `limits` with its duration, the decision, a `no_guidance` finding when a health
-business's 429 has no lines to show, and the exception's class name for a 503.
+**One metadata-only `guard` record per request** (G10), written by `admit`, before the route's
+service runs: the route, `limits` with its duration, the decision, a `no_guidance` finding when a
+health business's 429 has no lines to show, and the exception's class name for a 503. `check` is
+the same check without the record, for a guard that writes the request's record later.
 
 **Health and guidance** follow `/v1/agent`'s rule (`guards.agent`): a health business by either
 source (its guard file, or the type the route serves it as: `tools.json`, the extraction file),
@@ -39,6 +41,7 @@ import contextlib
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Final
 
 from fastapi.responses import JSONResponse
@@ -116,6 +119,13 @@ class RouteLimits:
     ) -> JSONResponse | None:
         """None when the request may go on; else the 429 or the typed 503 (module docstring).
         Never raises but a cancel."""
+        checked = await self.check(business_id, customer_ref=customer_ref)
+        with contextlib.suppress(Exception):  # the record never replaces the response
+            self._emit(business_id, trace_id, checked)
+        return checked.response
+
+    async def check(self, business_id: str, *, customer_ref: str | None = None) -> "LimitCheck":
+        """`admit`'s check without its record (module docstring). Never raises but a cancel."""
         started = self._clock()
         refused: GuardRefused | None = None
         error_type: str | None = None
@@ -143,9 +153,7 @@ class RouteLimits:
             else:
                 decision = GuardDecision(GuardAction.UNAVAILABLE, DecidedBy.GUARD_ERROR)
             response = unavailable_response()
-        with contextlib.suppress(Exception):  # the record never replaces the response
-            self._emit(business_id, trace_id, decision, findings, error_type, elapsed)
-        return response
+        return LimitCheck(response, decision, findings, error_type, elapsed)
 
     def _capped(self, refused: GuardRefused) -> GuardRefused:
         """`refused` with its `Retry-After` at most the cap (G15)."""
@@ -154,25 +162,29 @@ class RouteLimits:
             return refused
         return GuardRefused(RefusalKind.LIMIT, retry_after_s=cap)
 
-    def _emit(
-        self,
-        business_id: str,
-        trace_id: str,
-        decision: GuardDecision,
-        findings: Counter[Finding],
-        error_type: str | None,
-        elapsed_ms: float,
-    ) -> None:
+    def _emit(self, business_id: str, trace_id: str, checked: "LimitCheck") -> None:
         emit_guard_record(
             GuardRecord(
                 business_id=business_id,
                 trace_id=trace_id,
                 route=self._route,
                 rules_version=None if self._config is None else self._config.rules_version,
-                decision=decision,
+                decision=checked.decision,
                 checks=(Check.LIMITS,),
-                findings=dict(findings),
-                error_type=error_type,
-                durations_ms={Check.LIMITS: elapsed_ms},
+                findings=dict(checked.findings),
+                error_type=checked.error_type,
+                durations_ms={Check.LIMITS: checked.elapsed_ms},
             )
         )
+
+
+@dataclass(frozen=True)
+class LimitCheck:
+    """One limits check, before its record is written: the 429 or typed 503 (None: go on), the
+    decision, the findings, the exception's class name and the check's duration."""
+
+    response: JSONResponse | None
+    decision: GuardDecision
+    findings: Counter[Finding]
+    error_type: str | None
+    elapsed_ms: float

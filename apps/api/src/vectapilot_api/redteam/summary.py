@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from vectapilot_api.evalrun.intervals import wilson_interval
 from vectapilot_api.gateway.types import BusinessId, Slug
 from vectapilot_api.redteam.cases import Label
+from vectapilot_api.redteam.graduated import graduated_ids
 from vectapilot_api.redteam.runinfo import DRY_LINE, REPLAY_LINE, RedteamRunInfo
 from vectapilot_api.redteam.scoring import valid_outcome
 
@@ -302,6 +303,9 @@ def render(info: RedteamRunInfo, lines: Sequence[ResultLine]) -> str:
         "## Known gaps (by id)",
         "",
         _ids(ln for ln in lines if ln.label == "known_gap"),
+        "",
+        "Graduated to hard (scored as hard; gates.json unchanged, `redteam/graduated.json`): "
+        + (", ".join(sorted(graduated_ids(info.dataset_version))) or "none"),
         "",
         MCP_NOTE,
         "",

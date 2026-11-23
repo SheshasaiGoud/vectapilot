@@ -3,8 +3,9 @@ H2's `mask_pii` with every business's locales (`guards.locales.DEFAULT_LOCALE_ID
 
 **What it runs.** The case's filled input goes through `normalize.clean`, as a guarded route
 will hand it over, then through the masker. A masker that raises is G3's hand-off: `handoff`
-decided by `guard_error`, with the exception's class name only. While H2 is the stub that is
-`NotImplementedError`, so `run_case` makes the case `pending:H2`.
+decided by `guard_error`, with the exception's class name only. H2 is written (2026-11-20), so
+that is a plain miss; while H2 was the stub it was `NotImplementedError`, which `run_case` made
+`pending:H2`.
 
 **The control is the masked text itself** (`scoring.model_facing`: E has no model). The runner
 renders the case's template with each placeholder replaced by the label the generator's type

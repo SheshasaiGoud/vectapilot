@@ -21,7 +21,7 @@ object or route its attack goes through. A later PR registers a runner for a pat
   PR 6, with the route stand-ins and database fixtures its runner shares with the agent path.
   The formatter itself is built in PR 3 (it masks since H2 was written, 2026-11-20,
   `guards/redact.py`);
-- `document` (D, `/v1/extractions`' page screens): PR 7;
+- `document` (D, `/v1/extractions`' page screens, `redteam.document`): PR 7;
 - `answer` (`/v1/answer` and `/v1/kb/search` with `guard_answer = on` in tests): PR 8.
 
 **Hand-writes.** A registered runner whose guard reaches a `[HAND-WRITE]` stub hands off with

@@ -19,7 +19,8 @@ test needs values back; the one test that runs H1 through the route waits for it
 - **E11:** the route's model is a `FakeProvider` whatever Settings say.
 
 M6's route, as before M7 (`guard_routes = "off"`); its limits (M7 PR 6) are
-tests/guards/test_route_limits.py.
+tests/guards/test_route_limits.py, its document screen (M7 PR 7)
+tests/guards/test_document_route.py.
 """
 
 import hashlib

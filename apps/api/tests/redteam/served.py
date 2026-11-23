@@ -26,7 +26,10 @@ under the configured (fake) embedding model with the fake embedder's vector of i
 leaked across businesses would return the other one at score 1.0. Afterwards, in a `finally`,
 exactly the planted documents go (their chunks with them), and a business inserted here is
 uprooted; a business that existed before keeps everything it had: no row is ever left for
-`sunrise-clinic` or `paws-and-co`.
+`sunrise-clinic` or `paws-and-co`. Since PR 7 the document path's end-to-end case (d-001) stores
+an extraction through the real route (the app role has no DELETE on it, migration 0007): the
+runner hands each stored id back (`stored_extractions`), and the `finally` deletes exactly those
+rows as the owner (their fields with them).
 """
 
 import asyncio
@@ -84,6 +87,9 @@ _PLANT_CHUNK: Final = text(
 _REMOVE_PLANTED: Final = text(
     "DELETE FROM documents WHERE business_id = :b AND source_id = :source"
 )  # its chunks go with it
+_REMOVE_EXTRACTION: Final = text(
+    "DELETE FROM extractions WHERE business_id = :b AND id = CAST(:id AS uuid)"
+)  # its fields go with it
 
 
 async def _insert_business(business_id: str) -> bool:
@@ -148,6 +154,16 @@ async def _plant(business_id: str, question: str, settings: Settings) -> Planted
     return planted
 
 
+async def _remove_extraction(business_id: str, extraction_id: str) -> None:
+    """As the owner: one extraction a case stored (`redteam.document`), named by business and id."""
+    owner = fresh_engine(owner_url())
+    try:
+        async with business_transaction(owner, business_id) as connection:
+            await connection.execute(_REMOVE_EXTRACTION, {"b": business_id, "id": extraction_id})
+    finally:
+        await owner.dispose()
+
+
 async def _unplant(planted: Planted) -> None:
     owner = fresh_engine(owner_url())
     try:
@@ -168,6 +184,9 @@ class ServedSuite:
     """Every served business's sandbox seed, by business id."""
     kb_canaries: Mapping[str, str]
     """k-001's planted canary per sample business (`redteam.search`)."""
+    stored_extractions: list[tuple[str, str]]
+    """(business id, extraction id) of every extraction a case stored (`redteam.document`):
+    deleted as the owner when the suite ends."""
 
     def customer_for(self, case: Case) -> str:
         return customer_ref_for(case, self.seeds[case.business_id])
@@ -177,6 +196,7 @@ def served_suite() -> Iterator[ServedSuite]:
     """The module's served app (module docstring); a generator for a module-scoped fixture."""
     inserted: list[str] = []
     planted: list[Planted] = []
+    stored: list[tuple[str, str]] = []
     fixtures = {
         business_id: fixture_business_tools(DATASET_DIR, business_id).seed
         for business_id in DATASET.manifest.fixture_businesses
@@ -218,8 +238,11 @@ def served_suite() -> Iterator[ServedSuite]:
                     folders=folders,
                     seeds=seeds,
                     kb_canaries={p.business_id: p.canary for p in planted},
+                    stored_extractions=stored,
                 )
         finally:
+            for business_id, extraction_id in stored:
+                asyncio.run(_remove_extraction(business_id, extraction_id))
             for row in planted:
                 asyncio.run(_unplant(row))
             for business_id in inserted:

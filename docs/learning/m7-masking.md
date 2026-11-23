@@ -394,12 +394,15 @@ keeps the probe's stub branch tested now that the real stub is gone.
 
 **After ananya-rag's H2 review (2026-11-20). Decided 2026-11-20 (shesha): all four stay recorded
 gaps; the first becomes a small follow-up commit in PR 7, the rest are revisited with real data:**
-- **The log cut and the squeezed view.** `redact.safe_cut` (team code, outside H2's file) still
-  treats a space between two squeezed characters as safe, so a log field over `FIELD_CAP` can
-  keep `99999` + ZWJ of `99999` + ZWJ + space + ZWJ + `99999` (no regression: before H2 all ten
-  stayed). Proposal: compare the nearest character on each side of the space that is not
-  squeezed out, through one predicate shared with `pii` (so widening the set below moves both),
-  as its own commit in H2's PR.
+- **The log cut and the squeezed view: done in M7 PR 7 (2026-11-21).** `redact.safe_cut` (team
+  code, outside H2's file) used to treat a space between two squeezed characters as safe, so a
+  log field over `FIELD_CAP` could keep `99999` + ZWJ of `99999` + ZWJ + space + ZWJ + `99999`
+  (no regression: before H2 all ten stayed; measured before the fix: 40 of 70 test lines, five
+  squeezed characters by 14 cut positions, kept five digits). The cut now compares the nearest
+  character on each side of the space that is not squeezed out, through `redact.squeezed_out`,
+  which reads `pii.SQUEEZED_OUT` itself (so widening the set below moves both; `guards/pii.py`
+  unchanged). Tests: `test_redact.py::test_a_field_over_the_cap_keeps_no_digit_joined_across_a_squeezed_space`
+  (with H2) and the two tests after it.
 - **Widen the squeezed view** from the five characters to them plus every combining mark
   (Unicode Mn, Mc and Me). It would mask digits carrying a strike-through, enclosing circle or
   grave mark, and Devanagari local parts that end in a sign (§2.6). ananya's scratch run changed

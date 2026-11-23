@@ -10,7 +10,8 @@ H1's full-text search (`text_search`, M3 PR 3), M3 PR 4's hybrid search (both le
 (`GET /v1/kb/search`, `POST /v1/answer`, through the real app with that business's
 `X-Business-Id`), each in vector mode and in hybrid mode (M3 PR 4), and M5 PR 2's tools
 (`check_slots`, `order_status` and the `book` and `reschedule` proposal checks, through the
-executor, over the sandbox bait). Add yours here, with no other change.
+executor, over the sandbox bait), and M7 PR 7's KB scan (`guards scan`). Add yours here, with no
+other change.
 
 **The business clause itself (M3 PR 3, ADR 0009 amendment).** Every path above runs as the app
 role, under RLS, so it would pass with a search whose SQL forgot `c.business_id = :business_id`:
@@ -63,9 +64,15 @@ from scripts.canary_gate import pending_reason
 from tests.answer.providers import CitingProvider
 from tests.canary.catalog import business_tables
 from tests.canary.checks import Planted
+from tests.guards.helpers import SAFETY_DIR
+from tests.tools.helpers import CORPUS_DIR
+from tests.tools.sandbox_db import fresh_engine, owner_url
 from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import Settings
 from vectapilot_api.db import business_transaction
+from vectapilot_api.guards.config import load_guard_dir
+from vectapilot_api.guards.scan import DatabaseChunks, scan_business
+from vectapilot_api.guards.types import Folded, TermHit, TermSet
 from vectapilot_api.intents.policy import BusinessType
 from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.fusion import RRF_K, rrf_fuse
@@ -469,6 +476,44 @@ TOOL_PATHS: Final[Mapping[str, SearchLegPath]] = {
 `create_ticket`: its proposal reads no row, so there is nothing of either business to show."""
 
 
+def _every_text_hits(text: Folded, terms: TermSet) -> tuple[TermHit, ...]:
+    """NOT H1: a hit for the first term it is given, on every text, so the scan lists every chunk
+    it reads (H1 is pure: it cannot move a read, so the path never waits for it)."""
+    first = terms.terms[0] if terms.terms else None
+    return () if first is None else (TermHit(first.id, first.category, 0),)
+
+
+_CHUNK_OWNERS: Final = text(
+    "SELECT c.id::text, c.business_id, d.title FROM chunks c"
+    " JOIN documents d ON d.business_id = c.business_id AND d.id = c.document_id"
+    " WHERE c.id = ANY(CAST(:ids AS uuid[]))"
+)
+
+
+async def scan_as_staff(engine: AsyncEngine, me: Planted, *, k: int = MAX_K) -> Mapping[str, str]:
+    """M7 PR 7's KB scan (`guards.scan`, the `guards scan` command's reader) as `me`, listing
+    every approved chunk it reads (`_every_text_hits`). It prints chunk ids, which hold no canary,
+    so each listed id is looked up as the owner (a superuser sees every business) and shown as
+    its business id and its document's title (the planted canary): `me`'s for a working scan,
+    the other business's if the scan read across. Also in `OWNER_CONNECTION_PATHS`: there only
+    the statement's own business clause keeps the other business out. `k` caps the chunks
+    shown."""
+    guards = load_guard_dir(SAFETY_DIR, CORPUS_DIR).for_business(me.business_id)
+    report = await scan_business(
+        DatabaseChunks(EngineTransactions(engine)), me.business_id, guards, _every_text_hits
+    )
+    ids = [str(chunk.chunk_id) for chunk in report.flagged[:k]]
+    owner = fresh_engine(owner_url())
+    try:
+        async with owner.connect() as connection:
+            rows = (await connection.execute(_CHUNK_OWNERS, {"ids": ids})).all()
+    finally:
+        await owner.dispose()
+    found = {row[0]: f"{row[1]} {row[2]}" for row in rows}
+    assert set(found) == set(ids), "a listed chunk the owner cannot find"
+    return {"guards scan": "\n".join(f"{i} {found[i]}" for i in ids)}
+
+
 READ_PATHS: Final[dict[str, ReadPath]] = {
     "sql": sql_on_every_business_table,
     "vector_search": vector_search_as_staff,
@@ -479,6 +524,7 @@ READ_PATHS: Final[dict[str, ReadPath]] = {
     "GET /v1/kb/search (hybrid)": search_through_the_api_hybrid,
     "POST /v1/answer (hybrid)": answer_through_the_api_hybrid,
     **TOOL_PATHS,
+    "guards scan": scan_as_staff,
 }
 
 OWNER_CONNECTION_PATHS: Final[Mapping[str, SearchLegPath]] = {
@@ -486,6 +532,7 @@ OWNER_CONNECTION_PATHS: Final[Mapping[str, SearchLegPath]] = {
     "text_search": text_search_as_staff,
     "hybrid_search": hybrid_search_as_staff,
     **TOOL_PATHS,
+    "guards scan": scan_as_staff,
 }
 """Read paths that also run on the owner's connection, where RLS never applies: each search leg's
 own `WHERE c.business_id = :business_id` is then the only thing between `me` and the other

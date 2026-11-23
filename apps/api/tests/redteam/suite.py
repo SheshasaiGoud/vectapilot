@@ -11,6 +11,7 @@ from typing import Final
 from vectapilot_api.redteam.cases import Case, Label
 from vectapilot_api.redteam.checks import RedteamDataset, generator_of
 from vectapilot_api.redteam.files import DEFAULT_DATASET, read_dataset
+from vectapilot_api.redteam.graduated import scored_labels
 from vectapilot_api.redteam.pii import PiiGenerator
 from vectapilot_api.redteam.plan import end_to_end_ids
 
@@ -21,7 +22,10 @@ CASES: Final[dict[str, Case]] = {case.id: case for case in DATASET.cases}
 END_TO_END: Final = end_to_end_ids(DATASET.cases)
 GENERATOR: Final[PiiGenerator] = generator_of(DATASET)
 """The frozen seed's generator (the default seed while collecting)."""
+LABELS: Final[dict[str, Label]] = scored_labels(DATASET.gates.labels, DATASET.manifest.version)
+"""The labels the suite scores with: gates.json's, with every graduated known gap as hard
+(`redteam.graduated`, decided 2026-11-21)."""
 
 
 def label_of(case_id: str) -> Label:
-    return DATASET.gates.labels[case_id]
+    return LABELS[case_id]

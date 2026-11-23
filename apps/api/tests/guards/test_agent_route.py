@@ -48,6 +48,7 @@ from vectapilot_api.gateway.gateway import LLMGateway
 from vectapilot_api.gateway.providers.fake import FakeProvider
 from vectapilot_api.guards.agent import AgentGuard
 from vectapilot_api.guards.budget import BudgetedGateway
+from vectapilot_api.guards.document import ExtractionGuard
 from vectapilot_api.guards.executor import ScreeningToolExecutor
 from vectapilot_api.guards.fake_limiter import FakeLimiter
 from vectapilot_api.guards.limits import GuardRefused
@@ -428,7 +429,9 @@ def test_guarded_create_app_builds_the_seams_around_unchanged_services(
             assert {type(p.executor) for p in served_profiles.values()} == {ScreeningToolExecutor}
         assert guard._profiles is full._profiles
         assert type(state.confirm_limits) is RouteLimits
-        assert type(state.extraction_limits) is RouteLimits
+        assert type(state.extraction_guard) is ExtractionGuard  # M7 PR 7: limits, then the scan
+        assert type(state.extraction_guard._limits) is RouteLimits
+        assert state.extraction_guard._matcher is state.agent_guard._matcher
         assert state.confirm_limits._max_retry_after_s == 899  # below the 900 s lifetime
 
 
@@ -538,4 +541,4 @@ def test_unguarded_create_app_builds_exactly_m5s_service(caplog: pytest.LogCaptu
         assert service._store is state.pending_actions
         assert service._propagate == ()
         assert {type(p.executor) for p in service._profiles.values()} == {ToolExecutor}
-        assert (state.confirm_limits, state.extraction_limits) == (None, None)
+        assert (state.confirm_limits, state.extraction_guard) == (None, None)
