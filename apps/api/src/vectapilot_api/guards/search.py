@@ -9,9 +9,10 @@ chunk with an injection signal, over its cap or empty once cleaned is **dropped 
 hybrid `fused` list keeps only the chunks that stayed, so the answer's counts never name a dropped
 chunk.
 
-It is reachable only under `agent_router = on` (`agent/service.py`'s `_answer`), and only through
-the agent's own `AnswerService`: M3's instance, behind `/v1/answer` and `/v1/kb/search`, keeps
-the plain `SearchService` (G11; PR 8 builds that route's own seam behind `guard_answer`).
+It is reachable under `agent_router = on` (`agent/service.py`'s `_answer`), through the agent's
+own `AnswerService`, and under `guard_answer = on` (M7 PR 8), through `/v1/answer`'s separate
+guarded `AnswerService`: M3's instance, which serves `/v1/answer` while `guard_answer` is off,
+keeps the plain `SearchService` (G11), and `/v1/kb/search` never screens its hits.
 
 **Fail closed.** The screen runs only inside a request the route tracks (`screens.track_screens`,
 with the business's guards set); outside one, or when the matcher or the screen raises, the search

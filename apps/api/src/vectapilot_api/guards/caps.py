@@ -15,8 +15,8 @@ Each cap is an existing bound of the platform, so a valid input never meets it:
 - `page_text`: 20,000, every page's text summed (`extraction.text.MAX_CHARACTERS`).
 
 The last four are copied, not imported (their modules pull in a database or PDF library);
-`tests/guards/test_caps.py` pins each one to its source. `/v1/answer`'s answer text gets its cap
-with PR 8.
+`tests/guards/test_caps.py` pins each one to its source. `/v1/answer`'s answer text (PR 8) is
+read against `reply`'s cap, as H3's contract reads an answer kind (`guards.answer`).
 """
 
 from collections.abc import Mapping

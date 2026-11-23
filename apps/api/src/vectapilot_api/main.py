@@ -41,6 +41,7 @@ from vectapilot_api.gateway.providers.base import Provider
 from vectapilot_api.gateway.providers.fake import FakeProvider
 from vectapilot_api.gateway.types import BusinessId
 from vectapilot_api.guards.agent import AgentGuard, read_only_tools
+from vectapilot_api.guards.answer import AnswerGuard
 from vectapilot_api.guards.budget import (
     BudgetedGateway,
     RefusalAsRouterFailure,
@@ -139,6 +140,16 @@ def _agent_answer_gateway(
     return nullcontext(None)
 
 
+def _answer_route_gateway(
+    settings: Settings, provider: Provider | None, limiter: Limiter, *, guarded: bool
+) -> AbstractAsyncContextManager[BudgetedGateway | None]:
+    """The gateway of `/v1/answer`'s guarded `AnswerService` (`large`, G9), only while
+    `guard_answer` is on (M7 PR 8); M3's `AnswerService` keeps its own gateway either way (G11)."""
+    if guarded:
+        return build_budgeted_gateway(settings, provider=provider, limiter=limiter)
+    return nullcontext(None)
+
+
 def _router_fallback(gateway: LLMGateway, *, guarded: bool) -> IntentFallback:
     """M4's LLM fallback on the agent's gateway. While `guard_routes` is on, that gateway is
     budgeted, and a refusal is raised as a failure of the router, so it fails closed at its top-1
@@ -190,6 +201,11 @@ def create_app(
     `/v1/extractions` check their limits first (`guards.routes.RouteLimits`, G15). With `"off"`
     every one of these is exactly as before M7.
 
+    **`/v1/answer` and `/v1/kb/search` with `guard_answer = "on"`** (M7 PR 8, G11, G13): both
+    routes call `AnswerGuard`, and the answer runs on a separate `AnswerService` over the
+    chunk-screening search and its own `BudgetedGateway`. With `"off"` (the default) neither is
+    built, and M3's `app.state.answer_service` and `app.state.search_service` serve, untouched.
+
     Every paid provider in Settings (`llm_provider`, `embeddings_provider`) needs
     `api_allow_paid_llm` (ADR 0006 Exposure, 2026-10-22 and D9 2026-10-23), injected provider or
     not: the rule reads Settings only.
@@ -198,6 +214,7 @@ def create_app(
     if matcher is not None and settings.environment not in GUARD_OFF_ENVIRONMENTS:
         raise ValueError(MATCHER_SEAM_REFUSED)
     guarded = settings.guard_routes == "on"
+    answer_guarded = settings.guard_answer == "on"
     screen_matcher: Matcher = match_terms if matcher is None else matcher
     # E11 (M6 PR 3): the extraction route's model is the fake provider, never one Settings name.
     if extraction_provider is not None and not isinstance(extraction_provider, FakeProvider):
@@ -344,12 +361,39 @@ def create_app(
             _agent_answer_gateway(
                 settings, llm_provider, limiter_in_use, guarded=guarded
             ) as agent_answer_gateway,
+            _answer_route_gateway(
+                settings, llm_provider, limiter_in_use, guarded=answer_guarded
+            ) as answer_route_gateway,
             build_extraction_gateway(settings, provider=extraction_fake) as extraction_gateway,
             page_reader() as extraction_reader,
         ):
             app.state.answer_service = AnswerService(
                 search, gateway, RagConfig.from_settings(settings)
             )
+            # M7 PR 8 (G11, G13): `/v1/answer`'s and `/v1/kb/search`'s guards, only when on; M3's
+            # `answer_service` above is the one that serves while off.
+            app.state.answer_guard = None
+            app.state.guarded_answer_service = None
+            if answer_guarded:
+                if answer_route_gateway is None:  # pragma: no cover
+                    raise RuntimeError("the guarded answer route needs a budgeted gateway")
+                app.state.guarded_answer_service = AnswerService(
+                    ScreeningSearchService(
+                        database,
+                        runner,
+                        matcher=screen_matcher,
+                        retrieval=RetrievalConfig.from_settings(settings),
+                    ),
+                    answer_route_gateway,
+                    RagConfig.from_settings(settings),
+                )
+                app.state.answer_guard = AnswerGuard(
+                    config=guards,
+                    limiter=limiter_in_use,
+                    matcher=screen_matcher,
+                    types=served,
+                    guidance=tool_guidance,
+                )
             # M5 PR 4: `/v1/agent` (ADR 0016 decisions 4, 5, 7), on its own gateway instance. The
             # router (when on) embeds with the API's runner and falls back on the agent's gateway.
             router = None

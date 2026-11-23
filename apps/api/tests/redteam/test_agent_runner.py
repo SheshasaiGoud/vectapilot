@@ -157,9 +157,12 @@ def test_masked_outcome_counts_only_placeholders_the_customer_did_not_write() ->
     assert masked_outcome("anything", None) == "allowed"
 
 
-def test_a_b_case_on_the_agent_route_is_refused_by_the_agent_runner() -> None:
-    with pytest.raises(RouterOffCase):
-        agent_runner(seams())(filled("b-007"), ENV)
+def test_a_b_case_on_the_agent_route_runs_in_process_never_in_the_database() -> None:
+    # M7 PR 8: b-007 and b-008 run in process under the router (tests/redteam/
+    # test_answer_runner.py); no B case on this route is a database case, so none is served.
+    agent_runner(seams())(filled("b-007"), ENV)  # runs (a miss here: nothing is screened)
+    with pytest.raises(RouterOffCase, match="runs in process"):
+        agent_runner(seams())(filled("b-007"), RunEnv(GENERATOR, "database"))
 
 
 def test_the_in_process_path_needs_the_dataset_folder() -> None:
