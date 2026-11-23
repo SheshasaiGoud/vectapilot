@@ -281,7 +281,12 @@ Planned: `scripts/`.
   fails closed) and, since PR 7, every guarded `/v1/extractions` upload is a 503
   `document_scan_unavailable` (the document scan fails closed). PR 8 built the guards on
   `/v1/answer` and `/v1/kb/search` behind `guard_answer = off` (byte-identical goldens at
-  6572e29); PR 10 switches them on after M3's last live answer run. H3 (`check_reply`, guide `docs/learning/m7-output-checks.md`) is a stub.
+  6572e29); PR 10 switches them on after M3's last live answer run. H3 (`check_reply`, guide
+  `docs/learning/m7-output-checks.md`) was written by Claude at shesha's request (D5 (b)) on
+  `m7/output-checks`, 2026-11-23, for shesha's review: its 58 contract cases pass, zara-safety's
+  and ananya-rag's reviews and a mutation check are applied (222 cases; open questions in the
+  guide's §5), and the red-team output cases now wait on H1 alone; its explain-back is shesha's
+  and due.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

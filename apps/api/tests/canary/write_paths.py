@@ -31,9 +31,9 @@ health business off before any tool, so a clinic could never reach the write.
 guard folder (`guard_folder`: the real platform and type term files, `data/safety/`, and a business
 file per planted business), so the path runs the guarded pipeline as production does. It then
 also runs M7's hand-writes H1 (`match_terms`, the screens) and H3 (`check_reply`, on the
-proposal's ticket text), and H2's `mask_pii` (written 2026-11-20); while H1 or H3 is a stub the
-route fails closed into a `guard_error` hand-off, which `surface_pending_loop` re-raises the same
-way. The confirm
+proposal's ticket text; written 2026-11-23), and H2's `mask_pii` (written 2026-11-20); while H1 is
+a stub the route fails closed into a `guard_error` hand-off, which `surface_pending_loop`
+re-raises the same way. The confirm
 and extraction paths are guarded too: their limits run first on the real Redis (G15; each test's
 planted business has fresh windows), and nothing else of M7 changes their writes.
 
@@ -234,9 +234,9 @@ def post_agent(client: TestClient, business_id: str | None) -> httpx2.Response:
     )
 
 
-GUARD_STUBS: Final = frozenset({"match_terms", "check_reply"})
+GUARD_STUBS: Final = frozenset({"match_terms"})
 """M7's hand-writes the guarded `POST /v1/agent` runs that are still stubs (module docstring;
-H2's `mask_pii` is written)."""
+H2's `mask_pii` is written, and H3's `check_reply` since 2026-11-23)."""
 
 
 def surface_pending_loop(response: httpx2.Response) -> None:

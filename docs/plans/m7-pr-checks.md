@@ -1269,6 +1269,15 @@ revisited with real data.
 using H1's matcher for phrases and H2's detector for PII. The digit-run grounding removes
 thousands separators before comparing. No database read. The explain-back is part of acceptance.
 
+**H3 written 2026-11-23** (Claude at shesha's request, D5 (b); for shesha's review): the 58
+contract cases pass without their switch, `check_reply` left the canary's `PENDING_HAND_WRITE`
+(the guarded `/v1/agent` write path's strict xfail now waits on `match_terms`), a raising
+stand-in check keeps the routes' fail-closed tests, and the red-team counts are unchanged
+(every output case is still `pending:H1`). zara-safety's and ananya-rag's reviews and a mutation
+check were applied the same day: rules 3-6 and the dose vocabulary widened (each a tightening;
+the frozen dataset and `data/` unchanged), 222 contract cases with no original expected value
+changed, one probe per surviving mutant. Open questions are in the guide's §5.
+
 ## PR 9 — `m7/close-out` (shesha's steps; zara, noah and maya help)
 Agents never pass `--live`, never run a ledgered test, never read the probe file and never see a
 key [carried ADR 0007].

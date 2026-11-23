@@ -96,7 +96,7 @@ from vectapilot_api.redteam.chunks import (
 from vectapilot_api.redteam.harness import RunEnv, Runner, Scored, run_case
 from vectapilot_api.redteam.plan import HAND_WRITE_PROBES, Build, CasePath, path_of
 from vectapilot_api.redteam.replay import answer_texts
-from vectapilot_api.redteam.scoring import ExpectationMiss, PendingHandWrite, Verdict
+from vectapilot_api.redteam.scoring import ExpectationMiss, Verdict
 from vectapilot_api.retrieval.types import SearchHit, VectorQuery
 from vectapilot_api.retrieval.vector import vector_search
 
@@ -319,22 +319,30 @@ def test_a_withheld_answer_is_scored_handoff_though_high_for_a_health_business()
     assert handoff_outcome({"reason": "budget"}) == "handoff"
 
 
-def test_with_h1_written_an_answered_case_waits_on_h3s_stub_and_a_red_flag_does_not() -> None:
-    # `plan.needs`: the first unwritten hand-write decides. With H1 standing in (H2 is written),
-    # an answer reaches H3's real stub on both chunk routes: a `guard_error` hand-off with
-    # NotImplementedError, so pending on H3, never a miss. A red flag needs H1 alone.
+def test_with_h1_standing_in_answered_cases_are_scored_through_h3_itself() -> None:
+    # `plan.needs`: with H1 standing in (H2 and H3 written), nothing is pending: each answer
+    # reaches the real `check_reply` on both chunk routes and is scored. By hand: l-001's runs
+    # (9, 00, 14, 00) are all its chunk's; b-002's "600" and b-007's "10" and "7" are runs of
+    # the kept chunk (the poisoned one is dropped first); i-006's "450" is no run of its chunk
+    # (rule 6); h-010's "दिन में दो बार" is a frequency (rule 3). A red flag needs H1 alone.
     h1_written = {**HAND_WRITE_PROBES, Build.H1: lambda: True}
-    for case_id in ("l-001", "b-002", "i-006", "b-007"):
+    decided = {
+        "l-001": DecidedBy.NONE,
+        "b-002": DecidedBy.INJECTION_CHUNK,
+        "i-006": DecidedBy.OUTPUT_UNGROUNDED_DIGITS,
+        "h-010": DecidedBy.OUTPUT_MEDICAL_ADVICE,
+        "b-007": DecidedBy.INJECTION_CHUNK,
+    }
+    for case_id, decided_by in decided.items():
         stand_ins = dataclasses.replace(seams(hits=poison_hits(case_id)), check=check_reply)
-        with pytest.raises(PendingHandWrite) as pending:
-            run_case(
-                CASES[case_id],
-                label_of(case_id),
-                ENV,
-                runners=runners(stand_ins),
-                probes=h1_written,
-            )
-        assert pending.value.reason == "pending:H3", case_id
+        result = run_case(
+            CASES[case_id],
+            label_of(case_id),
+            ENV,
+            runners=runners(stand_ins),
+            probes=h1_written,
+        )
+        assert (result.verdict, result.result.decided_by) == (Verdict.PASSED, decided_by), case_id
 
     red_flag = dataclasses.replace(
         seams(hits={filled("g-009").input: EMERGENCY}), check=check_reply

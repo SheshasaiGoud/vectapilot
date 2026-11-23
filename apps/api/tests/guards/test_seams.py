@@ -2,7 +2,7 @@
 
 `ScreeningSearchService` runs over the retrieval stand-ins (no SQL); `ScreeningProposalStore` over
 a recording store. The matcher is `LookupMatcher` (a fixed lookup, not H1) and the output check
-`FixedCheck` (not H3) unless a test runs H3's stub.
+`FixedCheck` or `RaisingCheck` (not H3) unless a test runs H3 itself (written 2026-11-23).
 """
 
 import asyncio
@@ -19,6 +19,7 @@ from tests.guards.agent_helpers import (
     FixedCheck,
     IdentityMask,
     LookupMatcher,
+    RaisingCheck,
     RaisingMatcher,
     WithholdingRecorder,
 )
@@ -220,7 +221,7 @@ def test_screen_tallies_are_per_request() -> None:
     assert current_screens() is None
 
 
-# ── H3's types (the stub's own strict xfails come with its scaffold) ─────────────────────────
+# ── H3's types (its contract tests are tests/guards/test_check_reply.py) ─────────────────────
 
 
 def context(kind: OutputKind = OutputKind.REPLY, cited: tuple[Clean, ...] = ()) -> OutputContext:
@@ -244,9 +245,10 @@ def test_only_an_answer_has_cited_chunks() -> None:
         context(OutputKind.REPLY, (Clean("a chunk"),))
 
 
-def test_h3_is_a_stub_until_it_is_written() -> None:
-    with pytest.raises(NotImplementedError, match="H3"):
-        check_reply("hi", context())
+def test_h3_is_written_and_finds_nothing_in_a_plain_reply() -> None:
+    # Written 2026-11-23 (D5 (b)): "hi" has no hit, no number, no PII shape (and no locale
+    # here), no boundary line, and a reply's digits are never grounded.
+    assert check_reply("hi", context()) == ()
     assert len(OUTPUT_FINDINGS) == 7
     assert all(code.value.startswith("output:") for code in OUTPUT_FINDINGS)
 
@@ -379,13 +381,14 @@ def test_a_clean_ticket_reaches_the_store_after_both_screens() -> None:
 
 @pytest.mark.parametrize(
     ("arguments", "error_type"),
-    [({"category": "order"}, "TypeError"), ({"summary": "Call me back."}, "NotImplementedError")],
+    [({"category": "order"}, "TypeError"), ({"summary": "Call me back."}, "RuntimeError")],
 )
 def test_a_ticket_the_screens_cannot_read_fails_closed_unstored(
     arguments: dict[str, str], error_type: str
 ) -> None:
     inner = WithholdingRecorder()
-    store = ScreeningProposalStore(inner, matcher=LookupMatcher())  # H3's stub
+    # A check that breaks (not H3): without a summary the store fails before asking it.
+    store = ScreeningProposalStore(inner, matcher=LookupMatcher(), check=RaisingCheck())
     proposed = WriteProposal.model_construct(
         tool=ToolName.CREATE_TICKET, arguments=arguments, summary="Create a ticket."
     )
