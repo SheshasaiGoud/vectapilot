@@ -1228,6 +1228,12 @@ human steps are not M7's.
     kind (above), and G3's priority for a Redis failure on a message in an uncovered script (high
     for a non-health business, as `/v1/answer` does; unreachable with today's data). **Done** in
     that follow-up (`m7/agent-followups`): the answer prompt's lines alone, not the union.
+  - **Decided with the follow-up (shesha, 2026-11-23, leo's review):** on `/v1/agent`, a full
+    window on a message the red-flag screen never cleared stays a 429 (a hand-off would let any
+    caller skip the window by writing in an uncovered script); revisit when `agent_router = on`
+    reaches a business that lists an uncovered language. **For M8's plan:** once a transcript
+    feeds the loop's own text into a `rag` question, H3 checks an answer kind against the union
+    of both prompts' boundary lines.
 
 ## H1 — `m7/term-matching` (`[HAND-WRITE]`, [D5]; time-box 2 h, decided 2026-11-16) · S
 `match_terms(text: Folded, terms: TermSet) -> tuple[TermHit, ...]`. Pure: no I/O, no logging,
