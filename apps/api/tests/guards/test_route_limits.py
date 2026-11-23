@@ -11,8 +11,11 @@ tests/extraction do.
   both the service never runs, so a 429 can never follow a write. Confirm's own responses pass
   byte for byte, and a bug inside it is still a 500 (nothing of M7 encloses the call).
 - **Extractions:** the limits run before the body is read: a limited caller costs no body read,
-  no parse and no stored row.
-- **One `guard` record per request**, written before the service, sharing the trace id.
+  no parse and no stored row. The document screen after the extraction (M7 PR 7) runs H1 through
+  `create_app`'s seam: here `LookupMatcher` with no entry (not H1), so an admitted upload is
+  screened clean; the screen itself is tests/guards/test_document_route.py.
+- **One `guard` record per request**, sharing the trace id: written before the service for
+  confirm and for a refused upload, after the document screen for an admitted one.
 - **Off** (`guard_routes = "off"`): the limiter is never called.
 """
 
@@ -33,6 +36,7 @@ from tests.extraction.helpers import EXTRACTION_DIR
 from tests.extraction.served import PDF
 from tests.extraction.served import RecordingStore as ExtractionStore
 from tests.extraction.standins import REFERRAL_LINES, pdf
+from tests.guards.agent_helpers import LookupMatcher
 from tests.guards.helpers import (
     SAFETY_DIR,
     SAMPLE_CORPUS_DIR,
@@ -42,7 +46,6 @@ from tests.guards.helpers import (
 )
 from vectapilot_api.actions.types import ActionNotFound, ConfirmFailed, OutcomeUnknown
 from vectapilot_api.business import BUSINESS_HEADER
-from vectapilot_api.config import Settings
 from vectapilot_api.db import Database
 from vectapilot_api.guards.config import load_guard_dir
 from vectapilot_api.guards.fake_limiter import REDIS_DOWN, FakeLimiter, LimiterCall
@@ -92,7 +95,8 @@ def served(
         "corpus_dir": SAMPLE_CORPUS_DIR,
         "guard_config_dir": SAFETY_DIR,
     }
-    app = create_app_with(make_settings(**(fields | overrides)), limiter or FakeLimiter())
+    settings = make_settings(**(fields | overrides))
+    app = create_app(settings, limiter=limiter or FakeLimiter(), matcher=LookupMatcher())
     root = logging.getLogger()
     root.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="vectapilot_api.guards")
@@ -103,10 +107,6 @@ def served(
             yield client, app
     finally:
         root.removeHandler(caplog.handler)
-
-
-def create_app_with(settings: Settings, limiter: FakeLimiter) -> FastAPI:
-    return create_app(settings, limiter=limiter)
 
 
 def post_confirm(client: TestClient, body: dict[str, Any] = BODY, **headers: str) -> Any:
@@ -245,7 +245,7 @@ def test_with_the_guards_off_confirm_never_calls_the_limiter(
     limiter = FakeLimiter(limit="raise")
     with served(caplog, limiter=limiter, guard_routes="off") as (client, app):
         response = post_confirm(client)
-        assert (app.state.confirm_limits, app.state.extraction_limits) == (None, None)
+        assert (app.state.confirm_limits, app.state.extraction_guard) == (None, None)
 
     assert response.status_code == 200
     assert limiter.calls == [] and records(caplog) == []

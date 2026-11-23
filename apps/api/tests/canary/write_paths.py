@@ -44,6 +44,12 @@ temporary folder, with a matching corpus manifest, and serves the real app from 
 `route_fields`, but is not marked: while the stub raises, the service fails closed into an
 all-review extraction (`internal_error`) that is still stored, so the write this check needs (an
 extraction and its fields) happens either way, and the path is checked now, not after H1.
+**M7 PR 7's document screen** runs on that path after the extraction and before the store, so the
+planted business gets a guard folder too (`guard_folder`, with Paws & Co's guidance lines: a
+`veterinary` business is health, G4), and the screen runs on a no-hit stand-in matcher
+(`LookupMatcher`, not H1) [proposal, PR 7]: while H1 is a stub the guarded route would answer
+every upload with a 503 and store nothing, so the write this check needs would wait for H1. H1 is
+pure (no I/O), so the stand-in changes nothing about where the write lands.
 """
 
 import json
@@ -73,6 +79,7 @@ from tests.extraction.fakes import vaccination
 from tests.extraction.served import PATH as EXTRACTIONS
 from tests.extraction.served import PDF, extraction_folder
 from tests.extraction.standins import VACCINATION_ANSWER, VACCINATION_LINES, pdf, reply
+from tests.guards.agent_helpers import LookupMatcher
 from tests.guards.helpers import SAFETY_DIR
 from tests.tools.helpers import write_corpus
 from vectapilot_api.business import BUSINESS_HEADER
@@ -297,15 +304,28 @@ EXTRACTION_DOCUMENT: Final = pdf(list(VACCINATION_LINES))
 planted business's)."""
 
 
+EXTRACTION_GUIDANCE: Final = tuple(
+    json.loads((SAFETY_DIR / "businesses" / "paws-and-co.json").read_text(encoding="utf-8"))[
+        "guidance"
+    ]
+)
+"""Paws & Co's guidance lines, for the planted `veterinary` business's guard file (G4)."""
+
+
 @contextmanager
 def served_with_extraction(business_id: str) -> Iterator[TestClient]:
     """The real app, as the app role, with an extraction file for `business_id` (Paws & Co's
-    settings) and the model scripted with a right answer (the fake provider, E11)."""
+    settings), a guard file for it, the model scripted with a right answer (the fake provider,
+    E11) and the document screen on a no-hit stand-in matcher (module docstring)."""
     with tempfile.TemporaryDirectory() as directory:
         folder, corpus = extraction_folder(Path(directory), {business_id: "paws-and-co"})
-        settings = Settings(extraction_config_dir=folder, corpus_dir=corpus)
+        guards = guard_folder(Path(directory), [business_id], {business_id: EXTRACTION_GUIDANCE})
+        settings = Settings(
+            extraction_config_dir=folder, corpus_dir=corpus, guard_config_dir=guards
+        )
         provider = FakeProvider([reply(vaccination(), dict(VACCINATION_ANSWER))])
-        with TestClient(create_app(settings, extraction_provider=provider)) as client:
+        app = create_app(settings, extraction_provider=provider, matcher=LookupMatcher())
+        with TestClient(app) as client:
             yield client
 
 

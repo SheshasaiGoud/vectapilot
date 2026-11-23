@@ -10,6 +10,8 @@ instead of a list of strings, and a line a `Line` instead of a string:
   writers do, and as pypdf then reads it back);
 - `Line(hidden=True)` draws the line in text render mode `3 Tr` (invisible, still in the text
   layer: ADR 0017's known gap, "hidden text layers");
+- `Line(white=True)` fills the line in white (`1 1 1 rg`), white on a white page (M7 PR 7's
+  hidden-text signal); a line placed off the page with `x` or `row` is the off-page variant;
 - `Page(image=True)` draws one tiny raw image XObject (a 1x1 grey pixel) on the page, as a
   letterhead logo or a scanned attachment would.
 
@@ -49,6 +51,8 @@ class Line:
     """The text row from the top (0 is the first); None is the row after the previous line's."""
     hidden: bool = False
     """Text render mode `3 Tr`: in the text layer, never painted."""
+    white: bool = False
+    """Filled in white (`1 1 1 rg`): painted, but white on white."""
 
 
 @dataclass(frozen=True)
@@ -78,6 +82,7 @@ def _positioned(lines: Sequence[str | Line]) -> bytes:
     parts: list[bytes] = []
     row = -1
     mode = 0
+    white = False
     for item in lines:
         line = Line(item) if isinstance(item, str) else item
         row = row + 1 if line.row is None else line.row
@@ -85,6 +90,9 @@ def _positioned(lines: Sequence[str | Line]) -> bytes:
         if wanted != mode:
             parts.append(b"%d Tr" % wanted)
             mode = wanted
+        if line.white != white:
+            parts.append(b"1 1 1 rg" if line.white else b"0 g")
+            white = line.white
         y = TOP - LEADING * row
         parts.append(b"1 0 0 1 %d %d Tm " % (LEFT + line.x, y) + _pdf_string(line.text) + b" Tj")
     return b"BT /F1 12 Tf " + b" ".join(parts) + b" ET" if parts else b""

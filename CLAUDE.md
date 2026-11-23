@@ -278,7 +278,10 @@ Planned: `scripts/`.
   applied; four open questions in the guide's §5); its explain-back is shesha's and due.
   Since PR 6 (`m7/agent-guards`) the guards are on for `/v1/agent`, its confirm route and
   `/v1/extractions`; until H1 lands, `/v1/agent` hands off every message (the red-flag screen
-  fails closed). H3 (`check_reply`, guide `docs/learning/m7-output-checks.md`) is a stub.
+  fails closed) and, since PR 7, every guarded `/v1/extractions` upload is a 503
+  `document_scan_unavailable` (the document scan fails closed). PR 8 built the guards on
+  `/v1/answer` and `/v1/kb/search` behind `guard_answer = off` (byte-identical goldens at
+  6572e29); PR 10 switches them on after M3's last live answer run. H3 (`check_reply`, guide `docs/learning/m7-output-checks.md`) is a stub.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

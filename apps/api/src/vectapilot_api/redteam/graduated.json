@@ -1,0 +1,6 @@
+{
+  "decided": "2026-11-21 (shesha): known gaps that now pass with PR 4's terms are scored as hard, code-side; the frozen dataset, gates.json included, never changes (docs/plans/m7-pr-checks.md, PR 6 and PR 7)",
+  "versions": {
+    "v0.1": ["g-015", "g-030"]
+  }
+}

@@ -23,7 +23,12 @@ and fails closed on any of:
   soft or known_gap) or between known_gap and soft, an id added or removed, or a raised ceiling
   (noah's PR 2 review: the gate, not only a pytest check, refuses it);
 - with `--final`: any pending reason but `pending:M5-H1` (D8 (i)), and the gate lists the
-  `pending:M5-H1` ids as "not measured through the real loop".
+  `pending:M5-H1` ids as "not measured through the real loop";
+- a graduated case (`src/vectapilot_api/redteam/graduated.json`, decided 2026-11-21, shesha:
+  the code-side list of known gaps scored as hard, read by path, as the case marks read it) that
+  failed or was xfailed as a known gap; a graduated id that is not a frozen `known_gap` case, or
+  an unreadable list. A graduated case counts as hard; a `known_gap` case that passed and is not
+  graduated still fails (a mark is missing).
 
 pytest's report keeps an xfail's reason but not its `strict` or `raises`; `tests/redteam/
 conftest.py` checks those at collection time, and `tests/test_redteam_gate.py` proves no other
@@ -44,12 +49,16 @@ import sys
 import xml.etree.ElementTree as ElementTree
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final
 
 REPO_ROOT: Final = Path(__file__).resolve().parents[3]
 DEFAULT_DATASET: Final = REPO_ROOT / "evals" / "datasets" / "redteam" / "v0.1"
+DEFAULT_GRADUATED: Final = (
+    Path(__file__).resolve().parents[1] / "src" / "vectapilot_api" / "redteam" / "graduated.json"
+)
+"""The graduated known gaps per dataset version (`vectapilot_api.redteam.graduated`)."""
 SUITE_CLASS: Final = "tests.redteam.test_cases"
 """JUnit `classname` of the suite's tests (their module path)."""
 TEST_NAME: Final = re.compile(r"^test_case\[(?P<id>[a-l]-[0-9]{3})\]$")
@@ -63,6 +72,7 @@ PENDING_REASONS: Final = frozenset(
 REAL_LOOP_PENDING: Final = "pending:M5-H1"
 FINAL_PENDING: Final = frozenset({REAL_LOOP_PENDING})
 KNOWN_GAP: Final = re.compile(r"^known_gap:(?P<id>[a-l]-[0-9]{3})$")
+CASE_ID: Final = re.compile(r"[a-l]-[0-9]{3}")
 OUTCOME: Final = re.compile(r"^[a-z][a-z0-9_]*(:[a-z_]+(,[a-z_]+)*)?$")
 """A recorded outcome code (`allowed`, `urgent_handoff`, `masked:email,phone`): never text."""
 
@@ -83,6 +93,16 @@ class Frozen:
     max_over_escalated: int
     loosened: tuple[str, ...] = ()
     """Every way gates.json loosened against freeze.json's frozen gates (`loosening`)."""
+    version: str | None = None
+    """The manifest's version: the key of its graduated list."""
+    graduated: frozenset[str] = frozenset()
+    """Known gaps scored as hard (`read_graduated`); empty until `graduate` sets them."""
+    graduation: tuple[str, ...] = ()
+    """Every graduated id that is not a frozen known_gap case (`graduate`)."""
+
+    def label(self, case_id: str) -> str | None:
+        """The label the case is gated on: gates.json's, or hard once graduated."""
+        return "hard" if case_id in self.graduated else self.labels.get(case_id)
 
 
 def loosening(frozen: object, labels: dict[str, str], ceiling: int) -> list[str]:
@@ -141,7 +161,38 @@ def read_frozen(dataset: Path) -> Frozen:
     if not isinstance(labels, dict) or not isinstance(ceiling, int) or not isinstance(total, int):
         raise DatasetError("gates.json labels and ceiling, and the manifest's total, are needed")
     loosened = tuple(loosening(freeze.get("gates"), labels, ceiling))
-    return Frozen(total, expects, labels, ceiling, loosened)
+    version = manifest.get("version")
+    return Frozen(
+        total, expects, labels, ceiling, loosened, version if isinstance(version, str) else None
+    )
+
+
+def read_graduated(path: Path, version: str | None) -> frozenset[str]:
+    """The ids `path` graduates for `version` (none for a version it does not list). Mirrors
+    `vectapilot_api.redteam.graduated.read_graduated` (tests pin the two to each other)."""
+    data = _json(path)
+    versions = data.get("versions") if isinstance(data, dict) else None
+    if not isinstance(versions, dict):
+        raise DatasetError(f"{path.name} needs a versions object")
+    ids = versions.get(version, []) if version is not None else []
+    if not isinstance(ids, list) or not all(
+        isinstance(i, str) and CASE_ID.fullmatch(i) for i in ids
+    ):
+        raise DatasetError(f"{path.name}: {version} lists case ids only")
+    if len(set(ids)) != len(ids):
+        raise DatasetError(f"{path.name}: {version} lists an id twice")
+    return frozenset(ids)
+
+
+def graduate(frozen: Frozen, graduated: frozenset[str]) -> Frozen:
+    """`frozen` with `graduated` scored as hard; an id that is not a frozen known_gap case is a
+    problem (graduation only tightens)."""
+    problems = tuple(
+        f"{case_id}: graduated, but not a frozen known_gap case"
+        for case_id in sorted(graduated)
+        if frozen.labels.get(case_id) != "known_gap"
+    )
+    return replace(frozen, graduated=graduated, graduation=problems)
 
 
 @dataclass
@@ -163,10 +214,12 @@ def _outcome(case: ElementTree.Element) -> str | None:
 
 
 def _xfail(report: Report, frozen: Frozen, case_id: str, reason: str | None) -> None:
-    label = frozen.labels.get(case_id)
+    label = frozen.label(case_id)
     known = KNOWN_GAP.fullmatch(reason or "")
     if reason in PENDING_REASONS:
         report.pending.setdefault(reason, []).append(case_id)
+    elif known is not None and case_id in frozen.graduated:
+        report.problems.append(f"{case_id}: graduated to hard, but xfailed as a known gap")
     elif known is not None and known["id"] == case_id and label == "known_gap":
         report.known_gaps.append(case_id)
     elif known is not None and known["id"] == case_id:
@@ -176,7 +229,7 @@ def _xfail(report: Report, frozen: Frozen, case_id: str, reason: str | None) -> 
 
 
 def _passed(report: Report, frozen: Frozen, case_id: str, case: ElementTree.Element) -> None:
-    label = frozen.labels.get(case_id)
+    label = frozen.label(case_id)
     if label == "hard":
         report.hard_passed += 1
     elif label == "soft":
@@ -220,7 +273,7 @@ def read_report(xml: str, frozen: Frozen) -> Report:
 
 
 def gate_problems(report: Report, frozen: Frozen, *, final: bool) -> list[str]:
-    problems = list(report.problems) + list(frozen.loosened)
+    problems = list(report.problems) + list(frozen.loosened) + list(frozen.graduation)
     missing = sorted(set(frozen.expects) - set(report.seen))
     if missing:
         problems.append(f"frozen cases missing from the report: {', '.join(missing)}")
@@ -268,9 +321,11 @@ def main(argv: Sequence[str]) -> int:
     parser.add_argument("report", type=Path, help="pytest's JUnit XML")
     parser.add_argument("--dataset", type=Path, default=DEFAULT_DATASET)
     parser.add_argument("--final", action="store_true", help="M7's close-out: D8 (i)")
+    parser.add_argument("--graduated", type=Path, default=DEFAULT_GRADUATED)
     args = parser.parse_args(argv)
     try:
         frozen = read_frozen(args.dataset)
+        frozen = graduate(frozen, read_graduated(args.graduated, frozen.version))
         report = read_report(args.report.read_text(encoding="utf-8"), frozen)
     except (DatasetError, OSError, ElementTree.ParseError, KeyError, ValueError) as error:
         print(f"redteam gate: cannot read the report or the dataset: {error}", file=sys.stderr)

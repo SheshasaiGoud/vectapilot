@@ -35,15 +35,15 @@ after every filter has run. Field by field:
   with the time, level and logger only.
 
 **The masker** is `log_masker()`: H2's `mask_pii` over `normalize.clean`, with
-`DEFAULT_LOCALE_IDS`. While H2 is the stub (probed once at startup: it raises
+`DEFAULT_LOCALE_IDS`. If H2 is a stub (probed once at startup: it raises
 `NotImplementedError`) there is no masker (the interim, decided 2026-11-18, shesha): free text is
 not masked or cleaned; the container bounds, the key checks and the id checks already apply (a dict
 keyed by a number, which `JsonFormatter` writes, is `[redaction_failed]`; no record we write has
 one), as do the uvicorn.error rewrite and the access line; and `create_app`'s startup warning
 `log_masking status=masker_unavailable` says so. Turning every free-text field into
 `[redaction_failed]` instead would blank uvicorn's own lines and every warning while hiding nothing
-that was not already written before M7. Once H2 is written, the probe passes and masking is on,
-failing closed field by field.
+that was not already written before M7. H2 is written (2026-11-20): the probe passes and masking
+is on, failing closed field by field.
 
 **The access line (G10-S2)** [proposal, diego's PR 1 review]: `AccessLine` (a stricter
 `DropQueryString`) rewrites uvicorn's access record at log time. The path becomes the matched
@@ -75,7 +75,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from vectapilot_api.guards.caps import INPUT_CAPS, Surface
 from vectapilot_api.guards.locales import DEFAULT_LOCALE_IDS, ascii_view, locales
 from vectapilot_api.guards.normalize import clean
-from vectapilot_api.guards.pii import mask_pii
+from vectapilot_api.guards.pii import SQUEEZED_OUT, mask_pii
 from vectapilot_api.guards.types import Clean
 from vectapilot_api.log import _STANDARD_ATTRS, DropQueryString, JsonFormatter
 
@@ -152,7 +152,7 @@ _CONTEXT: Final = "\nDuring handling of the above exception, another exception o
 
 
 def log_masker(locale_ids: Sequence[str] = DEFAULT_LOCALE_IDS) -> Masker | None:
-    """H2's `mask_pii` as a `Masker`, or None while H2 is the stub (module docstring)."""
+    """H2's `mask_pii` as a `Masker`, or None if H2 is a stub (module docstring)."""
     chosen = locales(locale_ids)
 
     def mask(text: str) -> str:
@@ -167,20 +167,45 @@ def log_masker(locale_ids: Sequence[str] = DEFAULT_LOCALE_IDS) -> Masker | None:
 
 def safe_cut(text: str, cap: int = FIELD_CAP) -> str | None:
     """`text` if it fits `cap`, else its longest prefix that ends just before a whitespace with no
-    digit, `+` or digit-like form on either side; None if there is none.
+    digit, `+` or digit-like form on either side; None if there is none. "On either side" is the
+    nearest character the masker's squeezed view keeps (`squeezed_out`), so a ZWJ, ZWNJ,
+    variation selector or keycap mark next to the whitespace never hides a digit beyond it.
 
     Why there: every pattern that spans whitespace (grouped phones, Aadhaar, cards) has it
     between digits (`locales`), so such a whitespace is never inside a span. Cutting anywhere
     else could leave half a number, too short for any pattern, in the line. `text` is the
     cleaned text the masker reads (`RedactingJsonFormatter.text`): on raw text, a zero-width
-    character `clean` drops could make a space between two digit groups look safe."""
+    character `clean` drops could make a space between two digit groups look safe; on cleaned
+    text, a character `clean` keeps but `pii`'s squeezed view leaves out could do the same
+    (`99999`, ZWJ, space, ZWJ, `99999` is one grouped number to the masker; decided 2026-11-20,
+    shesha, `docs/learning/m7-masking.md` §5). A step past squeezed characters stops at the first
+    character the view keeps (a whitespace is one), so the search reads each squeezed character
+    at most twice, once from each side (G3)."""
     if len(text) <= cap:
         return text
-    view = ascii_view(Clean(text[: cap + 2]))  # the cut's own character and the one after it
     for i in range(cap, 0, -1):
-        if view[i].isspace() and not _numeric(view[i - 1]) and not _numeric(view[i + 1 : i + 2]):
+        if (
+            text[i].isspace()
+            and not _numeric(_beside(text, i, -1))
+            and not _numeric(_beside(text, i, 1))
+        ):
             return text[:i]
     return None
+
+
+def squeezed_out(character: str) -> bool:
+    """Whether `pii`'s squeezed view leaves `character` out (`pii.SQUEEZED_OUT`, H2's rule 2).
+    The cut reads the same set the masker does, so widening it moves both."""
+    return character in SQUEEZED_OUT
+
+
+def _beside(text: str, i: int, step: int) -> str:
+    """The nearest character to `text[i]` in direction `step` (-1 or 1) that the squeezed view
+    keeps, as the ASCII view reads it (one character for one); "" past either end."""
+    j = i + step
+    while 0 <= j < len(text) and squeezed_out(text[j]):
+        j += step
+    return ascii_view(Clean(text[j])) if 0 <= j < len(text) else ""
 
 
 def _numeric(character: str) -> bool:

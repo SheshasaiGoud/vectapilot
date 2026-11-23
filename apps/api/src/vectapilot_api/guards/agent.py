@@ -22,9 +22,10 @@ every step scoped by the business:
    cannot read that script either, so the turn runs read-only (step 6), and the message never
    counts as cleared (G3: a later guard failure is high, not normal).
 5. **Limits, then the budget pre-check** (G9): `Limiter.admit` for the business and the customer,
-   then `require_budget` with `turn_precheck_micro_usd` [proposal, PR 6]. A full window is a 429
-   with `Retry-After` (its body carries the guidance for a health business); an exhausted budget
-   a `budget` hand-off; Redis failing a `guard_error` hand-off (`limits.refusal_decision`).
+   then `require_budget` with `turn_precheck_micro_usd` (decided 2026-11-21, shesha; G9
+   amended). A full window is a 429 with `Retry-After` (its body carries the guidance for a
+   health business); an exhausted budget a `budget` hand-off; Redis failing a `guard_error`
+   hand-off (`limits.refusal_decision`).
 6. **Injection signals** in the message (G7): a phrase or the hidden-character rule selects the
    read-only service (every constructor argument the same but its profiles, G13).
 7. **Masking** of the clean message (H2's `mask_pii`), re-validated as an `AgentRequest`, so
@@ -56,9 +57,10 @@ finding), finding counts, the exception's class name, the budget tally, a withhe
 action id and durations. Never the message, a term or a term id. The `agent_turn` record stays
 the loop's outcome; both share the trace id.
 
-**Which rule decided** [proposal, PR 6; the scoring rules' reading for c-007 and a-005]: a rule
-before the service decides first (the red flag, the language, limits and budget, the message's
-injection signal, which chose the read-only service). After the service, a **whole-response
+**Which rule decided** (PR 6's proposal, standing as built, decided 2026-11-21, shesha; the
+scoring rules' reading for c-007 and a-005): a rule before the service decides first (the red
+flag, the language, limits and budget, the message's injection signal, which chose the
+read-only service). After the service, a **whole-response
 replacement** (the ticket text's screen or H3, `guard_output`) decides over a tightening inside
 the service (a dropped chunk, a withheld tool-result field), which then is a finding: that
 replacement, not the tightening, decided what the customer got. Only a response that passed
@@ -172,17 +174,18 @@ def turn_precheck_micro_usd(
     trace_id: str,
     max_steps: int,
 ) -> int:
-    """The day's remainder a turn needs before it starts [proposal, PR 6; open for shesha]:
-    `max_steps` times the worst case of the turn's first step, computed exactly as
+    """The day's remainder a turn needs before it starts (decided 2026-11-21, shesha; G9 amended
+    to match): `max_steps` times the worst case of the turn's first step, computed exactly as
     `BudgetedGateway` will reserve it (the step's own request for this message, the business's
     step schema, the gateway's retry and repair limits). Every later step's prompt holds this one
     plus its observations, so each later reservation is at least as large: this is a **lower
-    bound** of a loop turn's worst case, not G9's "one turn's worst case" (leo's PR 6 review). A
-    remainder below it cannot finish a loop turn that uses its steps; above it, each call's own
-    reservation stays the control (a step refused mid-turn is a `budget` hand-off, and the loop
-    never writes). It models the loop's step gateway only: under `agent_router = on` a RAG turn
-    spends a `small` fallback and a `large` answer instead (kenji's PR 6 review), and a refusal
-    in the router's fallback fails closed through M4 (`guards.budget.RefusalAsRouterFailure`)."""
+    bound** of a loop turn's worst case (leo's PR 6 review; G9 now says so), so it never refuses
+    a turn that could have finished. A remainder below it cannot finish a loop turn that uses its
+    steps; above it, each call's own reservation stays the control (a step refused mid-turn is a
+    `budget` hand-off, and the loop never writes). It models the loop's step gateway only: under
+    `agent_router = on` a RAG turn spends a `small` fallback and a `large` answer instead
+    (kenji's PR 6 review), and a refusal in the router's fallback fails closed through M4
+    (`guards.budget.RefusalAsRouterFailure`)."""
     prompt = build_agent_prompt(
         Transcript(message),
         today=profile.config.sandbox_date,

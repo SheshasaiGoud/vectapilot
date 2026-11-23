@@ -16,6 +16,7 @@ from vectapilot_api.guards.types import DecidedBy
 from vectapilot_api.redteam.agent import run_agent
 from vectapilot_api.redteam.answer import run_answer
 from vectapilot_api.redteam.cases import Category, Route, Surface
+from vectapilot_api.redteam.document import run_document
 from vectapilot_api.redteam.harness import (
     RUNNERS,
     FilledCase,
@@ -79,36 +80,41 @@ def test_every_frozen_case_has_one_path_and_one_rule_under_test() -> None:
     }
 
 
-def test_pr_6_registers_the_agent_the_logs_and_the_search_leg() -> None:
-    # PR 3 registered the masking path, PR 5 the limiter (k-002, k-004 hard). PR 6 registers the
-    # agent path, the logs and the search leg: no case is pending on a PR 6 runner any more. An
-    # agent case now waits on the first hand-write its guard reaches (H1 for every one: the
-    # red-flag screen runs first). H2 is written (2026-11-20): category E and F's logs (the
-    # formatter's masker, their only hand-write) take their hard label, and k-001 needs none.
-    # PR 8 registers the answer path, which ends b-007's and b-008's wait (`waiting_on`).
+def test_every_path_is_registered() -> None:
+    # PR 3 registered the masking path, PR 5 the limiter (k-002, k-004 hard). PR 6 registered the
+    # agent path, the logs and the search leg; PR 7 the document path; PR 8 the answer path, which
+    # ends b-007's and b-008's wait (`waiting_on`): no case is pending on a PR's runner any more.
+    # An agent, document or answer case now waits on the first hand-write its guard reaches (H1
+    # for every one: the red-flag screen runs first). H2 is written (2026-11-20): category E and
+    # F's logs (the formatter's masker, their only hand-write) take their hard label, and k-001
+    # needs none.
     assert dict(RUNNERS) == {
         CasePath.MASKING: run_masking,
         CasePath.LIMITER: run_limiter,
         CasePath.AGENT: run_agent,
         CasePath.LOG: run_logs,
         CasePath.SEARCH_LEG: run_search_leg,
+        CasePath.DOCUMENT: run_document,  # M7 PR 7
         CasePath.ANSWER: run_answer,  # M7 PR 8
     }
     plans = {c.id: mark_plan(c, label_of(c.id), RUNNERS) for c in CASES.values()}
     category_e = {c.id for c in CASES.values() if c.category is Category.E}
     logs = {c.id for c in CASES.values() if c.surface is Surface.LOG}
+    documents = {c.id for c in CASES.values() if path_of(c) is CasePath.DOCUMENT}
 
     assert (len(category_e), logs) == (18, {"f-001", "f-002", "f-003", "f-004", "f-005"})
+    assert documents == {"d-001", "d-002", "d-003", "d-004", "d-005"}
     hard = {"k-001", "k-002", "k-004"} | category_e | logs
     assert {c for c, plan in plans.items() if plan.kind != "pending"} == hard
     assert {plans[c] for c in hard} == {MarkPlan("hard", None)}
+    # Re-derived from the suite's own run after PR 7 and PR 8 (2026-11-23).
     assert Counter(plan.reason for plan in plans.values()) == {
-        # Every agent-path case and, since PR 8, every answer-path case and b-007, b-008: the
-        # red-flag screen (H1) runs first on both routes (80 + 26 + 2, counted 2026-11-23).
-        "pending:H1": 108,
-        "pending:PR 7": 5,
+        # Every agent-path, document and answer-path case, and b-007, b-008: the red-flag screen
+        # (H1) runs first on every route (80 + 5 + 26 + 2, counted 2026-11-23 after the merge).
+        "pending:H1": 113,
         None: 26,  # 18 E + 5 F logs + k-001, k-002, k-004
     }
+    assert {plans[i].reason for i in documents} == {"pending:H1"}
     assert plans["f-002"] == MarkPlan("hard", None)  # logs: the formatter's masker, any route
     assert plans["f-006"].reason == "pending:H1"  # an echoed reply runs the agent's guards
     # kenji's PR 6 review: b-007 and b-008 run on /v1/agent (router on, a stub router) since
@@ -203,8 +209,10 @@ def runner_returning(make: Callable[[FilledCase], CaseResult]) -> Runner:
 
 
 def test_run_case_raises_pending_before_running_anything_without_a_runner() -> None:
+    # A path with no runner is pending on its frontier PR before anything runs (a document case
+    # without PR 7's runner, an empty registry here).
     with pytest.raises(PendingHandWrite) as pending:
-        run_case(CASES["d-001"], "hard", ENV)  # documents: PR 7 registers their runner
+        run_case(CASES["d-001"], "hard", ENV, runners={}, probes=ALL_WRITTEN)
 
     assert pending.value.reason == "pending:PR 7"
 
@@ -299,9 +307,7 @@ def test_a_runner_gets_the_filled_case_and_its_result_is_scored() -> None:
 
 def test_a_path_registers_once() -> None:
     runner = runner_returning(lambda f: CaseResult(case_id=f.case.id, outcome="allowed"))
-    try:
-        register(CasePath.DOCUMENT, runner)
-        with pytest.raises(ValueError, match="already has a runner"):
-            register(CasePath.DOCUMENT, runner)
-    finally:
-        RUNNERS.pop(CasePath.DOCUMENT, None)
+
+    with pytest.raises(ValueError, match="already has a runner"):
+        register(CasePath.DOCUMENT, runner)  # PR 7 registered it
+    assert RUNNERS[CasePath.DOCUMENT] is run_document

@@ -19,18 +19,21 @@ import pytest
 from _pytest.mark.structures import Mark
 
 from scripts.redteam_gate import (
+    DEFAULT_GRADUATED,
     FINAL_PENDING,
     PENDING_REASONS,
     DatasetError,
     gate_problems,
+    graduate,
     main,
     read_frozen,
+    read_graduated,
     read_report,
 )
 from tests.redteam import conftest as redteam_conftest
 from tests.redteam.marks import mark_problems, redteam_param
 from tests.redteam.suite import CASES as SUITE
-from vectapilot_api.redteam import plan
+from vectapilot_api.redteam import graduated, plan
 from vectapilot_api.redteam.scoring import ExpectationMiss, PendingHandWrite
 
 TESTS: Final = Path(__file__).resolve().parent
@@ -338,6 +341,116 @@ def test_final_lists_the_cases_not_measured_through_the_real_loop(
 def test_the_gates_closed_lists_are_the_plans() -> None:
     assert PENDING_REASONS == plan.PENDING_REASONS
     assert FINAL_PENDING == plan.FINAL_PENDING
+
+
+# ── Graduated known gaps (decided 2026-11-21, shesha) ────────────────────────────────────────
+
+VERSION: Final = "v-test"
+
+
+def graduating(tmp_path: Path, ids: object, *, version: str = VERSION) -> tuple[Path, Path]:
+    """A TEST-ONLY frozen version named `VERSION` and a graduated list giving `version` `ids`."""
+    root = write_frozen(tmp_path / "ds")
+    manifest = json.loads((root / "manifest.json").read_text("utf-8"))
+    (root / "manifest.json").write_text(json.dumps(manifest | {"version": VERSION}), "utf-8")
+    listed = tmp_path / "graduated.json"
+    listed.write_text(json.dumps({"versions": {version: ids}}), "utf-8")
+    return root, listed
+
+
+def gate(tmp_path: Path, xml: str, root: Path, listed: Path) -> int:
+    report = tmp_path / "pytest.xml"
+    report.write_text(xml, "utf-8")
+    return main([str(report), "--dataset", str(root), "--graduated", str(listed)])
+
+
+A_009_PASSED: Final = GOOD.replace(
+    junit_case("a-009", xfail("known_gap:a-009")), junit_case("a-009")
+)
+
+
+def test_a_graduated_known_gap_counts_as_hard_and_must_pass(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, listed = graduating(tmp_path, ["a-009"])
+
+    assert gate(tmp_path, A_009_PASSED, root, listed) == 0
+    assert capsys.readouterr().out.startswith(
+        "redteam gate: 2 hard passed; 0 known gaps still failing as listed;"
+    )
+    failed = GOOD.replace(xfail("known_gap:a-009"), '<failure message="x" />')
+    assert gate(tmp_path, failed, root, listed) == 1
+    assert "redteam gate: a-009: failure" in capsys.readouterr().err
+    assert gate(tmp_path, GOOD, root, listed) == 1  # still xfailed as a known gap
+    assert "a-009: graduated to hard, but xfailed as a known gap" in capsys.readouterr().err
+    pending = GOOD.replace("known_gap:a-009", "pending:H1")  # H1 still a stub: as any hard case
+    assert gate(tmp_path, pending, root, listed) == 0
+
+
+def test_a_known_gap_that_passes_and_is_not_graduated_still_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for root, listed in (
+        graduating(tmp_path / "none", []),
+        graduating(tmp_path / "other version", ["a-009"], version="v-other"),
+    ):
+        assert gate(tmp_path, A_009_PASSED, root, listed) == 1
+        assert "a-009: passed, but labelled known_gap (a mark is missing)" in (
+            capsys.readouterr().err
+        )
+        assert gate(tmp_path, GOOD, root, listed) == 0
+
+
+@pytest.mark.parametrize(
+    ("ids", "expected"),
+    [
+        (["a-001"], "a-001: graduated, but not a frozen known_gap case"),  # hard already
+        (["l-007"], "l-007: graduated, but not a frozen known_gap case"),  # soft: a move sideways
+        (["b-001"], "b-001: graduated, but not a frozen known_gap case"),  # not a frozen case
+    ],
+)
+def test_only_a_frozen_known_gap_can_graduate(
+    tmp_path: Path, ids: list[str], expected: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, listed = graduating(tmp_path, ids)
+
+    assert gate(tmp_path, GOOD, root, listed) == 1
+    assert f"redteam gate: {expected}" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["{", json.dumps({"v": 1}), json.dumps({"versions": {VERSION: ["A-9"]}}), "missing"],
+)
+def test_an_unreadable_or_malformed_graduated_list_fails_closed(
+    tmp_path: Path, content: str
+) -> None:
+    root, listed = graduating(tmp_path, [])
+    if content == "missing":
+        listed.unlink()
+    else:
+        listed.write_text(content, "utf-8")
+
+    assert gate(tmp_path, GOOD, root, listed) == 1
+    with pytest.raises(DatasetError):
+        read_graduated(listed, VERSION)
+    twice = tmp_path / "twice.json"
+    twice.write_text(json.dumps({"versions": {VERSION: ["a-009", "a-009"]}}), "utf-8")
+    with pytest.raises(DatasetError, match="twice"):
+        read_graduated(twice, VERSION)
+
+
+def test_the_gate_and_the_case_marks_read_one_graduated_list() -> None:
+    # One file, two readers: the gate by path (it imports nothing from the project), the marks
+    # through `redteam.graduated`. The frozen dataset is unchanged: both are known gaps there.
+    assert DEFAULT_GRADUATED == graduated.GRADUATED_FILE
+    real = read_graduated(DEFAULT_GRADUATED, "v0.1")
+    assert real == graduated.graduated_ids("v0.1") == {"g-015", "g-030"}
+    frozen = graduate(read_frozen(REAL), real)
+    assert (frozen.version, frozen.graduation) == ("v0.1", ())
+    assert {frozen.labels[i] for i in real} == {"known_gap"}
+    assert {frozen.label(i) for i in real} == {"hard"}
+    assert read_graduated(DEFAULT_GRADUATED, "v9.9") == frozenset()
 
 
 # ── One mark per case: the helper, the collection check, the scan ────────────────────────────

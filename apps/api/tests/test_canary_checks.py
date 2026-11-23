@@ -362,11 +362,12 @@ def test_every_search_leg_also_runs_on_the_owners_connection() -> None:
     # with its own business clause, so it also runs where RLS cannot help (M3 PR 4 added
     # hybrid_search: both legs' clauses, through the fusion).
     # M5 PR 2 added the tool paths: every tool statement's own business clause, the same way.
+    # M7 PR 7 added the KB scan (`guards scan`): its statement's own business clause.
     legs = {name for name in READ_PATHS if name != "sql" and not API_ROUTE.match(name)}
     assert (
         legs
         == OWNER_CONNECTION_PATHS.keys()
-        == {"vector_search", "text_search", "hybrid_search", *TOOL_PATHS}
+        == {"vector_search", "text_search", "hybrid_search", *TOOL_PATHS, "guards scan"}
     )
     assert set(TOOL_PATHS) == {
         "tool check_slots",

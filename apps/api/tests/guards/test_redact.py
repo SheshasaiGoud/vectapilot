@@ -45,6 +45,7 @@ from vectapilot_api.gateway.types import SLUG_PATTERN, BusinessId, CallRecord
 from vectapilot_api.guards import redact
 from vectapilot_api.guards.locales import MASK_CAP
 from vectapilot_api.guards.normalize import clean
+from vectapilot_api.guards.pii import SQUEEZED_OUT
 from vectapilot_api.guards.redact import (
     EXCEPTION_LINES,
     FIELD_CAP,
@@ -62,6 +63,7 @@ from vectapilot_api.guards.redact import (
     log_masker,
     route_template,
     safe_cut,
+    squeezed_out,
 )
 from vectapilot_api.guards.types import GUARD_RECORD
 from vectapilot_api.log import LOG_MASKING, DropQueryString, JsonFormatter, configure_logging
@@ -499,9 +501,8 @@ class Recording:
 def test_the_cut_reads_the_cleaned_text_the_masker_masks(invisible: str) -> None:
     # diego's PR 3 review: in "99999<ZW> <ZW>99999" the raw space has no digit beside it, but
     # `clean` drops the invisible characters and the masker would see "99999 99999" cut after
-    # its first half. Cleaned first, that space is between digits: never a place to cut. (ZWJ
-    # and ZWNJ survive `clean`. Since H2, its squeezed view masks digits joined by them, but this
-    # cut does not look through them yet: an open item recorded in H2's PR.)
+    # its first half. Cleaned first, that space is between digits: never a place to cut. (ZWJ,
+    # ZWNJ and the rest of `pii.SQUEEZED_OUT` survive `clean`: the next test.)
     value = f"99999{invisible} {invisible}99999"
     for length in range(FIELD_CAP - 16, FIELD_CAP - 2):  # the cap falls across the value
         recording = Recording()
@@ -509,6 +510,53 @@ def test_the_cut_reads_the_cleaned_text_the_masker_masks(invisible: str) -> None
         [given] = recording.seen[1:]  # [0] is the message
         assert "9" not in given, length
         assert given == "a" * length
+
+
+SQUEEZED: Final = sorted(SQUEEZED_OUT)
+"""ZWNJ, ZWJ, VS15, VS16 and the keycap mark U+20E3: `clean` keeps them, H2's squeezed view
+leaves them out (`pii.SQUEEZED_OUT`)."""
+
+
+@pytest.mark.parametrize("squeezed", SQUEEZED, ids=[f"U+{ord(c):04X}" for c in SQUEEZED])
+def test_a_field_over_the_cap_keeps_no_digit_joined_across_a_squeezed_space(
+    squeezed: str,
+) -> None:
+    # The H2 follow-up (decided 2026-11-20, shesha; `docs/learning/m7-masking.md` §5): to H2's
+    # squeezed view, "99999<ZWJ> <ZWJ>99999" is one grouped number, but a cut that compared the
+    # ZWJs on each side of the space took it as safe and kept "99999<ZWJ>" alone, too short for
+    # any pattern: five digits written (40 of these 70 lines before the fix). Now the cut
+    # compares the nearest character the squeezed view keeps, through the set the masker reads.
+    masker = log_masker()
+    assert masker is not None  # H2 is written
+    formatter = RedactingJsonFormatter(masker)
+    value = f"99999{squeezed} {squeezed}99999"
+    for length in range(FIELD_CAP - 16, FIELD_CAP - 2):  # the cap falls across the value
+        note = loads(formatter.format(make(note=f"{'a' * length} b {value} tail")))["note"]
+        assert not any(c.isdigit() for c in note), length
+        assert note == f"{'a' * length} {TRUNCATED}"
+
+
+@pytest.mark.parametrize(
+    ("text", "cap", "cut"),
+    [
+        ("ab c9\u200d d", 6, "ab"),  # a digit behind a ZWJ, before the space
+        ("ab c \u200c\u200d9d", 5, "ab"),  # a digit behind two, after it
+        ("ab c \ufe0f+d", 5, "ab"),  # a plus behind VS16
+        ("ab c\u20e3 \u20e3\u096fd", 6, "ab"),  # a Devanagari digit, through the view
+        ("ab c\u200d \u200dd", 6, "ab c\u200d"),  # letters both sides: a safe place
+        ("ab \u200d\u200d", 4, "ab"),  # only squeezed characters to the end: nothing numeric
+        ("\u200d \u200d9", 1, None),  # only squeezed characters back to the start, a digit ahead
+    ],
+)
+def test_safe_cut_looks_past_squeezed_characters_on_both_sides(
+    text: str, cap: int, cut: str | None
+) -> None:
+    assert safe_cut(text, cap) == cut
+
+
+def test_the_cut_and_the_masker_read_one_squeezed_set() -> None:
+    # One predicate: widening `pii.SQUEEZED_OUT` moves the cut with the masker.
+    assert {c for c in map(chr, range(0x110000)) if squeezed_out(c)} == SQUEEZED_OUT
 
 
 def test_a_field_longer_than_the_raw_cap_never_keeps_its_cleaned_end() -> None:

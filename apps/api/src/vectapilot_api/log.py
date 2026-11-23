@@ -62,8 +62,9 @@ def silence_untrusted_parsers() -> None:
 
 
 LOG_MASKING: Final = "log_masking"
-"""The startup warning of `configure_logging(..., redact=True)` while H2 is the stub: free text in
-the API's log lines is not masked yet (`guards/redact.py`, the interim). Fixed codes only."""
+"""The startup warning of `configure_logging(..., redact=True)` if its probe finds H2 a stub (not
+since H2 was written, 2026-11-20): free text in the API's log lines is then not masked
+(`guards/redact.py`, the interim). Fixed codes only."""
 
 
 def configure_logging(level: str, *, redact: bool = False) -> None:

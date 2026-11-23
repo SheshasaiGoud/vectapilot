@@ -41,6 +41,7 @@ from vectapilot_api.redteam.cases import Case, Label
 from vectapilot_api.redteam.checks import RedteamDataset, check_dataset, generator_of
 from vectapilot_api.redteam.files import DEFAULT_DATASET, read_dataset
 from vectapilot_api.redteam.freeze import file_sha256
+from vectapilot_api.redteam.graduated import GraduationError, scored_labels
 from vectapilot_api.redteam.harness import RUNNERS, RunEnv, Runner, run_case
 from vectapilot_api.redteam.pii import GENERATOR_VERSION
 from vectapilot_api.redteam.plan import (
@@ -221,7 +222,7 @@ def run_dry(
     out.mkdir(parents=True, exist_ok=False)
     env = RunEnv(generator_of(dataset), "in_process", dataset_dir=dataset_dir)
     end_to_end = end_to_end_ids(dataset.cases)
-    labels = dataset.gates.labels
+    labels = scored_labels(dataset.gates.labels, dataset.manifest.version)  # graduated: hard
     lines = [
         run_one(case, labels[case.id], env, end_to_end, runners=runners, probes=probes)
         for case in sorted(dataset.cases, key=lambda c: c.id)
@@ -276,7 +277,7 @@ def run_command(
     dataset_dir = dataset or io.git().root / DEFAULT_DATASET
     try:
         out = run_dry(dataset_dir, io=io, corpus_dir=corpus)
-    except (DatasetError, CorpusError) as error:
+    except (DatasetError, CorpusError, GraduationError) as error:
         raise Refused(str(error)) from None
     print(f"dry run complete. Written to {out} (DRY RUN: git ignores it).")
     return 0

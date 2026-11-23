@@ -65,6 +65,7 @@ from tests.extraction.standins import (
     reply,
     with_changes,
 )
+from tests.guards.agent_helpers import LookupMatcher
 from tests.guards.helpers import sample_guard_dir, use_answer_key_selftest
 from tests.kb.test_routes import PARAMS as KB_PARAMS
 from tests.kb.test_routes import build_kb
@@ -476,7 +477,9 @@ def extractions(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch)
     )
     provider = FakeProvider([reply(referral(), answer)])
     store = ExtractionStore(error=RuntimeError(FORCED) if kind == "forced" else None)
-    app = create_app(settings, limiter=FakeLimiter())  # M7 PR 6: its limits, on the fake
+    # M7 PR 6-7: its limits on the fake, then the document screen on a no-hit stand-in matcher
+    # (not H1), so the success path reaches the store and the screen's `guard` record is logged.
+    app = create_app(settings, limiter=FakeLimiter(), matcher=LookupMatcher())
 
     def started(app: FastAPI) -> None:
         app.state.extraction_service = ExtractionService(

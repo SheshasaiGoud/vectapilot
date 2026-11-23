@@ -999,6 +999,87 @@ human steps are not M7's.
     urgent.
   - A clean document's response is unchanged except an empty `document_flags`.
   - The scan prints no chunk text; the canary covers the scan per business.
+- **Step B1 built (zara, 2026-11-21): the document screen.** [proposal]s for review:
+  - `document_flags` is a list of `{page, code, urgent}`, one per page and code, in page then
+    code order; `urgent` is true for both red-flag codes (a document route has no hand-off, and
+    marking `professional_judgement` urgent only tightens). It is set only while the guard is on
+    (`response_model_exclude_unset`): absent while off, so M6's response keeps its bytes, and an
+    empty list means "screened, nothing found", never "not screened".
+  - The 503 is `document_scan_unavailable` (`{detail, error}`, as `limits_unavailable`). A cap
+    decides `input_cap` (finding `over_cap`); any other failure `guard_error`. No guard folder
+    (local, test and ci only) is that 503 before the limiter and the body read
+    (`guards_not_configured`): nothing may be stored unscreened.
+  - One `guard` record per upload: `RouteLimits.check` is `admit` without its record, and the
+    screen writes the request's record from the route's `finally` with the limits folded in (a
+    document refused after admission, 413/415/422, still gets it, decided `none`).
+  - The page text comes from `extraction.text.read_pages` (the text the model was sent, E12's
+    limits again); a second pypdf pass walks the operators (`guards.hidden`). Hidden: render
+    modes 3 and 7 (and any mode outside 0-7); white at 0.95 per component or more (CMYK inks
+    0.05 or less) in the device spaces or an ICC-based or calibrated space by its component
+    count, the stroke colour for stroked modes; a run whose start point is outside the crop box.
+    Form XObjects are walked to `FORM_DEPTH_MAX` levels, deeper counts as hidden; 200,000
+    operations per page, forms included, else `OverCap` (fail closed). `document:hidden_text`
+    counts pages, not runs.
+  - The extraction write canary (`tests/canary/write_paths.py`) runs the screen on a no-hit
+    stand-in matcher instead of a strict xfail on `match_terms`, so the write's isolation stays
+    checked while H1 is a stub (H1 is pure: it cannot move a write).
+- **Step B2 built (zara, 2026-11-21): the KB scan, the document runner, graduation and two
+  follow-ups.**
+  - **Graduated known gaps** (PR 6's decision, done here): `redteam/graduated.json` lists g-015
+    and g-030 for v0.1; `redteam/graduated.py` (the case marks, `redteam run`, the dry run's
+    summary) and `scripts/redteam_gate.py` (by path, `--graduated`) read the one file. A
+    graduated case is scored as hard (`pending:H1` while H1 is a stub); the gate counts it hard
+    and fails when it fails or is xfailed as a known gap; an id that is not a frozen `known_gap`
+    case, or an unreadable list, fails closed. A `known_gap` case that passes and is not
+    graduated still fails the gate. The frozen dataset, `gates.json` included, is unchanged.
+  - **The document runner** (`redteam/document.py`, PDFs built at run time by
+    `redteam/pdf.py`): d-002 to d-005 in process through the route's guard object
+    (`admit`, `scan`, `finish`, an allowing `FakeLimiter`); d-001 through the served app's real
+    route, whose stored extraction the served suite deletes as the owner afterwards. All five
+    are `pending:H1` while H1 is a stub; d-005 (forced review) stays a known gap until PR 11.
+    Counts (mark plan): `pending:H1` 80 to 85, `pending:PR 7` 5 to 0, `pending:PR 8` 28, hard
+    26; labels scored hard 112 to 114, known gaps 13 to 11.
+  - **`redact.safe_cut`** compares the nearest character the squeezed view keeps on each side of
+    the space (`redact.squeezed_out` over `pii.SQUEEZED_OUT`; `guards/pii.py` unchanged): the
+    masking guide's §5 follow-up, decided 2026-11-20.
+  - [proposal]s: the scan screens approved chunks of both audiences with the agent's chunk screen
+    (`screens.screen_chunk`: `over_cap`, `injection:phrase`, `injection:invisible`; red flags are
+    not listed, a business's own guidance holds them); it runs G14's self-test before any
+    connection, so while H1 is a stub it is refused and lists nothing; its statement names the
+    business as well as RLS; output is a count line, then `<chunk id> <codes>`, exit 0 scanned,
+    1 refused or failed, 2 bad arguments.
+- **Review applied (ananya-rag's review and a mutation check, 2026-11-23).**
+  - `guards.hidden` parses each Form XObject once per page: re-parsing it on every `Do` made a
+    1 KB (Flate) upload hold the one reading thread for minutes. On ananya's input (a form with
+    a 2,000-number dash array drawn 20,000 times), the walk went from 49 s to 0.13 s. At the cap's
+    worst case (99,997 draws) it takes 0.54 s, and past the cap it raises `OverCap`. The cap
+    bounds the walk; pypdf's decode limits bound the parse.
+  - The walk also reads `T*`, the white initial colour of an ICC-based space with four
+    components, and an ExtGState's `/ca` and `/CA`: an alpha of 0.05 or less counts as unseen
+    (`NEAR_CLEAR`, [proposal]).
+  - Known gaps added and pinned: a `TJ` displacement or large `Tc`/`Tw` spacing, optional content
+    that is off by default, and a soft mask or blend mode.
+  - Known false positives, documented so the flag reads honestly to staff: white text on a dark
+    fill, a searchable scan's `3 Tr` OCR layer, and mode 7 text used as a clip. Whether to
+    suppress any of them is an open question for shesha.
+  - A scan failure now also writes M6's `extraction_not_stored` line (code
+    `document_scan_unavailable`, error `DocumentScanFailed`).
+  - 23 probe tests kill the mutants that survived. Two record fields are pinned: hidden text is
+    counted per page, and durations add up across pages.
+- **Decided 2026-11-23 (shesha, each as recommended):**
+  - **A page in a `not_covered` script** is flagged `not_covered_language` (not urgent; D3 (i)):
+    the screens could not read it, so an empty `document_flags` never claims it was screened.
+    Added after the review (`guards.document`, two unit tests). A script no business lists stays
+    a known gap.
+  - **Hidden-text false positives** (white text on a dark fill, OCR layers, mode 7 clips) stay
+    documented noise; PR 11 measures them on M6's 24 synthetic documents before any suppression.
+  - **Every red-flag code in a document is `urgent`,** `professional_judgement` included (the
+    route has no hand-off; it only tightens). Page numbers count as codes.
+  - **A PDF the walker cannot read, or over 200,000 operations on a page,** is the 503, never
+    stored (G3).
+  - **The KB scan** refuses while H1 is a stub and never lists red flags (a business's own
+    guidance holds them on purpose). `NEAR_CLEAR` (alpha 0.05 or less) stands.
+  - **d-005** (forced review) stays a known gap until PR 11.
 
 ## PR 8 — `m7/answer-guard` (zara; ananya and noah review) · M · after PR 6
 - **Settings accepts `guard_answer = "on"` again.** PR 1 refuses it (`GUARD_ANSWER_NOT_WIRED`,

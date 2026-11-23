@@ -49,6 +49,7 @@ from vectapilot_api.guards.budget import (
     build_budgeted_gateway,
 )
 from vectapilot_api.guards.config import load_guard_dir
+from vectapilot_api.guards.document import ExtractionGuard
 from vectapilot_api.guards.executor import screening_profiles
 from vectapilot_api.guards.limits import GuardRefused, Limiter, LimitPolicy, RedisLimiter
 from vectapilot_api.guards.match import match_terms
@@ -198,8 +199,10 @@ def create_app(
     and stores a withheld one already expired; each profile's executor screens its tool results'
     free text (`guards.executor`); and a read-only `AgentService`, equal in every constructor
     argument but its profiles, serves messages with an injection signal. The confirm route and
-    `/v1/extractions` check their limits first (`guards.routes.RouteLimits`, G15). With `"off"`
-    every one of these is exactly as before M7.
+    `/v1/extractions` check their limits first (`guards.routes.RouteLimits`, G15), and
+    `/v1/extractions` screens every page's text after the extraction, before the store
+    (`guards.document.ExtractionGuard`, M7 PR 7). With `"off"` every one of these is exactly as
+    before M7.
 
     **`/v1/answer` and `/v1/kb/search` with `guard_answer = "on"`** (M7 PR 8, G11, G13): both
     routes call `AnswerGuard`, and the answer runs on a separate `AnswerService` over the
@@ -429,7 +432,7 @@ def create_app(
             app.state.agent_guard = None
             app.state.read_only_agent_service = None
             app.state.confirm_limits = None
-            app.state.extraction_limits = None
+            app.state.extraction_guard = None
             if not guarded:
                 app.state.agent_service = agent_service(
                     profiles, store=app.state.pending_actions, answers=app.state.answer_service
@@ -489,7 +492,11 @@ def create_app(
                 # G15: a 429's Retry-After stays below the action's lifetime.
                 lifetime_cap = max(1, settings.action_lifetime_seconds - 1)
                 app.state.confirm_limits = route_limits(RouteSlug.CONFIRM, lifetime_cap)
-                app.state.extraction_limits = route_limits(RouteSlug.EXTRACTION, None)
+                app.state.extraction_guard = ExtractionGuard(  # M7 PR 6-7: limits, then the scan
+                    limits=route_limits(RouteSlug.EXTRACTION, None),
+                    config=guards,
+                    matcher=screen_matcher,
+                )
             # M6 PR 3: `POST /v1/extractions` (ADR 0017 decisions 3-6) on the extraction's own
             # gateway (the fake provider, E11), with H1's `route_fields` (fail closed until it is
             # written) and the store under RLS. PDFs are read in the app's own reading thread, so
@@ -498,6 +505,7 @@ def create_app(
                 FieldExtractor(extraction_gateway), reader=extraction_reader
             )
             app.state.extraction_store = PostgresExtractionStore(database)
+            app.state.extraction_reader = extraction_reader  # M7 PR 7: the scan reads here too
             logger.info(
                 "startup", extra={"environment": settings.environment, "version": __version__}
             )

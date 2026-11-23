@@ -9,12 +9,16 @@ documents only until Q4c and M7 (ADR 0017 decision 6).
 **Order of checks:** the business (400) → the query (422, echoing nothing) → the kind (404: an
 unknown kind and one the business does not enable are the same answer, E8; with no extraction
 folder configured, every kind is unknown) → the format (415: `Content-Type` must be
-`application/pdf`) → with `guard_routes = "on"` (the default), M7's limits (`guards.routes`: the
-business's window, before the body is read, so a limited caller never costs a body read or a PDF
-parse; a 429 with `Retry-After`, or a typed 503 `limits_unavailable` when Redis is down, nothing
-read, extracted or stored) → the size (413, while the body streams in) → extract (PR 2's service:
-E12's page and text limits are 413s, a body that is no PDF a 415, an encrypted or unreadable one a
-422, each before any model call and with nothing stored) → store in one transaction → 201.
+`application/pdf`) → with `guard_routes = "on"` (the default), M7's guard (`guards.document`):
+no guard folder is a typed 503 `document_scan_unavailable`, then the limits (the business's
+window, before the body is read, so a limited caller never costs a body read or a PDF parse; a 429
+with `Retry-After`, or a typed 503 `limits_unavailable` when Redis is down, nothing read,
+extracted or stored) → the size (413, while the body streams in) → extract (PR 2's service: E12's
+page and text limits are 413s, a body that is no PDF a 415, an encrypted or unreadable one a 422,
+each before any model call and with nothing stored) → with the guard on, the document screen
+(M7 PR 7, G13: after the extraction, before the store; the bytes read again in the app's reading
+thread, every page's text through the red-flag and injection screens, hidden text as a signal) →
+store in one transaction → 201. With `guard_routes = "off"` the route is M6's, byte for byte.
 
 **The model is always the fake provider in M6 (E11).** `create_app` builds the extraction's
 gateway on a `FakeProvider` whatever Settings say, and refuses any other provider; unscripted, the
@@ -25,11 +29,15 @@ raises until shesha writes it: until then every extraction is all-review (`inter
 **Responses**, each from the service step on with `X-Trace-Id` (the trace id of the `extraction`
 record and the stored row):
 - 201 with the stored id, status, failure, pages, expiry and every field (status, level, reasons,
-  value, span, page). Values and spans are untrusted data (E7): escape them in any UI.
+  value, span, page). Values and spans are untrusted data (E7): escape them in any UI. With the
+  guard on, also `document_flags` (codes and page numbers, never stored; absent while off).
 - 413, 415 or 422 for a refused document (`REFUSALS`), nothing stored or sent.
 - 503 `database_unavailable` when storing fails (`SQLAlchemyError`, `OSError`): nothing is stored,
   only the exception's type is logged (`extraction_not_stored`), and the error is raised outside
   `except`, so nothing (no row values a database message may hold) is chained to it (E9).
+- 503 `document_scan_unavailable` when the document screen cannot run (G3: H1's stub, a guard
+  that raises, hostile bytes, a cap): nothing is stored, `extraction_not_stored` says so (error
+  `DocumentScanFailed`), and the `guard` record holds the cause's class name.
 - 503 `extraction_timeout` past `REQUEST_TIMEOUT_S`: send the document again (each upload is its
   own extraction; one that was cut off while committing may still be stored, and expires as usual).
   A PDF still being read keeps its reading thread until pypdf returns (`REQUEST_TIMEOUT_S`).
@@ -39,7 +47,8 @@ Anything else is a bug and propagates (500).
 import asyncio
 import hashlib
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from concurrent.futures import Executor
 from datetime import datetime
 from typing import Annotated, Final
 from uuid import UUID
@@ -57,7 +66,14 @@ from vectapilot_api.extraction.service import ExtractionOutcome, ExtractionServi
 from vectapilot_api.extraction.store import ExtractionStore, StoredExtraction, ordered
 from vectapilot_api.extraction.text import MAX_BYTES, DocumentRefused, RefusalReason
 from vectapilot_api.gateway.types import BusinessId
-from vectapilot_api.guards.routes import RouteLimits
+from vectapilot_api.guards.document import (
+    SCAN_UNAVAILABLE,
+    SCAN_UNAVAILABLE_DETAIL,
+    DocumentFlag,
+    DocumentScanFailed,
+    DocumentScreen,
+    ExtractionGuard,
+)
 from vectapilot_api.kb.router import read_body
 from vectapilot_api.kb.types import KbError
 from vectapilot_api.retrieval.router import TRACE_HEADER
@@ -92,6 +108,12 @@ STORE_FAILED: Final = (
     "database_unavailable",
     DATABASE_UNAVAILABLE,
 )
+SCAN_FAILED: Final = (
+    status.HTTP_503_SERVICE_UNAVAILABLE,
+    SCAN_UNAVAILABLE,
+    SCAN_UNAVAILABLE_DETAIL,
+)
+"""The document screen could not run (M7 PR 7, G3): nothing stored."""
 TIMED_OUT: Final = (
     status.HTTP_503_SERVICE_UNAVAILABLE,
     "extraction_timeout",
@@ -146,10 +168,20 @@ class ExtractionResponse(BaseModel):
     expires_at: datetime
     """Hidden from then on, and deleted by the next purge (E10)."""
     fields: list[ExtractedField]
+    document_flags: list[DocumentFlag] | None = None
+    """M7 PR 7 (G7): what the document screen flagged, as codes and page numbers (a red flag is
+    `urgent`), never stored. Set only while the route's guard is on (an empty list: screened,
+    nothing found); while it is off the key is absent (the route's `response_model_exclude_unset`),
+    so M6's response keeps its bytes."""
 
     @classmethod
-    def of(cls, outcome: ExtractionOutcome, stored: StoredExtraction) -> "ExtractionResponse":
-        return cls(
+    def of(
+        cls,
+        outcome: ExtractionOutcome,
+        stored: StoredExtraction,
+        document_flags: Sequence[DocumentFlag] | None = None,
+    ) -> "ExtractionResponse":
+        response = cls(
             id=stored.id,
             kind=outcome.kind,
             status=outcome.status,
@@ -170,6 +202,9 @@ class ExtractionResponse(BaseModel):
                 for result in outcome.fields
             ],
         )
+        if document_flags is not None:  # set (so serialised) only when the screen ran
+            response.document_flags = list(document_flags)
+        return response
 
 
 def get_extraction_service(request: Request) -> ExtractionService:
@@ -182,11 +217,11 @@ def get_extraction_store(request: Request) -> ExtractionStore:
     return store
 
 
-def get_extraction_limits(request: Request) -> RouteLimits | None:
-    """The route's limits (M7 PR 6, G13: an object the route calls, never a screening
-    dependency); None while `guard_routes` is off."""
-    limits: RouteLimits | None = request.app.state.extraction_limits
-    return limits
+def get_extraction_guard(request: Request) -> ExtractionGuard | None:
+    """The route's guard (M7 PR 6-7, G13: an object the route calls, never a screening
+    dependency): its limits and its document screen; None while `guard_routes` is off."""
+    guard: ExtractionGuard | None = request.app.state.extraction_guard
+    return guard
 
 
 def find_kind(request: Request, business_id: str, kind: str) -> KindConfig:
@@ -226,6 +261,7 @@ EXTRACTION_RESPONSES: Final[dict[int | str, dict[str, object]]] = {
     "/extractions",
     status_code=status.HTTP_201_CREATED,
     response_model=ExtractionResponse,
+    response_model_exclude_unset=True,  # `document_flags` only when set (ExtractionResponse)
     responses=EXTRACTION_RESPONSES,
 )
 async def create_extraction(
@@ -235,24 +271,48 @@ async def create_extraction(
     params: Annotated[ExtractionParams, Query()],
     service: Annotated[ExtractionService, Depends(get_extraction_service)],
     store: Annotated[ExtractionStore, Depends(get_extraction_store)],
-    limits: Annotated[RouteLimits | None, Depends(get_extraction_limits)],
+    guard: Annotated[ExtractionGuard | None, Depends(get_extraction_guard)],
 ) -> ExtractionResponse | JSONResponse:
     """Extract one PDF (the raw body) as the business's `kind`, store the result and return it:
     every field accepted, in review or absent, with its level and reasons (module docstring)."""
     kind = find_kind(request, business_id, params.kind)
     require_pdf(request.headers.get("content-type"))
     trace_id: str | None = None
-    if limits is not None:  # M7 PR 6: before the body is read (module docstring)
+    screen: DocumentScreen | None = None
+    if guard is not None:  # M7 PR 6-7: before the body is read (module docstring)
         trace_id = new_trace_id()  # the guard record's, then the extraction's
-        limited = await limits.admit(business_id, trace_id=trace_id)
-        if limited is not None:
-            limited.headers[TRACE_HEADER] = trace_id
-            return limited
+        admitted = await guard.admit(business_id, trace_id=trace_id)
+        if isinstance(admitted, JSONResponse):
+            admitted.headers[TRACE_HEADER] = trace_id
+            return admitted
+        screen = admitted
+    try:
+        return await extract_and_store(
+            request, response, business_id, kind, service, store, trace_id, screen
+        )
+    finally:
+        if screen is not None:  # the request's one `guard` record, whatever happened
+            screen.finish()
+
+
+async def extract_and_store(
+    request: Request,
+    response: Response,
+    business_id: BusinessId,
+    kind: KindConfig,
+    service: ExtractionService,
+    store: ExtractionStore,
+    trace_id: str | None,
+    screen: DocumentScreen | None,
+) -> ExtractionResponse:
+    """The body, the extraction, the document screen (M7 PR 7, when `screen` is given) and the
+    store, in the module docstring's order. Raises the typed errors."""
     data = await read_body(request, MAX_BYTES)
     if trace_id is None:
         trace_id = new_trace_id()  # before the service: a typed error carries it too
     file_sha256 = hashlib.sha256(data).hexdigest()
     outcome: ExtractionOutcome | None = None
+    flags: tuple[DocumentFlag, ...] | None = None
     stored: StoredExtraction | None = None
     failure: tuple[int, str, str] | None = None
     error = ""
@@ -260,6 +320,9 @@ async def create_extraction(
     try:
         async with limit:
             outcome = await service.extract(kind, data, business_id=business_id, trace_id=trace_id)
+            if screen is not None:  # M7 PR 7 (G13): after the extraction, before the store
+                reader: Executor | None = request.app.state.extraction_reader
+                flags = await screen.scan(data, reader=reader)
             stored = await store.save(
                 outcome,
                 business_id=business_id,
@@ -269,6 +332,8 @@ async def create_extraction(
             )
     except DocumentRefused as refused:  # E12 and unreadable bodies: nothing stored or sent
         failure = REFUSALS[refused.reason]
+    except DocumentScanFailed:  # G3: nothing stored; the guard record holds the cause's class
+        failure, error = SCAN_FAILED, DocumentScanFailed.__name__
     except TimeoutError as caught:  # before OSError: TimeoutError is one
         if not limit.expired():
             failure, error = STORE_FAILED, type(caught).__name__  # the database's own timeout
@@ -294,4 +359,4 @@ async def create_extraction(
     if outcome is None or stored is None:  # pragma: no cover (both are set without a failure)
         raise RuntimeError("an extraction finished without an outcome")
     response.headers[TRACE_HEADER] = trace_id
-    return ExtractionResponse.of(outcome, stored)
+    return ExtractionResponse.of(outcome, stored, flags)

@@ -22,7 +22,7 @@ object or route its attack goes through. A later PR registers a runner for a pat
   PR 6, with the route stand-ins and database fixtures its runner shares with the agent path.
   The formatter itself is built in PR 3 (it masks since H2 was written, 2026-11-20,
   `guards/redact.py`);
-- `document` (D, `/v1/extractions`' page screens): PR 7;
+- `document` (D, `/v1/extractions`' page screens, `redteam.document`): PR 7;
 - `answer` (`/v1/answer` with `guard_answer = on` in tests, `redteam.answer`): PR 8. No frozen
   case of this path is on `/v1/kb/search` (only k-001, the search leg, and f-003, a log case).
 
