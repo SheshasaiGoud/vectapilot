@@ -39,7 +39,8 @@ NO_RULES: Final = "no data/safety yet"
 ANSWER_NOTE: Final = (
     "Answer-route cases run with guard_answer = on (they test the code). The deployed default is"
     " off until PR 10, and retrieved-chunk screening has no default-on path until PR 10 or M4's"
-    " router."
+    " router. b-007 and b-008 run on /v1/agent with agent_router = on and a stub router (every"
+    " message to RAG), not M4's router."
 )
 INDEPENDENCE_NOTE: Final = (
     "The cases were frozen before PR 4's term files existed, but the term author can read them:"

@@ -1098,10 +1098,129 @@ human steps are not M7's.
   `/v1/agent` with `agent_router = on` and a stub router (the agent's own `AnswerService` over the
   chunk screen), never through `/v1/answer`. Registering the `answer` path ends their
   `pending:PR 8` (`redteam.plan.waiting_on`), so the agent runner must take them in the same PR.
-- **The byte-identical test (G11).** Golden responses, headers and `rag_answer` and `llm_call`
-  records are recorded on the base commit for a fixed set of requests (fake provider and
-  embedder), and replayed with `guard_answer = off` under G11's normalisation, with a dead Redis
-  and a limiter that fails if called.
+- **The byte-identical test (G11).** Golden responses, headers and `rag_answer`, `llm_call` and
+  `embedding_call` records (the last added by noah's review, 2026-11-23: search's one record) are
+  recorded on the base commit for a fixed set of requests (fake provider and embedder), and
+  replayed with `guard_answer = off` under G11's normalisation, with a dead Redis and a limiter
+  that fails if called.
+- **Built, step B1 (zara, 2026-11-21; `guards/answer.py`).** The goldens
+  (`tests/answer/goldens/guard_answer_off.json`, 36 requests, 38 since the review) were recorded on
+  the untouched tree at 6572e29 before any route code changed, and re-recorded byte-identical from
+  an export of 6572e29 with the final recorder (`tests/answer/goldens.py` says how to re-record).
+  The builder's proposals, open for review:
+  - [proposal] `AnswerSafetyHandoff` carries **every** guard hand-off on `/v1/answer`, not only a
+    red flag: `reason` is one of `safety`, `not_covered_language`, `budget`, `guard_error`,
+    `guard_output`, `guards_not_configured` (each a `/v1/agent` `HandoffReason` value); `intent`
+    only for a red flag.
+  - [proposal] No budget pre-check on `/v1/answer`: G9's pre-check models loop turns, and an
+    answer's one `large` prompt is known only after retrieval, so that call's own
+    `BudgetedGateway` reservation is the control (a refusal is a `budget` hand-off).
+  - [proposal] Injection signals in the question are counted only (both routes): the answer path
+    has no write tool and no read-only variant; boundaries, the citation check and H3 stay the line.
+  - [proposal] With the guards on, the service's own errors keep M3's typed table (embedding,
+    re-index, database, model) and a bug stays a 500; the `guard` record says `none`. Only a guard's
+    failure (a seam, the budget, Redis, a stub) is a hand-off.
+  - [proposal] `/v1/kb/search` embeds the clean, masked question (G6: before every third party),
+    never screens its hits (no prompt reads them), records a red flag or an uncovered script only,
+    answers a full window with a 429 (guidance for a health business) and fails closed with typed
+    503s: `limits_unavailable` (Redis), `guard_unavailable` (a guard raised, or the input cap),
+    `guards_not_configured` (no folder, local, test and ci).
+  - [proposal] The answer text is checked against `reply`'s cap (1,500) at the route before H3, as
+    H3's rule 1 reads an answer kind: over it is `guard_error`, decided by `input_cap`. Nothing
+    bounds `/v1/answer`'s answer to 1,500 today (`large` allows 2,048 output tokens), so a valid
+    long answer would be withheld as a guard failure (ananya's review). **Precondition of PR 10**
+    (option (a), applied 2026-11-23; the cap stays shesha's to confirm): measure the longest
+    answer in M2's and M3's live dev results and record that it fits; if answers come near 1,500,
+    option (b) instead: `/v1/answer` gets its own `Surface` cap sized from `large`'s output limit,
+    with its own finding code and H3's rule-1 docstring amended for answer kinds.
+  - [proposal] H3's boundary lines on `/v1/answer` are the answer prompt's fixed text
+    (`answer/prompt.py`, read, never edited), not the agent's.
+  - [proposal] A `guard_output` hand-off is high for a health business and normal otherwise, as on
+    `/v1/agent`; a Redis failure for a question the screen never cleared (a non-health business's
+    uncovered script) keeps G3's before-the-screen priority (high).
+  - [proposal] Both routes document the 429 (with `X-Trace-Id`) in OpenAPI;
+    `tests/retrieval/test_search.py`'s documented-codes assertion gained `429`.
+  - [proposal] The guarded path's isolation is a plain integration test
+    (`tests/guards/test_answer_guard_db.py`) in this PR, not a new canary `READ_PATHS` entry, which
+    would change `tests/test_canary_checks.py`'s exact sets that PR 7 also touches. A canary
+    `READ_PATHS` entry for `/v1/answer` and `/v1/kb/search` with `guard_answer = on` is a
+    **precondition of PR 10** (ananya's review): added after PR 7 and PR 8 merge, and passing in
+    the canary gate before the switch.
+- **Built, step B2 (zara, 2026-11-21; `redteam/answer.py`, `redteam/chunks.py`).** The answer path
+  is registered (`harness.RUNNERS`), which ends b-007's and b-008's wait; the agent runner takes
+  them in process under `agent_router = on`. Counted from two dry `redteam run`s (2026-11-23, an
+  export of 6572e29 and this branch): the 28 `pending:PR 8` cases are all `pending:H1` (the
+  red-flag screen runs first on both routes). The mark plans' `pending:H1` goes from 80 to 108;
+  the dry run's from 66 to 92 in process (24 answer-path cases, b-007 and b-008), and b-001 and
+  h-009 join the not-run database cases (22 to 24). Once H1 is written, every answered
+  case on both chunk routes waits on H3's stub (`pending:H3`) and a red flag on none (a test pins
+  both). The answer pipeline is pinned to
+  `create_app`'s guarded wiring (`tests/redteam/test_answer_runner.py`), allowed to differ only in
+  the vector search's recorder and the provider. The builder's proposals, open for review:
+  - [proposal] A `guard_output` hand-off is scored `handoff` whatever its priority
+    (`redteam.agent.handoff_outcome`, both runners): the scoring rules keep `urgent_handoff` and
+    `high_handoff` for the red flags, and a withheld answer is high for a health business (above),
+    so h-009 to h-012, i-006 and i-007 (all on health businesses, `expect: handoff`) would
+    otherwise miss on a tightening. Every other hand-off keeps its priority's code (J's
+    `guard_raising` still passes `urgent_handoff`). No frozen case changes outcome on `/v1/agent`.
+  - [proposal] The chunk runner's in-process stand-ins: each fixture chunk is a hit with a fixed
+    uuid5 id per case and slug, cosine 0.9, a customer reading `public` chunks only; the scripted
+    answer cites exactly `context.cited`; a B case's poisoned chunks are the ones it does not cite.
+    `reached` (B) is the poisoned chunk among the vector search's hits before the screen
+    (`chunks.RecordingSearch`); `dropped` also needs it absent from every request the answer model
+    got (its marker id and its cleaned text).
+  - [proposal] A scripted answer the service did not show, while no guard decided, is a fixture
+    error (`chunks.AnswerNotShown`), never an `allowed` outcome, so a runner bug cannot pass an L
+    case.
+  - [proposal] The answer path's end-to-end cases (b-001, h-009) run through the served app's real
+    route with the route's two guard dependencies overridden per case (as the agent path does);
+    the served app keeps `guard_answer` off (pinned in its `Settings`, whatever the environment
+    says: noah's review), since with it on `/v1/kb/search` would hand k-001's
+    search to H1's stub (a 503) until H1 lands. Their chunks are planted rows (`served.py`,
+    `answer_chunks`), embedded under the fake embedder's vector of the question as the guarded
+    route embeds it.
+  - [proposal] B on the agent route in the database environment is refused (`RouterOffCase`): no
+    such case is a database case (b-001, on the answer route, is the chunk surface's end-to-end
+    case).
+- **Review fixes (zara, 2026-11-23; ananya-rag, noah-evals and a mutation check).**
+  - The goldens hold `embedding_call` too and one question per route with a synthetic phone
+    number (38 requests); the error codes are checked per route from `SEARCH_ERRORS` and
+    `ANSWER_ERRORS`. Re-recorded on a local clone at 6572e29 (only the recorder copied in) and
+    replayed byte-identical on this branch. The recorder now refuses any tree that is not
+    6572e29's untouched one (HEAD and tracked files, read from git), writes the full commit, and
+    records with the replay's settings (`guard_answer = off`, the dead Redis).
+  - With `guard_answer` on, the `rag_answer` record counts `hits` and `evidence` after the chunk
+    screen, while a hybrid record's `retrieval` block counts before it: the two differ by the
+    chunks dropped, which the `guard` record marks with `drop` / `injection:chunk` when the
+    response passed (it does not count them). PR 10's paired comparison reads them so (noah-evals),
+    and measures one more effect: hybrid's full-text leg also gets the masked question, so a
+    placeholder (`[PHONE]`) becomes an OR-ed lexeme (`phone`) that can pull a chunk into the fused
+    top k (the evidence gate stays cosine).
+  - Tests added: an answer citing a dropped chunk is `dont_know` (`citation_unverified`, no
+    source, H3 not asked); the chunk screen on the guarded route in hybrid mode; the runner's
+    non-200 outcome codes, `answer_record` and the 422 branches (B2's question: yes, tested);
+    and one probe per surviving mutant of the mutation check (26 of 88 survived; 2 more are
+    equivalent: the type set cannot change a priority under M4's current policy, and the chunk
+    screen's own failure re-raises through M3's service).
+  - The red-team summary states that b-007 and b-008 run with `agent_router = on` and a stub
+    router (`ANSWER_NOTE`).
+  - Follow-up for PR 6's owner (ananya's review, kept out of PR 8): `/v1/agent`'s answer kind is
+    written from the answer prompt but H3 checks it against the agent prompt's boundary lines;
+    `guards/agent.py` should pass `ANSWER_BOUNDARY_LINES` (or the union) for `OutputKind.ANSWER`,
+    with one test.
+- **Decided 2026-11-23 (shesha, each as recommended):**
+  - The [proposal]s above stand as built: every guard hand-off on `/v1/answer` is an
+    `AnswerSafetyHandoff`; no budget pre-check there (the one `large` call's reservation is the
+    control); injection signals in a question are counted only; search records a red flag and
+    screens no hits; the runner's scoring and stand-ins as described.
+  - **The answer cap** stays the reply cap (1,500 characters), with no finding code of its own.
+    PR 10 precondition: the longest answer in M2/M3's live dev results fits under it.
+  - **Screening `/v1/kb/search`'s hits** waits for M8's customer surface.
+  - **PR 10 precondition:** a canary `READ_PATHS` entry for `/v1/answer` and `/v1/kb/search` with
+    `guard_answer = on`, added after PR 7 and PR 8 merge, passes before the switch.
+  - **A small `/v1/agent` follow-up PR** after PR 7 and PR 8: H3's boundary lines for the answer
+    kind (above), and G3's priority for a Redis failure on a message in an uncovered script (high
+    for a non-health business, as `/v1/answer` does; unreachable with today's data).
 
 ## H1 — `m7/term-matching` (`[HAND-WRITE]`, [D5]; time-box 2 h, decided 2026-11-16) · S
 `match_terms(text: Folded, terms: TermSet) -> tuple[TermHit, ...]`. Pure: no I/O, no logging,

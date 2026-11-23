@@ -15,14 +15,16 @@ object or route its attack goes through. A later PR registers a runner for a pat
   I, J, L, k-003): PR 6. B on the agent route (b-007, b-008) stays on its frozen route (the
   scoring rules: a router-on configuration with a stub router), but its poisoned chunk reaches
   the agent only through `agent_router = on`, a stub router and the agent's own `AnswerService`
-  over the chunk screen, an answer step PR 8's chunk runner builds: until PR 8 registers the
-  `answer` path it is pending on PR 8 (`waiting_on`) [kenji's PR 6 review, proposal];
+  over the chunk screen, an answer step PR 8's chunk runner builds (`redteam.chunks`): until the
+  `answer` path is registered it is pending on PR 8 (`waiting_on`), and the agent runner takes it
+  since [kenji's PR 6 review, proposal];
 - `log` (F's forced exceptions on every route, through the app's `RedactingJsonFormatter`):
   PR 6, with the route stand-ins and database fixtures its runner shares with the agent path.
   The formatter itself is built in PR 3 (it masks since H2 was written, 2026-11-20,
   `guards/redact.py`);
 - `document` (D, `/v1/extractions`' page screens, `redteam.document`): PR 7;
-- `answer` (`/v1/answer` and `/v1/kb/search` with `guard_answer = on` in tests): PR 8.
+- `answer` (`/v1/answer` with `guard_answer = on` in tests, `redteam.answer`): PR 8. No frozen
+  case of this path is on `/v1/kb/search` (only k-001, the search leg, and f-003, a log case).
 
 **Hand-writes.** A registered runner whose guard reaches a `[HAND-WRITE]` stub hands off with
 `guard_error` and `NotImplementedError` (G3): the case is then pending on the first unwritten one

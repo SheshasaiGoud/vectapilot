@@ -56,13 +56,26 @@ def lines_of(folder: Path) -> list[ResultLine]:
 
 
 DATABASE_REGISTERED: Final = frozenset(
-    {"a-001", "c-001", "c-007", "c-008", "d-001", "k-001", "k-002", "k-003", "k-004"}
+    {
+        "a-001",
+        "b-001",
+        "c-001",
+        "c-007",
+        "c-008",
+        "d-001",
+        "h-009",
+        "k-001",
+        "k-002",
+        "k-003",
+        "k-004",
+    }
     | {f"f-00{n}" for n in range(1, 7)}
     | {f"j-00{n}" for n in range(1, 9)}
 )
 """Every case whose runner is registered (PR 5's limiter; PR 6's agent, logs and search leg; PR 7's
-documents) and that runs in the database environment: F, J, K and the end-to-end cases of the
-agent's surfaces and of the document surface (d-001)."""
+documents; PR 8's answer path) and that runs in the database environment: F, J, K and the
+end-to-end cases of the agent's surfaces, the document surface (d-001) and the answer route's
+surfaces (b-001, h-009)."""
 
 
 def test_a_dry_run_runs_the_in_process_cases_and_leaves_the_database_ones(
@@ -82,10 +95,12 @@ def test_a_dry_run_runs_the_in_process_cases_and_leaves_the_database_ones(
     # M7 PR 6: the in-process agent cases ran through the real guards and reached H1's stub:
     # 80 agent-path cases less the 14 that run in the database (a-001, c-001, c-007, c-008,
     # f-006, j-001 to j-008, k-003) is 66. M7 PR 7: d-002 to d-005 too (d-001 runs in the
-    # database), so 70. Counts re-derived from this dry run.
+    # database). M7 PR 8: the answer path's 26 cases less b-001 and h-009 (database), and b-007
+    # and b-008 on the agent route under the router. 66 + 4 + 24 + 2 is 96, re-derived from this
+    # dry run after merging PR 7 and PR 8 (2026-11-23).
     pending = Counter(line.reason for line in lines if line.status == "pending")
-    assert pending == {"pending:H1": 70, "pending:PR 8": 28}
-    assert (len(not_run), len(scored), pending.total()) == (23, 18, 98)
+    assert pending == {"pending:H1": 96}
+    assert (len(not_run), len(scored), pending.total()) == (25, 18, 96)
     # Graduated known gaps (decided 2026-11-21): scored as hard, gates.json unchanged.
     labels = Counter(line.label for line in lines)
     assert labels == {"hard": 114, "known_gap": 11, "soft": 14}
@@ -105,13 +120,15 @@ def test_a_dry_run_runs_the_in_process_cases_and_leaves_the_database_ones(
         REPLAY_LINE,
         "rules version: no data/safety yet",
         "PII generator: redteam-pii.1, seed 20261116",
-        "- pending: 98",
-        "  - pending:H1: 70 (a-002,",
-        "- not run: a-001, c-001, c-007, c-008, d-001, f-001,",
+        "- pending: 96",
+        "  - pending:H1: 96 (a-002,",
+        "- not run: a-001, b-001, c-001, c-007, c-008, d-001,",
         "with uncommitted changes). CI gate: not checked by this run",
         "Crisis messages: not measured",
         # The plan's "Not in M7": the MCP server's results are a listed gap (leo's PR 6 review).
         "MCP results: not screened (known_gap:mcp_unscreened;",
+        # noah's PR 8 review: B on the agent route states its configuration.
+        "b-007 and b-008 run on /v1/agent with agent_router = on and a stub router",
         "- hard passed: 18 of 18 scored (96 not scored)",  # category E, since H2
         "| mask-several-types | 2 | 0 | 0 |",
         # noah's review: nothing scored reads "not measured", never a zero.
@@ -171,7 +188,7 @@ def test_scored_cases_reach_the_summary_with_their_statuses(tmp_path: Path) -> N
     assert status["b-001"] == "pending"
     summary = (folder / SUMMARY_MD).read_text("utf-8")
     soft = [ln for ln in lines if ln.label == "soft" and ln.status != "pending"]
-    assert len(soft) == 7  # the agent-route look-alikes; the answer-route ones wait for PR 8
+    assert len(soft) == 7  # the agent-route look-alikes (this test registers no answer runner)
     assert f"{wilson_text(2, 7)} over-escalated" in summary
     assert "| sunrise-clinic | en |" in summary
 

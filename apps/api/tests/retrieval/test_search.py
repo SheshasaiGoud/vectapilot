@@ -425,4 +425,5 @@ def test_the_app_searches_with_h1s_vector_search_and_serves_both_routes(
             for code, doc in operation["responses"].items()
             if TRACE_HEADER in doc.get("headers", {})
         }
-        assert documented == {"200", "422", "502", "503"}  # not 400: refused before a trace id
+        # Not 400: refused before a trace id. The 429 is M7 PR 8's (`guard_answer = on` only).
+        assert documented == {"200", "422", "429", "502", "503"}

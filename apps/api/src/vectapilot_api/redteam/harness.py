@@ -12,9 +12,10 @@ the masking path (`masking.run_masking`, category E against H2's `mask_pii`), PR
 path (`limiter.run_limiter`, k-002 and k-004 against real Redis), PR 6 the agent path
 (`agent.run_agent`), the log path (`logs.run_logs`) and the search leg (`search.run_search_leg`,
 k-001), PR 7 the document path (`document.run_document`, category D through
-`/v1/extractions`' guard). A runner that reports `guard_error` with `NotImplementedError`
-reached a `[HAND-WRITE]` stub: pending on the first unwritten hand-write the case needs
-(`plan.unwritten`). If none is unwritten, that hand-off is a plain miss.
+`/v1/extractions`' guard), PR 8 the answer path (`answer.run_answer`; registering it ends B on
+the agent route's wait, `plan.waiting_on`). A runner that reports `guard_error` with
+`NotImplementedError` reached a `[HAND-WRITE]` stub: pending on the first unwritten hand-write
+the case needs (`plan.unwritten`). If none is unwritten, that hand-off is a plain miss.
 
 **A database case without its served app** (M7 PR 6) [proposal]: a case whose environment is
 `database` but whose `RunEnv` has no app (a unit run, where the suite requests the served app only
@@ -35,6 +36,7 @@ from typing import Final, Protocol
 
 from vectapilot_api.guards.types import DecidedBy
 from vectapilot_api.redteam.agent import run_agent
+from vectapilot_api.redteam.answer import run_answer
 from vectapilot_api.redteam.cases import Case, Label
 from vectapilot_api.redteam.document import run_document
 from vectapilot_api.redteam.limiter import run_limiter
@@ -118,6 +120,7 @@ register(CasePath.AGENT, run_agent)  # M7 PR 6
 register(CasePath.LOG, run_logs)  # M7 PR 6
 register(CasePath.SEARCH_LEG, run_search_leg)  # M7 PR 6
 register(CasePath.DOCUMENT, run_document)  # M7 PR 7
+register(CasePath.ANSWER, run_answer)  # M7 PR 8
 
 
 def reached_a_stub(result: CaseResult) -> bool:

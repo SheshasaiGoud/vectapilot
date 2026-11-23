@@ -451,8 +451,8 @@ def test_every_seam_screens_with_the_routes_matcher(caplog: pytest.LogCaptureFix
 
 ALLOWED_DIFFERENCES: Final = {
     "_loop": "the scripted replay stands in for M5's H1 (`run_turn`), one per service",
-    "_answers": "agent_router off: the runner's answer step refuses; B on the agent route waits"
-    " for PR 8's chunk runner (`redteam.plan.waiting_on`)",
+    "_answers": "agent_router off: the runner's answer step refuses; B on the agent route builds"
+    " its own under the router (PR 8, tests/redteam/test_answer_runner.py)",
 }
 """What the red-team pipeline may build differently from `create_app`, each with its reason."""
 
