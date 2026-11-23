@@ -66,7 +66,6 @@ question, a term or a term id.
 """
 
 import contextlib
-import re
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
@@ -76,7 +75,6 @@ from typing import Final, Literal
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
-from vectapilot_api.answer.prompt import SYSTEM_PROMPT
 from vectapilot_api.answer.service import AnswerService
 from vectapilot_api.answer.types import AnswerRequest, AnswerResponse, AnswerRun
 from vectapilot_api.gateway.types import TraceId
@@ -101,10 +99,9 @@ from vectapilot_api.guards.output import (
     check_reply,
 )
 from vectapilot_api.guards.pii import mask_pii
+from vectapilot_api.guards.screens import ANSWER_BOUNDARY_LINES as ANSWER_BOUNDARY_LINES
 from vectapilot_api.guards.screens import (
-    MIN_BOUNDARY_WORDS,
     RED_FLAG_DECIDED_BY,
-    SENTENCE_END,
     GuardFailed,
     Masker,
     Prepared,
@@ -192,21 +189,6 @@ class GuardedAnswer:
 
     response: AnswerResponse | AnswerSafetyHandoff | JSONResponse | None = None
     failure: Exception | None = None
-
-
-def answer_boundary_lines() -> tuple[str, ...]:
-    """The answer prompt's fixed text whose echo H3 flags (G8), as `screens.boundary_lines` does
-    for the agent's: each marker's stem, and every sentence of at least `MIN_BOUNDARY_WORDS` words
-    of each system-prompt line that holds no per-request value (`answer/prompt.py`, read, never
-    edited)."""
-    stems = [f"{stem} " for stem in re.findall(r'"(<<<[A-Z ]+?) \{boundary\}', SYSTEM_PROMPT)]
-    lines = [line.strip() for line in SYSTEM_PROMPT.splitlines() if "{" not in line]
-    sentences = [part.strip() for line in lines for part in SENTENCE_END.split(line)]
-    long_enough = [text for text in sentences if len(text.split()) >= MIN_BOUNDARY_WORDS]
-    return tuple(dict.fromkeys(text for text in (*stems, *long_enough) if text))
-
-
-ANSWER_BOUNDARY_LINES: Final = answer_boundary_lines()
 
 
 # ── One request ──────────────────────────────────────────────────────────────────────────────

@@ -8,10 +8,11 @@ The paths: plain SQL on every business table, M2 H1's top-k vector search (`m2/r
 H1's full-text search (`text_search`, M3 PR 3), M3 PR 4's hybrid search (both legs and M3 H2's
 `rrf_fuse` in one snapshot, `search.fused_search`), and PR 6's two routes that show chunk text
 (`GET /v1/kb/search`, `POST /v1/answer`, through the real app with that business's
-`X-Business-Id`), each in vector mode and in hybrid mode (M3 PR 4), and M5 PR 2's tools
-(`check_slots`, `order_status` and the `book` and `reschedule` proposal checks, through the
-executor, over the sandbox bait), and M7 PR 7's KB scan (`guards scan`). Add yours here, with no
-other change.
+`X-Business-Id`, with `guard_answer = "off"` pinned), each in vector mode and in hybrid mode (M3
+PR 4), the same two routes with `guard_answer = "on"` in both modes (M7 PR 8's guarded pipeline,
+a PR 10 precondition: "M7's guarded routes" below), and M5 PR 2's tools (`check_slots`,
+`order_status` and the `book` and `reschedule` proposal checks, through the executor, over the
+sandbox bait), and M7 PR 7's KB scan (`guards scan`). Add yours here, with no other change.
 
 **The business clause itself (M3 PR 3, ADR 0009 amendment).** Every path above runs as the app
 role, under RLS, so it would pass with a search whose SQL forgot `c.business_id = :business_id`:
@@ -34,6 +35,27 @@ H1's `text_search`, the `text_search` path below) has the other business's bait 
 (zara's S2). `BAIT` also holds the word "canary", which each business's canary chunk (its text is
 its canary, `canary-<hex>`) shares, so a working full-text search finds that chunk too.
 
+**M7's guarded routes** (`guard_answer = "on"`, M7 PR 8; decided 2026-11-23 as PR 10's
+precondition). The real app builds the guarded pipeline itself, as production does: the red-flag
+screen, the limits and the budget on the real Redis (each test's planted business has fresh
+windows; the limits and the budget are pinned to the test suite's, `GUARDED_LIMITS`), masking, a
+separate `AnswerService` over the chunk-screening search and its own `BudgetedGateway`, and H3's
+output check, with the real term files (`data/safety/`), where a planted business is unresolved
+and gets every term (G4). Two stand-ins, so the paths do not wait on a
+pending [HAND-WRITE]: a no-hit matcher (`LookupMatcher`, not H1) and a no-finding output check
+(`FixedCheck`, not H3). Both are pure and only ever tighten (a hit drops a chunk or hands off, a
+finding withholds an answer), so neither can move a read; with their stubs every request would be
+a `guard_error` hand-off or a 503 and nothing of either business would show. H1 itself still runs
+in the startup self-test (G14), as for the guarded extraction write path. The masked `BAIT` is
+`BAIT` (no PII), so the embedder still asks the bait's own vector. Besides the leak check, each
+path asserts it went through the guards (non-vacuity): exactly one `guard` record, for `me`, its
+route and the response's trace id, that let the question through after the clean, red-flag,
+language, limits, injection and mask steps; the answer path also that it made exactly one model
+call, reserved on the guarded route's own budget (M3's gateway reserves nothing), and that H3's
+seam saw the shown answer with every cited chunk's clean text (only this request's chunk screen
+supplies one). Every metadata record the request logged (`guard`, `embedding_call`, `llm_call`,
+`rag_answer`) is an output too, so a record written for the other business would show its id.
+
 **A path that runs [HAND-WRITE] stubs** names them in `NEEDS_HAND_WRITE` (a set: PR 4's hybrid
 paths run three), and a stub that still raises NotImplementedError is listed in
 `PENDING_HAND_WRITE`. While any of a path's stubs is, the canary test marks the path
@@ -49,12 +71,16 @@ No other `xfail` belongs anywhere in tests/canary/: the gate refuses any other r
 `tests/test_canary_checks.py` refuses an `xfail` written outside `pending_hand_writes`.
 """
 
-from collections.abc import Awaitable, Callable, Iterable, Mapping
-from contextlib import AbstractAsyncContextManager
+import functools
+import json
+import logging
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
+from contextlib import AbstractAsyncContextManager, contextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Final, Protocol
+from typing import Any, Final, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -64,18 +90,24 @@ from scripts.canary_gate import pending_reason
 from tests.answer.providers import CitingProvider
 from tests.canary.catalog import business_tables
 from tests.canary.checks import Planted
+from tests.conftest import TEST_SETTINGS_FIELDS
+from tests.guards.agent_helpers import FixedCheck, LookupMatcher
 from tests.guards.helpers import SAFETY_DIR
 from tests.tools.helpers import CORPUS_DIR
 from tests.tools.sandbox_db import fresh_engine, owner_url
+from vectapilot_api import main as api_main
 from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import Settings
 from vectapilot_api.db import business_transaction
+from vectapilot_api.guards.answer import AnswerGuard
 from vectapilot_api.guards.config import load_guard_dir
+from vectapilot_api.guards.output import OutputKind
 from vectapilot_api.guards.scan import DatabaseChunks, scan_business
-from vectapilot_api.guards.types import Folded, TermHit, TermSet
+from vectapilot_api.guards.types import GUARD_RECORD, Check, Folded, RouteSlug, TermHit, TermSet
 from vectapilot_api.intents.policy import BusinessType
 from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.fusion import RRF_K, rrf_fuse
+from vectapilot_api.retrieval.router import TRACE_HEADER
 from vectapilot_api.retrieval.search import fused_search
 from vectapilot_api.retrieval.text import text_search
 from vectapilot_api.retrieval.types import MAX_K, RetrievalMode, TextQuery, VectorQuery
@@ -296,7 +328,8 @@ def _reindex(client: TestClient, me: Planted) -> None:
 
 
 async def _search_through_the_api(me: Planted, mode: RetrievalMode, label: str) -> dict[str, str]:
-    with TestClient(create_app(Settings(rag_retrieval_mode=mode))) as client:
+    settings = Settings(rag_retrieval_mode=mode, guard_answer="off")  # M3's route: module docstring
+    with TestClient(create_app(settings)) as client:
         _reindex(client, me)
         response = client.get(
             "/v1/kb/search",
@@ -311,7 +344,8 @@ async def search_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[st
     """`GET /v1/kb/search` as `me` (reader customer: approved public chunks), asking `BAIT` with
     the largest `k`; the response body as text (`me`'s bait shows `me`'s canary as its title).
     Through the real app, as the app role: it proves the route's isolation through RLS and its own
-    scoping together."""
+    scoping together. `guard_answer = "off"` explicitly, so M3's unguarded route (still reachable
+    outside production) keeps this canary whatever a `.env` or a later default says."""
     return await _search_through_the_api(me, "vector", "GET /v1/kb/search")
 
 
@@ -324,7 +358,7 @@ async def search_through_the_api_hybrid(engine: AsyncEngine, me: Planted) -> Map
 
 async def _answer_through_the_api(me: Planted, mode: RetrievalMode, label: str) -> dict[str, str]:
     provider = CitingProvider()
-    settings = Settings(rag_retrieval_mode=mode)
+    settings = Settings(rag_retrieval_mode=mode, guard_answer="off")  # M3's route: module docstring
     with TestClient(create_app(settings, llm_provider=provider)) as client:
         _reindex(client, me)
         response = client.post(
@@ -342,7 +376,8 @@ async def answer_through_the_api(engine: AsyncEngine, me: Planted) -> Mapping[st
     of its prompt; the response body (its `sources` show chunk text and titles) and every prompt
     the model got (business-context §5: a prompt only ever holds the current business's data).
     `me`'s bait scores 1.0, so it is evidence, and its title, `me`'s canary, is the positive
-    control in both outputs."""
+    control in both outputs. `guard_answer = "off"` explicitly, as `search_through_the_api`: each
+    M3 entry and its guarded twin are off and on by construction."""
     return await _answer_through_the_api(me, "vector", "POST /v1/answer")
 
 
@@ -350,6 +385,196 @@ async def answer_through_the_api_hybrid(engine: AsyncEngine, me: Planted) -> Map
     """`answer_through_the_api` with `rag_retrieval_mode=hybrid` (M3 PR 4): the prompt holds the
     top `rag_context_k` fused hits whose cosine passes the gate (`me`'s bait scores 1.0)."""
     return await _answer_through_the_api(me, "hybrid", "POST /v1/answer (hybrid)")
+
+
+# ── M7's guarded routes: `guard_answer = "on"` (module docstring) ─────────────────────────────
+
+GUARDED_CHECKS: Final = frozenset(
+    {
+        Check.CLEAN,
+        Check.RED_FLAG,
+        Check.NOT_COVERED_LANGUAGE,
+        Check.LIMITS,
+        Check.INJECTION,
+        Check.MASK,
+    }
+)
+"""G1's steps both guarded routes run on a question every guard lets through (`guards.answer`);
+the answer route also runs H3's output check (`Check.OUTPUT`)."""
+
+GUARDED_LIMITS: Final[dict[str, Any]] = {
+    name: TEST_SETTINGS_FIELDS[name]
+    for name in (
+        "guard_limit_business_per_minute",
+        "guard_limit_customer_per_minute",
+        "guard_budget_usd_per_business_per_day",
+    )
+}
+"""The guarded routes' limits and budget, pinned to the test suite's (`TEST_SETTINGS_FIELDS`,
+far above one request: CI's integration job shares one Redis database) on the real Redis."""
+
+
+class MetadataRecords(logging.Handler):
+    """Every metadata record logged under `vectapilot_api` while attached: the `guard`,
+    `embedding_call`, `llm_call` and `rag_answer` records each carry their fields as the `extra`
+    named by their message (metadata only, G10: ids, codes and counts, never text)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[tuple[str, dict[str, Any]]] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        name = record.getMessage()
+        fields = getattr(record, name, None)
+        if isinstance(fields, dict):
+            self.records.append((name, fields))
+
+    def named(self, name: str) -> list[dict[str, Any]]:
+        return [fields for logged, fields in self.records if logged == name]
+
+    def text(self) -> str:
+        return "\n".join(
+            json.dumps({name: fields}, sort_keys=True, default=str) for name, fields in self.records
+        )
+
+
+@contextmanager
+def recording() -> Iterator[MetadataRecords]:
+    """The metadata records logged inside this block (the app logs from its own thread too)."""
+    handler = MetadataRecords()
+    logger = logging.getLogger("vectapilot_api")
+    logger.addHandler(handler)
+    try:
+        yield handler
+    finally:
+        logger.removeHandler(handler)
+
+
+@contextmanager
+def served_guarded(
+    mode: RetrievalMode, provider: CitingProvider, check: FixedCheck
+) -> Iterator[TestClient]:
+    """The real app, as the app role, with `guard_answer = "on"`, the real term files and the
+    real Redis limiter, `provider` as the answer model, and the two stand-ins (module docstring):
+    `LookupMatcher` through `create_app`'s test seam and `check` as `AnswerGuard`'s output check,
+    patched in before the lifespan builds the guard (as tests/guards/test_answer_guard_db.py).
+    The limits and the budget are the test suite's (`GUARDED_LIMITS`), never a `.env`'s: a small
+    budget would turn this isolation gate red with a `budget` hand-off that says nothing about
+    isolation (Redis keeps its own canaries, tests/canary/test_redis_isolation.py)."""
+    settings = Settings(
+        rag_retrieval_mode=mode,
+        guard_answer="on",
+        guard_config_dir=SAFETY_DIR,
+        corpus_dir=CORPUS_DIR,
+        tools_config_dir=None,  # a developer's .env may name the sample folders: not here
+        extraction_config_dir=None,
+        **GUARDED_LIMITS,
+    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(api_main, "AnswerGuard", functools.partial(AnswerGuard, check=check))
+        app = create_app(settings, llm_provider=provider, matcher=LookupMatcher())
+        with TestClient(app) as client:
+            yield client
+
+
+def the_guard_record(
+    records: MetadataRecords, me: Planted, route: RouteSlug, response: httpx2.Response
+) -> dict[str, Any]:
+    """The request's one `guard` record (non-vacuity): written for `me`, on `route`, under the
+    response's trace id, after every step of `GUARDED_CHECKS`, and letting the response pass."""
+    guards = records.named(GUARD_RECORD)
+    assert len(guards) == 1, f"{len(guards)} guard records: the guarded route did not run once"
+    [record] = guards
+    assert (record["business_id"], record["route"]) == (me.business_id, route.value), record
+    assert record["trace_id"] == response.headers[TRACE_HEADER], record
+    assert (record["action"], record["decided_by"]) == ("pass", "none"), record
+    assert {check.value for check in GUARDED_CHECKS} <= set(record["checks"]), record
+    return record
+
+
+async def _search_through_the_guarded_api(
+    me: Planted, mode: RetrievalMode, label: str
+) -> dict[str, str]:
+    with served_guarded(mode, CitingProvider(), FixedCheck()) as client:
+        _reindex(client, me)
+        with recording() as records:
+            response = client.get(
+                "/v1/kb/search",
+                params={"q": BAIT, "k": MAX_K},
+                headers={BUSINESS_HEADER: me.business_id},
+            )
+    assert response.is_success, response.text
+    the_guard_record(records, me, RouteSlug.SEARCH, response)
+    return {label: response.text, f"{label} (records)": records.text()}
+
+
+async def search_through_the_guarded_api(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """`search_through_the_api` with `guard_answer = "on"` (module docstring): the guards run
+    before the search, which embeds the clean, masked question; its hits are not screened (M8).
+    The response body (`me`'s bait shows `me`'s canary as its title) and the request's metadata
+    records."""
+    return await _search_through_the_guarded_api(me, "vector", "GET /v1/kb/search (guarded)")
+
+
+async def search_through_the_guarded_api_hybrid(
+    engine: AsyncEngine, me: Planted
+) -> Mapping[str, str]:
+    """`search_through_the_guarded_api` with `rag_retrieval_mode=hybrid`: both legs and the
+    fusion get the masked question."""
+    return await _search_through_the_guarded_api(
+        me, "hybrid", "GET /v1/kb/search (hybrid, guarded)"
+    )
+
+
+async def _answer_through_the_guarded_api(
+    me: Planted, mode: RetrievalMode, label: str
+) -> dict[str, str]:
+    provider, check = CitingProvider(), FixedCheck()
+    with served_guarded(mode, provider, check) as client:
+        _reindex(client, me)
+        with recording() as records:
+            response = client.post(
+                "/v1/answer",
+                json={"question": BAIT},
+                headers={BUSINESS_HEADER: me.business_id},
+            )
+    assert response.is_success, response.text
+    record = the_guard_record(records, me, RouteSlug.ANSWER, response)
+    assert Check.OUTPUT.value in record["checks"], record
+    # Exactly one model call, reserved on the guarded route's own `BudgetedGateway`: M3's gateway,
+    # which serves while the guards are off, reserves nothing, and a miswire that also answered
+    # through M3's service would call the model twice.
+    assert len(provider.calls) == 1, provider.calls
+    reserved = record["reserved_micro_usd"]
+    assert isinstance(reserved, int) and reserved > 0, record
+    # H3's seam saw the shown answer once, with the clean text of every chunk it cites: only this
+    # request's chunk screen supplies those (`guards.search`; any other citation is a KeyError).
+    body = response.json()
+    asked = [(reply, context.kind, len(context.cited)) for reply, context in check.asked]
+    assert asked == [(body["answer"], OutputKind.ANSWER, len(body["sources"]))], asked
+    prompts = [f"{call.system}\n{call.messages[-1].content}" for call in provider.calls]
+    return {
+        label: response.text,
+        f"{label} (prompt)": "\n".join(prompts),
+        f"{label} (records)": records.text(),
+    }
+
+
+async def answer_through_the_guarded_api(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """`answer_through_the_api` with `guard_answer = "on"` (module docstring): the masked `BAIT`,
+    the chunk screen before the prompt, the guarded route's own budgeted model call and H3's
+    seam. The response body (its `sources` show titles), every prompt the model got and the
+    request's metadata records; `me`'s bait scores 1.0 and passes the screen, so its title, `me`'s
+    canary, is the positive control in the body and the prompt (the records show `me`'s id)."""
+    return await _answer_through_the_guarded_api(me, "vector", "POST /v1/answer (guarded)")
+
+
+async def answer_through_the_guarded_api_hybrid(
+    engine: AsyncEngine, me: Planted
+) -> Mapping[str, str]:
+    """`answer_through_the_guarded_api` with `rag_retrieval_mode=hybrid`: the chunk screen keeps
+    only the fused hits it let through (`guards.search`)."""
+    return await _answer_through_the_guarded_api(me, "hybrid", "POST /v1/answer (hybrid, guarded)")
 
 
 class EngineTransactions:
@@ -523,6 +748,10 @@ READ_PATHS: Final[dict[str, ReadPath]] = {
     "POST /v1/answer": answer_through_the_api,
     "GET /v1/kb/search (hybrid)": search_through_the_api_hybrid,
     "POST /v1/answer (hybrid)": answer_through_the_api_hybrid,
+    "GET /v1/kb/search (guarded)": search_through_the_guarded_api,
+    "POST /v1/answer (guarded)": answer_through_the_guarded_api,
+    "GET /v1/kb/search (hybrid, guarded)": search_through_the_guarded_api_hybrid,
+    "POST /v1/answer (hybrid, guarded)": answer_through_the_guarded_api_hybrid,
     **TOOL_PATHS,
     "guards scan": scan_as_staff,
 }
@@ -560,10 +789,15 @@ NEEDS_HAND_WRITE: Final[Mapping[str, frozenset[str]]] = {
     "POST /v1/answer": frozenset({"vector_search"}),
     "GET /v1/kb/search (hybrid)": HYBRID,
     "POST /v1/answer (hybrid)": HYBRID,
+    "GET /v1/kb/search (guarded)": frozenset({"vector_search"}),
+    "POST /v1/answer (guarded)": frozenset({"vector_search"}),
+    "GET /v1/kb/search (hybrid, guarded)": HYBRID,
+    "POST /v1/answer (hybrid, guarded)": HYBRID,
 }
 """Read path → the [HAND-WRITE] stubs it runs (M2 H1's `vector_search` for PR 6's routes, M3 H1's
 `text_search` for its own path, and both legs and M3 H2's `rrf_fuse` for M3 PR 4's hybrid
-paths)."""
+paths). M7's guarded routes run the same legs; they run M7's H1 and H3 as stand-ins (module
+docstring), so they wait on neither."""
 
 NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {
     "run_turn": "M5 H1's tests, the fake-provider turns and the POST /v1/agent write path",
