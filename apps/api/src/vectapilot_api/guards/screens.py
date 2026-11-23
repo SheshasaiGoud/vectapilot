@@ -52,6 +52,7 @@ from vectapilot_api.agent.prompt import (
     RESULT_START,
     SYSTEM_PROMPT,
 )
+from vectapilot_api.answer.prompt import SYSTEM_PROMPT as ANSWER_PROMPT
 from vectapilot_api.guards.caps import Surface, within_cap
 from vectapilot_api.guards.config import BusinessGuards
 from vectapilot_api.guards.locales import Locale, locales
@@ -318,6 +319,22 @@ def boundary_lines() -> tuple[str, ...]:
 
 
 BOUNDARY_LINES: Final = boundary_lines()
+
+
+def answer_boundary_lines() -> tuple[str, ...]:
+    """The answer prompt's fixed text whose echo H3 flags (G8), as `boundary_lines` does for the
+    agent's: each marker's stem, and every sentence of at least `MIN_BOUNDARY_WORDS` words of each
+    system-prompt line that holds no per-request value (`answer/prompt.py`, read, never edited).
+    Here, not in `guards.answer`, because `guards.agent` needs it for `/v1/agent`'s answer kind
+    and `guards.answer` imports `guards.agent` (`red_flag_priority`): a leaf both import."""
+    stems = [f"{stem} " for stem in re.findall(r'"(<<<[A-Z ]+?) \{boundary\}', ANSWER_PROMPT)]
+    lines = [line.strip() for line in ANSWER_PROMPT.splitlines() if "{" not in line]
+    sentences = [part.strip() for line in lines for part in SENTENCE_END.split(line)]
+    long_enough = [text for text in sentences if len(text.split()) >= MIN_BOUNDARY_WORDS]
+    return tuple(dict.fromkeys(text for text in (*stems, *long_enough) if text))
+
+
+ANSWER_BOUNDARY_LINES: Final = answer_boundary_lines()
 
 
 def output_context(

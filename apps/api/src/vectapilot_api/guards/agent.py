@@ -25,7 +25,8 @@ every step scoped by the business:
    then `require_budget` with `turn_precheck_micro_usd` (decided 2026-11-21, shesha; G9
    amended). A full window is a 429 with `Retry-After` (its body carries the guidance for a
    health business); an exhausted budget a `budget` hand-off; Redis failing a `guard_error`
-   hand-off (`limits.refusal_decision`).
+   hand-off (`limits.refusal_decision`; for a message step 4 never cleared, G3's
+   before-the-screen priority, `AgentGuard._refused`).
 6. **Injection signals** in the message (G7): a phrase or the hidden-character rule selects the
    read-only service (every constructor argument the same but its profiles, G13).
 7. **Masking** of the clean message (H2's `mask_pii`), re-validated as an `AgentRequest`, so
@@ -39,10 +40,16 @@ every step scoped by the business:
    tally after the service, whatever the service returned: the loop turns an exception from its
    tools into its own `tool_failure` hand-off (M5 H1 rule 7).
 9. **Output checks** (H3, G8) on a `reply`'s text and an `answer` kind's answer text (its cited
-   chunks' clean texts as grounding). A finding replaces the whole response with a `guard_output`
-   hand-off [proposal: high for a health business, normal for any other, as G3's after-the-screen
-   rule]. Hand-offs and `confirmation_required` pass byte for byte (G2; a ticket's text was
-   screened before its response was built, `guards.store`).
+   chunks' clean texts as grounding), each against the boundary lines of the prompt that wrote
+   it: a reply's are the agent prompt's (`screens.BOUNDARY_LINES`), an answer's the answer
+   prompt's alone (`screens.ANSWER_BOUNDARY_LINES`, as on `/v1/answer`) [ananya's PR 8 review]. A
+   `rag` route hands the masked message straight to `AnswerService`, so the answer model never
+   sees the agent prompt: agent-only text in an answer could come only from the customer's own
+   message or a screened chunk, which is no leak, and flagging it would only withhold good
+   answers. A finding replaces the whole response with a `guard_output` hand-off [proposal: high
+   for a health business, normal for any other, as G3's after-the-screen rule]. Hand-offs and
+   `confirmation_required` pass byte for byte (G2; a ticket's text was screened before its
+   response was built, `guards.store`).
 
 **Fail closed** (G3). Any exception in a guard (a pending stub's `NotImplementedError`, a hit H1
 was not given, Redis, a bug) becomes a `guard_error` hand-off, never a 500 and never the message
@@ -71,7 +78,7 @@ import contextlib
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import MappingProxyType
 from typing import Final
 from uuid import UUID
@@ -107,6 +114,7 @@ from vectapilot_api.guards.normalize import uncovered_languages
 from vectapilot_api.guards.output import Matcher, OutputCheck, OutputKind, check_reply
 from vectapilot_api.guards.pii import mask_pii
 from vectapilot_api.guards.screens import (
+    ANSWER_BOUNDARY_LINES,
     RED_FLAG_DECIDED_BY,
     GuardFailed,
     GuardWithheld,
@@ -498,7 +506,8 @@ class AgentGuard:
         return None
 
     def _output(self, response: AgentResponse, screens: ScreenTally) -> GuardWithheld | None:
-        """H3 on a reply's or an answer's text; None for every other kind (G8)."""
+        """H3 on a reply's or an answer's text, each against the boundary lines of the prompt
+        that wrote it (module docstring, step 9); None for every other kind (G8)."""
         if isinstance(response, ReplyResponse):
             context = output_context(screens, OutputKind.REPLY, self._matcher)
             return output_withheld(self._check(response.text, context))
@@ -507,7 +516,8 @@ class AgentGuard:
             # other chunk is a KeyError, which fails closed (G3).
             cited = tuple(screens.kept_chunks[s.chunk_id] for s in response.answer.sources)
             context = output_context(screens, OutputKind.ANSWER, self._matcher, cited)
-            return output_withheld(self._check(response.answer.answer, context))
+            answer = replace(context, boundary_lines=ANSWER_BOUNDARY_LINES)
+            return output_withheld(self._check(response.answer.answer, answer))
         return None
 
     # ── Responses ────────────────────────────────────────────────────────────────────────────
@@ -561,7 +571,16 @@ class AgentGuard:
         return self._handoff(trace_id, HandoffReason.GUARD_OUTPUT, priority, rule, turn)
 
     def _refused(self, refusal: GuardRefused, trace_id: str, turn: _Turn) -> _Outcome:
-        """A limit, the budget or Redis failing (G9, PR 5's `refusal_decision`)."""
+        """A limit, the budget or Redis failing (G9, PR 5's `refusal_decision`), before the
+        service (step 5) or for a call inside it (step 8).
+
+        Only `UNAVAILABLE` is a guard failing (G3): Redis could not answer, so nothing decided
+        the request, and G3 sets the priority by whether the red-flag screen cleared the message.
+        A message it never cleared (step 4's uncovered script) keeps the before-the-screen
+        priority through `_failed`, as `/v1/answer` does: high for a non-health business (a
+        health business's such message never gets here: step 4 hands it off). A full window and
+        an exhausted budget are the limiter deciding as configured (G9), not a guard failing, so
+        the 429 and the `budget` hand-off keep `refusal_decision`'s outcome for every message."""
         business = turn.business
         decision = refusal_decision(refusal, health=business.health)
         if refusal.kind is RefusalKind.UNAVAILABLE:
@@ -572,6 +591,8 @@ class AgentGuard:
             if decision.guidance and not shown:
                 turn.findings[Finding.NO_GUIDANCE] += 1
             return _Outcome(limited_response(refusal, shown), decision)
+        if refusal.kind is RefusalKind.UNAVAILABLE and not turn.cleared:
+            return self._failed(trace_id, turn, decision.decided_by)
         reason = (
             HandoffReason.BUDGET
             if refusal.kind is RefusalKind.BUDGET

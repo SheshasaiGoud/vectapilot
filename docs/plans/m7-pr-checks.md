@@ -1220,7 +1220,8 @@ human steps are not M7's.
     `guard_answer = on`, added after PR 7 and PR 8 merge, passes before the switch.
   - **A small `/v1/agent` follow-up PR** after PR 7 and PR 8: H3's boundary lines for the answer
     kind (above), and G3's priority for a Redis failure on a message in an uncovered script (high
-    for a non-health business, as `/v1/answer` does; unreachable with today's data).
+    for a non-health business, as `/v1/answer` does; unreachable with today's data). **Done** in
+    that follow-up (`m7/agent-followups`): the answer prompt's lines alone, not the union.
 
 ## H1 — `m7/term-matching` (`[HAND-WRITE]`, [D5]; time-box 2 h, decided 2026-11-16) · S
 `match_terms(text: Folded, terms: TermSet) -> tuple[TermHit, ...]`. Pure: no I/O, no logging,
