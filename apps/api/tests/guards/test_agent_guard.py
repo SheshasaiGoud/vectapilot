@@ -2,9 +2,9 @@
 
 The fixture guard folder (tests/guards/fixtures) serves a clinic, a vet and a shop. The matcher is
 `LookupMatcher`, a fixed lookup that is not H1. Masking is H2's `mask_pii` (written 2026-11-20)
-and output checks are H3's stub, unless a test passes the identity or a raising mask or a fixed
-check (none of them is H2 or H3). Every guarded outcome is checked on what the customer gets and
-on the one `guard` record (G10).
+and output checks are H3's `check_reply` (written 2026-11-23), unless a test passes the identity
+or a raising mask or a fixed or raising check (none of them is H2 or H3). Every guarded outcome
+is checked on what the customer gets and on the one `guard` record (G10).
 """
 
 import asyncio
@@ -32,6 +32,7 @@ from tests.guards.agent_helpers import (
     Guarded,
     IdentityMask,
     LookupMatcher,
+    RaisingCheck,
     RaisingMask,
     RaisingMatcher,
     WithholdingRecorder,
@@ -931,13 +932,52 @@ def test_an_output_finding_replaces_the_whole_reply_with_a_handoff(
     assert record["findings"] == {"output:medical_advice": 1, "output:pii": 1}
 
 
-def test_the_h3_stub_fails_closed_on_a_reply(caplog: pytest.LogCaptureFixture) -> None:
+def test_h3_passes_a_clean_reply_byte_for_byte(caplog: pytest.LogCaptureFixture) -> None:
+    # H3 itself (no stand-in check): "nine" is a number word with no word after it (no dose, no
+    # frequency), the reply holds no PII shape and no boundary line, and the lookup hits nothing.
     built = build(canned_loop(TurnReply("We open at nine.")), mask=IdentityMask())
+
+    response = respond(built, SHOP)
+
+    assert response == ReplyResponse(trace_id=TRACE, text="We open at nine.")
+    record = the_record(caplog)
+    assert (record["action"], record["decided_by"]) == ("pass", "none")
+
+
+@pytest.mark.parametrize(
+    ("text", "decided_by"),
+    [
+        # Rule 3: "5", then "drops" (a unit) right after it, and "give" two words before it.
+        ("Give him 5 drops in each ear.", "output:medical_advice"),
+        # Rule 4: a phone shape the customer's message (BENIGN) does not hold.
+        (f"We will call you on {SYNTHETIC_PHONE}.", "output:pii"),
+    ],
+    ids=["dose", "phone"],
+)
+def test_h3_replaces_a_reply_with_a_finding_by_a_handoff(
+    caplog: pytest.LogCaptureFixture, text: str, decided_by: str
+) -> None:
+    built = build(canned_loop(TurnReply(text)), mask=IdentityMask())
+
+    response = handoff(respond(built, SHOP))
+
+    assert (response.reason, response.priority) == (HandoffReason.GUARD_OUTPUT, Priority.NORMAL)
+    assert text not in response.model_dump_json()
+    record = the_record(caplog)
+    assert (record["decided_by"], record["findings"]) == (decided_by, {decided_by: 1})
+
+
+def test_an_output_check_that_raises_fails_closed_on_a_reply(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    check = RaisingCheck()
+    built = build(canned_loop(TurnReply("We open at nine.")), mask=IdentityMask(), check=check)
 
     response = handoff(respond(built, SHOP))
 
     assert (response.reason, response.priority) == (HandoffReason.GUARD_ERROR, Priority.NORMAL)
-    assert the_record(caplog)["error_type"] == "NotImplementedError"
+    assert check.calls == 1
+    assert the_record(caplog)["error_type"] == "RuntimeError"
 
 
 def test_an_output_check_that_returns_anything_but_its_codes_is_a_guard_error(
@@ -1075,17 +1115,48 @@ def test_a_withheld_ticket_that_cannot_be_stored_fails_closed(
     assert record["withheld_action_id"] is None
 
 
-def test_the_h3_stub_on_a_ticket_fails_closed_and_stores_nothing(
+def test_an_output_check_that_raises_on_a_ticket_fails_closed_and_stores_nothing(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     store = WithholdingRecorder()
-    built = build(canned_loop(ticket()), store=store, mask=IdentityMask())
+    check = RaisingCheck()
+    built = build(canned_loop(ticket()), store=store, mask=IdentityMask(), check=check)
 
     response = handoff(respond(built, SHOP))
 
     assert response.reason is HandoffReason.GUARD_ERROR
-    assert (store.created, store.withheld) == ([], [])
-    assert the_record(caplog)["error_type"] == "NotImplementedError"
+    assert (store.created, store.withheld, check.calls) == ([], [], 1)
+    assert the_record(caplog)["error_type"] == "RuntimeError"
+
+
+@pytest.mark.parametrize(
+    ("message", "withheld"),
+    [(BENIGN, True), (f"Please call me back on {SYNTHETIC_PHONE}.", False)],
+    ids=["phone-from-nowhere", "customers-own-phone"],
+)
+def test_h3_withholds_ticket_text_with_a_phone_the_customer_never_wrote(
+    caplog: pytest.LogCaptureFixture, message: str, withheld: bool
+) -> None:
+    # H3 itself on `create_ticket`'s summary (rule 4): the phone is exempt when the customer's
+    # own message holds it, and the ticket is withheld (stored expired, G7) when it does not.
+    summary = f"Call the customer back on {SYNTHETIC_PHONE}."
+    store = WithholdingRecorder()
+    built = build(canned_loop(ticket(summary)), store=store, mask=IdentityMask())
+
+    response = respond(built, SHOP, message)
+
+    record = the_record(caplog)
+    if withheld:
+        assert handoff(response).reason is HandoffReason.GUARD_OUTPUT
+        assert (store.created, len(store.withheld)) == ([], 1)
+        assert (record["decided_by"], record["withheld_action_id"]) == (
+            "output:pii",
+            str(WITHHELD_ACTION),
+        )
+    else:
+        assert isinstance(response, ConfirmationResponse)
+        assert (len(store.created), store.withheld) == (1, [])
+        assert (record["action"], record["decided_by"]) == ("pass", "none")
 
 
 def test_another_write_tools_proposal_is_not_screened() -> None:

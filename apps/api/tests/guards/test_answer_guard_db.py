@@ -137,7 +137,8 @@ def api(
     provider: CitingProvider, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> Iterator[TestClient]:
     use_answer_key_selftest(monkeypatch)
-    # FixedCheck stands in for H3 (a stub); the guard is built in the lifespan, so patch first.
+    # FixedCheck stands in for H3 (this file checks the database path; H3's own tests are
+    # test_check_reply.py); the guard is built in the lifespan, so patch first.
     monkeypatch.setattr(main, "AnswerGuard", functools.partial(AnswerGuard, check=FixedCheck()))
     settings = Settings(
         guard_answer="on",

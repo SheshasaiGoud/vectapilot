@@ -163,13 +163,16 @@ def test_hand_writes_each_case_needs() -> None:
     assert needs(CASES["a-001"]) == (Build.H1, Build.H2, Build.H3)
 
 
-def test_h1_and_h3_are_probed_unwritten_h2_written_and_one_without_a_probe_is_unwritten() -> None:
+def test_h1_is_probed_unwritten_h2_and_h3_written_and_one_without_a_probe_is_unwritten() -> None:
     assert HAND_WRITE_PROBES[Build.H1]() is False  # match_terms is shesha's stub (M7 H1)
     assert HAND_WRITE_PROBES[Build.H2]() is True  # mask_pii is written (M7 H2, 2026-11-20)
-    assert HAND_WRITE_PROBES[Build.H3]() is False  # check_reply is the stub (M7 H3, PR 6)
+    assert HAND_WRITE_PROBES[Build.H3]() is True  # check_reply is written (M7 H3, 2026-11-23)
     assert unwritten(CASES["e-001"]) is unwritten(CASES["f-001"]) is None
+    assert unwritten(CASES["a-001"]) is Build.H1
     assert unwritten(CASES["a-001"], {Build.H1: lambda: True}) is Build.H2  # no probe: unwritten
-    assert unwritten(CASES["a-001"], {**HAND_WRITE_PROBES, Build.H1: lambda: True}) is Build.H3
+    assert unwritten(CASES["a-001"], {**HAND_WRITE_PROBES, Build.H1: lambda: True}) is None
+    h3_unwritten = {**HAND_WRITE_PROBES, Build.H1: lambda: True, Build.H3: lambda: False}
+    assert unwritten(CASES["a-001"], h3_unwritten) is Build.H3  # the last one still decides
     assert unwritten(CASES["e-001"], {Build.H1: lambda: True}) is Build.H2
 
 
@@ -231,18 +234,23 @@ def test_a_database_case_without_its_served_app_is_pending_on_its_hand_write_unr
         raise AssertionError("a pending database case ran without its served app")
 
     env = RunEnv(GENERATOR, "database")
-    h1_written = {**HAND_WRITE_PROBES, Build.H1: lambda: True}  # H3 is still the stub
+    h1_written = {**HAND_WRITE_PROBES, Build.H1: lambda: True}  # H2 and H3 are written
+    h3_unwritten = {**h1_written, Build.H3: lambda: False}  # a stand-in: H3 as its stub was
     for case_id, probes, reason in (
         ("j-001", HAND_WRITE_PROBES, "pending:H1"),
-        ("a-001", h1_written, "pending:H3"),
+        ("a-001", HAND_WRITE_PROBES, "pending:H1"),
+        ("a-001", h3_unwritten, "pending:H3"),
     ):
         with pytest.raises(PendingHandWrite) as pending:
             run_case(CASES[case_id], "hard", env, runners={CasePath.AGENT: never}, probes=probes)
         assert pending.value.reason == reason
     # With every hand-write the case needs written there is no shortcut: the runner is called.
-    # F's logs need only H2, written since 2026-11-20, so f-001 already gets there.
+    # F's logs need only H2, written since 2026-11-20, so f-001 already gets there; a-001 needs
+    # H1 too (stood in here), H2 and H3 (written since 2026-11-23).
     with pytest.raises(AssertionError):
         run_case(CASES["j-001"], "hard", env, runners={CasePath.AGENT: never}, probes=ALL_WRITTEN)
+    with pytest.raises(AssertionError):
+        run_case(CASES["a-001"], "hard", env, runners={CasePath.AGENT: never}, probes=h1_written)
     with pytest.raises(AssertionError):
         run_case(CASES["f-001"], "hard", env, runners={CasePath.LOG: never})
 

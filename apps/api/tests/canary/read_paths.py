@@ -803,7 +803,6 @@ NEEDED_OUTSIDE_READ_PATHS: Final[Mapping[str, str]] = {
     "run_turn": "M5 H1's tests, the fake-provider turns and the POST /v1/agent write path",
     "route_fields": "M6 H1's tests and the POST /v1/extractions routing test",
     "match_terms": "M7 H1's tests and the guarded POST /v1/agent write path",
-    "check_reply": "M7 H3's tests and the guarded POST /v1/agent write path",
 }
 """[HAND-WRITE] stubs that no read path runs, but other tests wait for through this same
 switch: stub → who waits. M3 H2's `rrf_fuse` left in M3 PR 4, when the hybrid read paths came,
@@ -812,11 +811,10 @@ checked without the loop); `write_paths.WRITE_NEEDS_HAND_WRITE` names the write 
 `route_fields` runs on no read path either: its own tests (tests/extraction/test_routing.py) and
 the route's H1 test (tests/extraction/test_route.py) wait for it. The `POST /v1/extractions` write
 path runs it too but is not marked: the stub fails closed into a stored all-review extraction, so
-the write it checks happens either way (`write_paths.py`)."""
+the write it checks happens either way (`write_paths.py`). M7 H3's `check_reply` left on
+2026-11-23, when it was written."""
 
-PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset(
-    {"run_turn", "route_fields", "match_terms", "check_reply"}
-)
+PENDING_HAND_WRITE: Final[frozenset[str]] = frozenset({"run_turn", "route_fields", "match_terms"})
 """[HAND-WRITE] stubs still raising NotImplementedError, one switch each. Remove a name once
 every test that runs it shows XPASS(strict) (guide: docs/learning/m3-hybrid.md §1):
 
@@ -827,11 +825,14 @@ every test that runs it shows XPASS(strict) (guide: docs/learning/m3-hybrid.md �
 - "route_fields" (M6 H1, review routing per field, shesha's; guide: docs/learning/m6-routing.md
   §1): its own tests (tests/extraction/test_routing.py) and the route's H1 test
   (tests/extraction/test_route.py), moved to this switch by M6 PR 3 when the route came.
-- "match_terms" (M7 H1, the term matcher, shesha's) and "check_reply" (M7 H3), added by M7 PR 6:
-  the guarded `POST /v1/agent` write path runs both (`write_paths.GUARD_STUBS`). Each
-  hand-write's PR removes its name here once that path and its own switch's tests show
-  XPASS(strict). M7 H2's `mask_pii` was written on 2026-11-20 (by Claude at shesha's request)
-  before PR 6, so it never had an entry: the guarded path runs it as plain code.
+- "match_terms" (M7 H1, the term matcher, shesha's), added by M7 PR 6 with "check_reply" (M7
+  H3): the guarded `POST /v1/agent` write path runs both (`write_paths.GUARD_STUBS`). Each
+  hand-write's PR removes its name here once its own switch's tests show XPASS(strict); the
+  path's strict xfail then waits on the names still listed. M7 H2's `mask_pii` was written on
+  2026-11-20 (by Claude at shesha's request) before PR 6, so it never had an entry: the guarded
+  path runs it as plain code. M7 H3's "check_reply" was removed on 2026-11-23 (written by Claude
+  at shesha's request, D5 (b)): its own tests are plain tests, and the guarded write path waits
+  on "match_terms" and "run_turn" alone.
 - M3 H1 "text_search" and M3 H2 "rrf_fuse" were removed on 2026-10-28 (both
   written by Claude at shesha's request, for the deadline), so their own tests, the `text_search`
   and hybrid read paths, the owner-connection checks and PR 4/5's real-leg tests are plain tests.

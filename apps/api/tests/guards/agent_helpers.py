@@ -7,7 +7,9 @@ It exists so the route's order, fold and fail-closed paths are tested before she
 fixed shape (ten digits in a row, nothing else: not H2) and `FixedCheck` returns fixed findings
 (not H3): they let a unit test reach the steps after masking and output checks. H2's `mask_pii` is
 written (2026-11-20), so a builder's default masker is the real one; `RaisingMask` stands in for a
-masker that breaks, to pin G3's fail-closed path after the screen cleared.
+masker that breaks, to pin G3's fail-closed path after the screen cleared. H3's `check_reply` is
+written too (2026-11-23), so a builder's default output check is the real one; `RaisingCheck`
+stands in for a check that breaks, for the same reason.
 `WithholdingRecorder` is the pending-action store's stand-in with `create_withheld` (G7).
 """
 
@@ -113,6 +115,19 @@ class DigitRunMask:
     def __call__(self, text: Clean, locales: Sequence[Locale]) -> Masked:
         self.seen.append(text)
         return Masked(Clean(re.sub(r"(?<![0-9])[0-9]{10}(?![0-9])", "[PHONE]", text)))
+
+
+@dataclass
+class RaisingCheck:
+    """NOT H3: an output check that raises, as a broken one would (H3 is written, so its own stub
+    can no longer show the fail-closed path)."""
+
+    error: Exception = field(default_factory=lambda: RuntimeError("check broke"))
+    calls: int = 0
+
+    def __call__(self, reply: str, context: OutputContext) -> tuple[Finding, ...]:
+        self.calls += 1
+        raise self.error
 
 
 WITHHELD_ACTION: Final = UUID("22222222-3333-4444-8555-666666666666")
