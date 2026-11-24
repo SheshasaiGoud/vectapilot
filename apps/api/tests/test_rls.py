@@ -384,11 +384,15 @@ async def test_the_app_role_is_safe_and_owns_nothing(
     # Migration 0007's tables: SELECT on the table, INSERT on named columns only, never UPDATE or
     # DELETE (only the owner's purge deletes, E10).
     extraction = {"extractions", "extraction_fields"}
+    # Migration 0008's tables (M8 PR 1): SELECT on the table; sessions' INSERT on named columns
+    # and UPDATE(revoked_at), staff_login_links' UPDATE(used_at): column grants only, never
+    # DELETE (tests/test_migrations.py checks the columns and the restrictive policies).
+    sessions = {"staff_users", "staff_login_links", "sessions"}
     assert {tuple(row) for row in grants} == (
         {("businesses", "SELECT"), ("llm_calls", "SELECT"), ("llm_calls", "INSERT")}
         | {("documents", privilege) for privilege in write}
         | {("chunks", privilege) for privilege in write}
-        | {(table, "SELECT") for table in sandbox | extraction}
+        | {(table, "SELECT") for table in sandbox | extraction | sessions}
     )
     assert can_create is False
 

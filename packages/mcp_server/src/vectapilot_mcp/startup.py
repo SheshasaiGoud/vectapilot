@@ -4,12 +4,19 @@ In order, each refusal before any later step runs:
 
 1. **The environment** (`Settings.environment`) must be **set explicitly** and be in
    `HEADER_ENVIRONMENTS` (local, test, ci): the flags assert a business and a customer, as
-   `X-Business-Id` and `customer_ref` do in the API, and nothing authenticates them until M8
-   (ADR 0016 decision 9). Settings defaults the environment to `local`; the API shows a missing
-   value at once (production needs real providers), but a stdio server started from a
+   `X-Business-Id` and `customer_ref` do on the API's header routes, and nothing ever
+   authenticates them: the MCP server gets no session and stays local, test and ci only (ADR 0016
+   decision 9, ADR 0019 decision 9). Settings defaults the environment to `local`; the API shows a
+   missing value at once (production needs real providers), but a stdio server started from a
    hand-written host config gives no such signal, so here the default is refused (fail closed).
    Checked before the flags are even parsed for meaning, and before any file or database is read.
-2. **The flags**: `--business-id` must be a business id and `--customer-ref` a customer reference.
+2. **The flags**: `--business-id` must be a business id and `--customer-ref` a customer reference,
+   never a widget session's (`s-` and 32 lowercase hex digits, M8 PR 1, ADR 0019 decision 9): a
+   session's bookings and actions belong to that widget conversation only, so a local MCP run
+   must not read them by typing its reference [proposal, leo]. This is consistency with the
+   header seam, not the control: `POST /v1/agent` in local, test and ci can still name such a
+   reference (D5). The controls are that a session's reference is never sent to a client or
+   logged, and that production refuses the header routes (the route inventory).
 3. **The tool configuration**: `VECTAPILOT_TOOLS_CONFIG_DIR` is required and read whole, as the
    API reads it (`load_tools_dir`), and the business must have a folder in it.
 4. **The database**: the API's engine (`create_api_engine`: its pool reset included) wrapped in
@@ -22,6 +29,7 @@ never a value (a DSN can hold a password; a flag is caller text).
 """
 
 import asyncio
+import re
 from dataclasses import dataclass
 from typing import Final
 
@@ -42,10 +50,18 @@ that does not answer stops startup instead of holding the MCP host."""
 
 REFUSED_ENVIRONMENT: Final = (
     "the MCP server runs only in local, test and ci, set explicitly (VECTAPILOT_ENVIRONMENT):"
-    " --business-id and --customer-ref are not authenticated until M8"
+    " --business-id and --customer-ref are asserted, never authenticated (ADR 0016 decision 9,"
+    " ADR 0019 decision 9)"
 )
 BAD_BUSINESS: Final = "--business-id must be a business id (a lowercase slug)"
 BAD_CUSTOMER: Final = "--customer-ref must be a customer reference (a lowercase slug, 3-40 chars)"
+SESSION_CUSTOMER: Final = (
+    "--customer-ref may not be a widget session's reference (s- and 32 hex digits): a session's"
+    " records belong to that widget conversation only (ADR 0019 decision 9)"
+)
+SESSION_CUSTOMER_REF: Final = re.compile(r"s-[0-9a-f]{32}")
+"""The form `vectapilot_api.auth.store.customer_ref_for` gives a session (S4); a test compares.
+Written out here so the server's process never loads the session code."""
 NO_TOOLS_DIR: Final = "VECTAPILOT_TOOLS_CONFIG_DIR is required: it names each business's tools"
 NO_BUSINESS_TOOLS: Final = "--business-id has no folder in VECTAPILOT_TOOLS_CONFIG_DIR"
 NOT_REGISTERED: Final = "--business-id is not a registered business in the database"
@@ -82,6 +98,8 @@ def validate_flags(business_id: str, customer_ref: str) -> ServerFlags:
         ToolContext(business_id=business, customer_ref=customer_ref)
     except ValidationError:
         raise StartupRefused(BAD_CUSTOMER) from None
+    if SESSION_CUSTOMER_REF.fullmatch(customer_ref) is not None:
+        raise StartupRefused(SESSION_CUSTOMER)
     return ServerFlags(business_id=business, customer_ref=customer_ref)
 
 

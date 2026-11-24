@@ -5,10 +5,14 @@
 is a fixed slug (`RouteSlug`), never a path. `h` is the first 16 hex characters of SHA-256 over
 `business_id ":" customer_ref`: **pseudonymised**, and reversible by enumeration (a customer
 reference is a short slug), never called anonymous. The business in the hash gives `cust-001`
-two different hashes in two businesses. M8's session id replaces it.
+two different hashes in two businesses. From M8 (S4) a widget session's reference is `s-` plus
+its uuid's hex, so its segment is not enumerable; the hash and the grammar stay.
 
-**Limits** (`admit`): a per-business window (`all`, the real control until M8) and, when the
-request names a customer, a per-customer window (advisory: `customer_ref` is client-asserted).
+**Limits** (`admit`): a per-business window (`all`, the real control) and, when the request names
+a customer, a per-customer window (advisory: client-asserted on the header routes; on the widget,
+one window per session, which a client renews by opening a new session; the per-business windows
+are the control). M8 PR 1 adds one route with its own per-business window and no customer
+(`LimitPolicy.routes`): creating a customer session. Staff login has none (step B3).
 One Lua script per request checks every window and increments all of them or none (`RATE_SCRIPT`),
 loaded with `register_script`: redis-py sends EVALSHA and reloads the script on NOSCRIPT after a
 Redis restart. A window is fixed: it starts at its first request and its key expires with it. A
@@ -46,11 +50,12 @@ import asyncio
 import hashlib
 import math
 import re
-from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import ROUND_CEILING, Decimal
 from enum import StrEnum
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Final, Protocol, Self
 
 from fastapi.responses import JSONResponse
@@ -219,15 +224,26 @@ class Window:
 
 @dataclass(frozen=True)
 class LimitPolicy:
-    """The windows and the day's cap (Settings' placeholders, module docstring)."""
+    """The windows and the day's cap (Settings' placeholders, module docstring).
+
+    `routes` (M8 PR 1): a route's own per-business window, used instead of `business` for that
+    route only. Creating a customer session has its own placeholder
+    (`session_limit_business_per_minute`, S14); every other route keeps `business`. Its keys
+    follow the same grammar (`RouteSlug`)."""
 
     business: Window
     customer: Window
     budget_micro_usd: int
+    routes: Mapping[RouteSlug, Window] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.budget_micro_usd < 1:
             raise ValueError("a day's budget is at least one micro-USD")
+        object.__setattr__(self, "routes", MappingProxyType(dict(self.routes)))
+
+    def business_window(self, route: RouteSlug) -> Window:
+        """The per-business window of `route`: its own when it has one, else `business`."""
+        return self.routes.get(route, self.business)
 
     @classmethod
     def from_settings(cls, settings: "Settings") -> Self:
@@ -235,6 +251,11 @@ class LimitPolicy:
             business=Window(settings.guard_limit_business_per_minute, WINDOW_SECONDS),
             customer=Window(settings.guard_limit_customer_per_minute, WINDOW_SECONDS),
             budget_micro_usd=micro_usd(settings.guard_budget_usd_per_business_per_day),
+            routes={
+                RouteSlug.SESSION: Window(
+                    settings.session_limit_business_per_minute, WINDOW_SECONDS
+                ),
+            },
         )
 
 
@@ -408,7 +429,7 @@ class RedisLimiter:
     async def admit(
         self, business_id: str, route: RouteSlug, customer_ref: str | None = None
     ) -> None:
-        windows = [(rate_key(business_id, route), self._policy.business)]
+        windows = [(rate_key(business_id, route), self._policy.business_window(route))]
         if customer_ref is not None:
             windows.append((rate_key(business_id, route, customer_ref), self._policy.customer))
         keys = [key for key, _ in windows]

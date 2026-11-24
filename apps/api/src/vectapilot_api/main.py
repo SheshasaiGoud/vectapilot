@@ -25,7 +25,11 @@ from vectapilot_api.agent.service import AgentService, AnswerSource, ProposalSto
 from vectapilot_api.agent.types import LoopLimits
 from vectapilot_api.answer.router import router as answer_router
 from vectapilot_api.answer.service import ANSWER_ALIAS, AnswerService, RagConfig
-from vectapilot_api.config import GUARD_OFF_ENVIRONMENTS, Settings
+from vectapilot_api.config import (
+    GUARD_OFF_ENVIRONMENTS,
+    WIDGET_HTTP_ORIGIN_ENVIRONMENTS,
+    Settings,
+)
 from vectapilot_api.db import Database, create_api_engine
 from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.factory import build_embedder
@@ -71,9 +75,12 @@ from vectapilot_api.kb.store import PostgresKbStore
 from vectapilot_api.log import configure_logging
 from vectapilot_api.retrieval.router import router as search_router
 from vectapilot_api.retrieval.search import RetrievalConfig, SearchService
+from vectapilot_api.staff.router import router as staff_router
 from vectapilot_api.tools.config import ToolsConfig
 from vectapilot_api.tools.executor import TransactionSource
 from vectapilot_api.tools.files import load_tools_dir
+from vectapilot_api.widget.config import WidgetRegistry, load_widget_dir
+from vectapilot_api.widget.router import router as widget_router
 
 logger = logging.getLogger("vectapilot_api")
 GUARDS_NOT_CONFIGURED: Final = "guards_not_configured"
@@ -233,6 +240,8 @@ def create_app(
     # needs the guard folder. In local, test and ci the app starts, and those routes will hand off
     # every message (`guards_not_configured`, wired by PR 6-8).
     settings.require_guard_config()
+    # Fail fast (M8 PR 1, S5): in production the session routes need the API's own origin.
+    settings.require_public_origin()
     # Fail fast (ADR 0006): an invalid catalog, or an alias whose model has no price, stops the
     # app here, before it serves anything. The answer's alias must exist too (M2 PR 6).
     catalog = load_catalog()
@@ -294,6 +303,20 @@ def create_app(
     # handed off [proposal]. Fixed codes only, never a term.
     if settings.guards_not_configured():
         logger.warning(GUARDS_NOT_CONFIGURED, extra={"environment": settings.environment})
+    # Fail fast (M8 PR 1, rule 9, S8): with a widget folder, every file must be valid, every
+    # origin strict, every UI language one its manifest supports, and an enabled health widget
+    # needs its guard guidance, or the app stops here (WidgetConfigError). Files only: the config
+    # route reads this, never the database or Redis (S14).
+    widgets = WidgetRegistry.empty()
+    if settings.widget_config_dir is not None:
+        if settings.corpus_dir is None:  # pragma: no cover (Settings refuses it)
+            raise ValueError("corpus_dir is required with widget_config_dir")
+        widgets = load_widget_dir(
+            settings.widget_config_dir,
+            settings.corpus_dir,
+            guards,
+            allow_http_loopback=settings.environment in WIDGET_HTTP_ORIGIN_ENVIRONMENTS,
+        )
     # Fail fast (D7 (a)): `agent_router = on` needs a live M4 model for the API's embedding model
     # (RouterModelError); Settings requires the folder's setting when it is on.
     router_model = None
@@ -524,6 +547,7 @@ def create_app(
     app.state.extraction = extraction
     app.state.guards = guards
     app.state.guard_selftest = guard_selftest
+    app.state.widgets = widgets
     app.include_router(health_router)
     app.include_router(kb_router)
     app.include_router(search_router)
@@ -531,6 +555,10 @@ def create_app(
     app.include_router(actions_router)
     app.include_router(agent_router)
     app.include_router(extraction_router)
+    # M8 PR 1 (ADR 0019): the widget's and the staff's session routes. Identity from the session
+    # only (S1), `no-store` on every response (S9, `auth.http.SessionRoute`).
+    app.include_router(widget_router)
+    app.include_router(staff_router)
     install_error_handlers(app)
     # G10-S2: the access line names the matched route's template, read from the request's scope
     # (`guards.redact.AccessLine`). For the log only: it screens and changes nothing.

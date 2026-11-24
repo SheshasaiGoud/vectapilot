@@ -32,6 +32,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Connection, event, text
 from sqlalchemy.engine.interfaces import AdaptedConnection, DBAPIConnection
+from sqlalchemy.exc import DBAPIError, MultipleResultsFound
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 from sqlalchemy.pool import ConnectionPoolEntry, NullPool, PoolResetState
 
@@ -64,6 +65,15 @@ from tests.canary.read_paths import (
     read_path_params,
     sql_on_every_business_table,
 )
+from tests.canary.sessions import (
+    BAIT_SESSION_ID,
+    BAIT_STAFF_ID,
+    BAIT_STAFF_SESSION_ID,
+    OWNER_SESSION_PLANT,
+    SESSION_UPROOT,
+    owner_session_params,
+    plant_app_sessions,
+)
 from tests.canary.write_paths import WRITE_PATHS, served_with_tools, write_path_params
 from tests.canary.write_paths import confirm as confirm_through_the_api
 from tests.conftest import integration
@@ -73,6 +83,7 @@ from vectapilot_api.actions import confirm as confirm_module
 from vectapilot_api.actions.confirm import ConfirmService
 from vectapilot_api.actions.router import ACTION_NOT_FOUND
 from vectapilot_api.actions.types import ActionNotFound, ActionStatus, ConfirmRequest
+from vectapilot_api.auth import store as auth_store
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import APP_ROLE, Database, business_transaction, create_api_engine
 from vectapilot_api.embeddings.base import EmbeddingSpec
@@ -108,6 +119,8 @@ SANDBOX_TABLES: Final = {
 """Migration 0006's tables (M5 PR 1, ADR 0016 decision 6): the catalog must find them too."""
 EXTRACTION_TABLES: Final = {"extractions", "extraction_fields"}
 """Migration 0007's tables (M6 PR 3, ADR 0017 decision 6): the catalog must find them too."""
+SESSION_TABLES: Final = {"staff_users", "staff_login_links", "sessions"}
+"""Migration 0008's tables (M8 PR 1, ADR 0019 decision 8): the catalog must find them too."""
 
 VECTOR: Final = "[" + ",".join(["0"] * 1023 + ["1"]) + "]"
 PLANT_LANGUAGE: Final = "en"
@@ -239,6 +252,7 @@ APP_PLANT: Final = (
     ),
 )
 UPROOT: Final = (
+    *SESSION_UPROOT,  # M8 PR 1: sessions and links before the staff they name
     text("DELETE FROM tool_audit WHERE business_id = :b"),
     text("DELETE FROM sandbox_tickets WHERE business_id = :b"),
     text("DELETE FROM sandbox_bookings WHERE business_id = :b"),
@@ -329,14 +343,16 @@ async def plant(owner: AsyncEngine, app: AsyncEngine, letter: str) -> Planted:
         "action_id": bait_action_id(planted.business_id),
         "token_sha256": hashlib.sha256(BAIT_CONFIRM_TOKEN.encode()).hexdigest(),
         "extraction_id": BAIT_EXTRACTION_ID,
+        **owner_session_params(planted.business_id),
     }
     async with business_transaction(owner, planted.business_id) as connection:
         await connection.execute(text("INSERT INTO businesses (business_id) VALUES (:b)"), params)
-        for statement in OWNER_PLANT:
+        for statement in (*OWNER_PLANT, *OWNER_SESSION_PLANT):
             await connection.execute(statement, params)
     async with business_transaction(app, planted.business_id) as connection:  # the app role writes
         for statement in (*PLANT, *APP_PLANT):
             await connection.execute(statement, params)
+        await plant_app_sessions(connection, planted.business_id)  # M8 PR 1, through auth.store
     return planted
 
 
@@ -537,6 +553,94 @@ async def test_the_same_extraction_id_in_both_businesses_is_invisible_across_the
             rows = (await connection.execute(EXTRACTION_BY_ID, params)).all()
         assert [tuple(row) for row in rows] == [(mine.business_id, mine.canary, mine.canary)]
         shown = {"extraction by id": "\n".join(" ".join(map(str, row)) for row in rows)}
+        assert checks.canary_leaks(shown, mine, other) == []
+
+
+async def test_the_catalog_finds_the_session_tables_with_forced_rls(
+    owner_engine: AsyncEngine,
+) -> None:
+    # M8 PR 1 (migration 0008): all three are business tables, so every check above and below
+    # covers them; `plant` seeds each (tests/canary/sessions.py), so the positive controls do too.
+    async with owner_engine.connect() as connection:
+        relations = {r.name: r for r in await load_relations(connection)}
+
+    assert set(relations) >= SESSION_TABLES, sorted(relations)
+    for table in SESSION_TABLES:
+        assert (relations[table].kind, relations[table].rls_enabled) == ("r", True), table
+        assert relations[table].rls_forced, table
+
+
+async def test_the_session_tables_keys_are_read_and_pair_the_business(
+    owner_engine: AsyncEngine,
+) -> None:
+    # The positive control for the key and foreign-key checks on 0008: they must see its keys,
+    # or they would pass by not looking at them.
+    async with owner_engine.connect() as connection:
+        keys = [k for k in await load_foreign_keys(connection) if k.table in SESSION_TABLES]
+        indexes = [k for k in await load_key_indexes(connection) if k.table in SESSION_TABLES]
+        tables = await business_tables(connection)
+
+    composite = {
+        (k.table, k.columns, k.referenced_table, k.referenced_columns)
+        for k in keys
+        if k.referenced_table != "businesses"
+    }
+    staff = ("business_id", "staff_id")
+    assert composite == {
+        ("staff_login_links", staff, "staff_users", ("business_id", "id")),
+        ("sessions", staff, "staff_users", ("business_id", "id")),
+    }
+    assert {(k.table, k.columns) for k in indexes} == {
+        ("staff_users", ("business_id", "id")),
+        ("staff_login_links", ("business_id", "id")),
+        ("staff_login_links", ("business_id", "token_sha256")),
+        ("sessions", ("business_id", "id")),
+        ("sessions", ("business_id", "token_sha256")),
+    }
+    assert checks.foreign_key_problems(keys, tables) == []
+    assert checks.key_problems(indexes) == []
+
+
+SESSION_BY_ID: Final = text(
+    "SELECT s.business_id, s.kind, u.display_name FROM sessions s"
+    " LEFT JOIN staff_users u ON u.business_id = s.business_id AND u.id = s.staff_id"
+    " WHERE s.id IN (:session_id, :staff_session_id) ORDER BY 1, 2"
+)
+STAFF_BY_ID: Final = text(
+    "SELECT business_id, display_name FROM staff_users WHERE id = :staff_id ORDER BY 1"
+)
+
+
+async def test_the_same_session_and_staff_ids_in_both_businesses_are_invisible_across_them(
+    planted: tuple[Planted, Planted], owner_engine: AsyncEngine, fresh_engine: AsyncEngine
+) -> None:
+    # M8 PR 1: both businesses hold BAIT_SESSION_ID, BAIT_STAFF_SESSION_ID and BAIT_STAFF_ID, the
+    # member's display name their own canary. The bait is real: on the owner's connection (no RLS)
+    # each id names both businesses' rows.
+    a, b = planted
+    params = {
+        "session_id": BAIT_SESSION_ID,
+        "staff_session_id": BAIT_STAFF_SESSION_ID,
+        "staff_id": BAIT_STAFF_ID,
+    }
+    async with owner_engine.connect() as connection:
+        sessions = (await connection.execute(SESSION_BY_ID, params)).all()
+        staff = (await connection.execute(STAFF_BY_ID, params)).all()
+    assert [tuple(row) for row in sessions] == sorted(
+        (business.business_id, kind, name)
+        for business in planted
+        for kind, name in (("customer", None), ("staff", business.canary))
+    )
+    assert [tuple(row) for row in staff] == sorted((x.business_id, x.canary) for x in planted)
+
+    for mine, other in ((a, b), (b, a)):
+        async with business_transaction(fresh_engine, mine.business_id) as connection:
+            rows = [
+                *(await connection.execute(SESSION_BY_ID, params)).all(),
+                *(await connection.execute(STAFF_BY_ID, params)).all(),
+            ]
+        assert {row[0] for row in rows} == {mine.business_id}
+        shown = {"session and staff by id": "\n".join(" ".join(map(str, row)) for row in rows)}
         assert checks.canary_leaks(shown, mine, other) == []
 
 
@@ -919,6 +1023,73 @@ async def test_red_proof_a_tool_statement_without_its_business_clause_is_caught_
         assert any(b.business_id in problem for problem in as_owner), as_owner
     else:
         assert any(f"shows nothing of {a.business_id}" in p for p in as_owner), as_owner
+
+
+# M8 PR 1: every business clause of the auth statements (`auth.store`). Both businesses hold the
+# same hashes under the same ids (tests/canary/sessions.py), so under RLS (the app role) a
+# statement that lost one still reads only the business's row, and on the owner's connection it
+# reads both and raises (`one_or_none`: never a choice between two businesses' sessions). The
+# link use's member subquery raises in Postgres itself (a scalar subquery with two rows, SQLSTATE
+# 21000), and the revocation through `RETURNING id` (zara's review: the one statement that takes
+# an id, `BAIT_SESSION_ID`, planted in both).
+
+
+@dataclass(frozen=True)
+class AuthClause:
+    path: str
+    statement: str
+    clause: str
+    raises: type[Exception] = MultipleResultsFound
+    sqlstate: str | None = None
+
+
+AUTH_CLAUSES: Final = {
+    "customer lookup": AuthClause(
+        "auth customer session", "CUSTOMER_SESSION", "business_id = :business_id AND "
+    ),
+    "staff lookup": AuthClause(
+        "auth staff session", "STAFF_SESSION", "s.business_id = :business_id AND "
+    ),
+    "staff lookup join": AuthClause(
+        "auth staff session", "STAFF_SESSION", "u.business_id = s.business_id AND "
+    ),
+    "login link use": AuthClause(
+        "auth login link use", "USE_LOGIN_LINK", "business_id = :business_id AND "
+    ),
+    "login link member": AuthClause(
+        "auth login link use",
+        "USE_LOGIN_LINK",
+        "u.business_id = staff_login_links.business_id AND ",
+        DBAPIError,
+        "21000",  # cardinality_violation: more than one row from a scalar subquery
+    ),
+    "revoke": AuthClause(
+        "auth revoke session", "REVOKE_SESSION", "business_id = :business_id AND "
+    ),
+}
+
+
+@pytest.mark.parametrize("proof", sorted(AUTH_CLAUSES))
+async def test_red_proof_an_auth_statement_without_its_business_clause_is_caught_as_the_owner(
+    owner_engine: AsyncEngine,
+    fresh_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    monkeypatch: pytest.MonkeyPatch,
+    proof: str,
+) -> None:
+    a, b = planted
+    target = AUTH_CLAUSES[proof]
+    statement = str(getattr(auth_store, target.statement).text)
+    assert statement.count(target.clause) == 1, f"{proof}'s clause changed: update this proof"
+    monkeypatch.setattr(auth_store, target.statement, text(statement.replace(target.clause, "")))
+
+    under_rls = checks.canary_leaks(await READ_PATHS[target.path](fresh_engine, a), a, b)
+
+    assert under_rls == []  # RLS hides the missing clause...
+    with pytest.raises(target.raises) as raised:  # ...the owner does not
+        await OWNER_CONNECTION_PATHS[target.path](owner_engine, a)
+    if target.sqlstate is not None:
+        assert getattr(getattr(raised.value, "orig", None), "sqlstate", None) == target.sqlstate
 
 
 class OwnerDatabase:

@@ -444,9 +444,9 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
   businesses. Compose gets one more read-only mount (sofia reviews).
 - **Settings** (fail fast, typed errors without values; each joins `TEST_SETTINGS_FIELDS`):
   `public_origin` (required in production), `staff_origin` only under D12 (a),
-  `widget_config_dir`, `ui_dir`, the three lifetimes (P1), limits for session creation and staff
-  login, `cookie_insecure_dev` (local and test only, refused elsewhere at startup) and
-  `cors_dev_origins` (local only; cut 6).
+  `widget_config_dir`, `ui_dir`, the three lifetimes (P1), the limit for session creation (staff
+  login's was dropped in step B3), `cookie_insecure_dev` (local and test only, refused elsewhere
+  at startup) and `cors_dev_origins` (local only; cut 6).
 - **Routes:** `GET /v1/widget/{business_id}/config` (files only: no database, no Redis; returns
   the guidance for S16), `POST /v1/widget/sessions {ui_language}` (Origin = `public_origin`; the
   business in the registry and its widget enabled; the per-business creation window; returns the
@@ -459,8 +459,8 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
 - **Owner CLI:** `python -m vectapilot_api.staff add|issue-link|disable` (owner role; local, test
   and ci only until M10). `issue-link` prints `<public_origin>/staff/login#b=<id>&t=<token>`:
   the fragment never reaches a server log or `Referer`.
-- **Limiter:** `RouteSlug` gains `session` and `staff_login`; the closed key grammar and the
-  K-004 key scan cover them unchanged.
+- **Limiter:** `RouteSlug` gains `session` (and `staff_login`, dropped in step B3); the closed key
+  grammar and the K-004 key scan cover it unchanged.
 - **Tests:**
   - Canary, under `tests/canary/` (the gate's no-skip rule): the new tables named in the catalog
     assertion; A's token with B's prefix → 401 in both directions; one uuid planted in A and B is
@@ -481,6 +481,120 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
     fallback is `cookie_insecure_dev`.
 - **Acceptance also shows:** `make check`; `make mcp-check`; `make test-integration` locally, then
   the database back at 0005 (S12's downgrade); the S13 diff-stat empty; no dependency change.
+- **Step B1 (built 2026-11-24, diego): migration 0008, `auth/`, Settings, canary.** Routes, the
+  widget files and their compose mount, the owner CLI, the MCP refusal, the limiter's slugs, the
+  route inventory and the per-route log canary followed in step B2 (below).
+  - **Expiry, decided here:** a restrictive `SELECT` policy `hidden_at_expiry` (app role,
+    `expires_at > now()`) on `sessions` and `staff_login_links`, as 0007, **and** the same clause
+    in every statement (the owner's connection has no policy). Revocation and use stay in the
+    statements' clauses only: Postgres checks `SELECT` policies against an UPDATE's new row when
+    the UPDATE reads the table (WHERE or RETURNING), so a policy `revoked_at IS NULL` or
+    `used_at IS NULL` would refuse S5's `UPDATE ... RETURNING` with 42501. Verified against
+    Postgres by `tests/test_migrations.py` (the refusal is a red proof there), pending the first
+    integration run.
+  - [proposal] `ui_language` is set exactly for customer sessions (a CHECK); a staff session has
+    none. `channel` is `web` for both.
+  - [proposal] A role that may not use a staff route is 403 `role_refused` (authenticated, not
+    allowed), apart from the one 401. CSRF answers 403 `cross_site_refused`, a body that is not
+    `application/json` 415 `json_only`; `X-Business-Id` on a session route 400
+    `business_header_refused`. The widget's 401 adds `WWW-Authenticate: Bearer`; its body is the
+    staff 401's, byte for byte. Every auth answer carries `Cache-Control: no-store`.
+  - [proposal] `admin` may use every `reviewer` route (P2's "plus").
+  - [proposal] A login link of a disabled member is still consumed; the staff lookup refuses that
+    member on every request, so the session it creates opens nothing. (Tightened in step B3: the
+    login opens no session at all for such a member, and answers the one 401.)
+  - [proposal] `public_origin` is required in production by `create_app`
+    (`require_public_origin`), not by Settings: the MCP server and the CLIs never serve a session.
+    Origins are strict: lowercase, no default port, no IP but 127.0.0.1, no IPv6; http only for
+    `localhost` and `127.0.0.1` outside production.
+  - [proposal] New setting `session_lookup_timeout_seconds` (2 s, a safety bound): past it, S14's
+    typed 503. Limit placeholders: 60 new sessions and 10 staff logins per business per minute
+    (the staff-login window dropped in step B3).
+  - [proposal] Session and login-link tokens share the form `<business_id>.<secret>`, so the
+    CLI's `#b=<id>&t=<token>` names the business twice; the CLI step decides whether `b=` stays.
+  - [proposal] `auth/` joins the coverage gate's targets (100 % combined and branch today).
+- **Step B2 (built 2026-11-24, diego): routes, widget files, owner CLI, MCP refusal, limiter
+  slugs, route inventory, log canaries.** `widget/` (`config`, `models`, `router`), `staff/`
+  (`router`, `owner`, `cli`), `auth/http.py` (`SessionRoute`: `no-store` and a closed 422 on the
+  new routes only), `data/widget/` (two synthetic files and a README), one read-only mount and
+  `VECTAPILOT_WIDGET_CONFIG_DIR` in `infra/compose.yaml`, `RouteSlug.SESSION` (and `STAFF_LOGIN`,
+  dropped in step B3). The integration tests (`tests/canary/test_session_routes.py`, the login-link race through the
+  real route included, and `tests/staff/test_cli_db.py`) are collected, not yet run.
+  - [proposal] `POST /v1/widget/sessions` takes `{business_id, ui_language}`: the one request
+    before a session exists, so it names the business (as the widget page's URL does; anyone may
+    open a session for an enabled business, ADR 0019 Consequences). Every later widget request
+    takes it from the session, and S1's "a body naming `business_id` is a 422" holds on every
+    other session route. The alternative is `POST /v1/widget/{business_id}/sessions`, as the
+    config route.
+  - [proposal] Each route may have its own per-business window (`LimitPolicy.routes`): session
+    creation uses its own, every M7 route keeps `business`; keys and the script are unchanged.
+    (B2 gave staff login one too, keyed by the token's business prefix; step B3 dropped it.)
+  - [proposal] Order on every session route: a body FastAPI cannot decode is refused first (400
+    or 422, before any check runs, writing nothing; step B3), then `X-Business-Id` (400), then
+    the Origin check, then the body model, then the lookup; logout included. A session route
+    turns only a database or timeout error into S14's 503; anything else is a 500 (the log
+    canary's forced path), as on M7's routes. Session creation's 429 carries a health business's
+    guidance (G3); its 503 does not (the widget shows its cached copy, S16). A 404 or 405 from the
+    router itself under the new prefixes has no `no-store` (it holds no data; a middleware would
+    touch every route, S13).
+  - [proposal] Widget files: an enabled widget names at least one origin. The samples name
+    `https://www.<business_id>.example` only (RFC 2606), so they load in every environment; an
+    `http://localhost` origin loads only in `local`, as written above. The samples' texts:
+    greeting, contact fallback (the corpus's fictional numbers) and two quick replies per
+    language; hi and te drafted by Claude and labelled unreviewed (D9); both follow-ups left out
+    for shesha (Q9, D11 (b)). Accent colours `#0f5c8c` and `#7a3e00` against white text, about
+    7.2:1 and 8.3:1 (arithmetic by the loader's own function); white as the text colour is for
+    sofia to confirm in PR 4.
+  - [proposal] The login link keeps `#b=<business_id>&t=<token>`: the page can name the business
+    before any request; the API reads only the token.
+  - [proposal] `VECTAPILOT_PUBLIC_ORIGIN` is not in compose yet (this step's compose change is the
+    mount): without it every session POST answers 403. PR 2, which serves the pages, adds
+    `http://localhost:8000`.
+  - **For shesha (rule 7, by hand, not done by Claude):** whether Safari and Chromium keep the
+    `__Host-vp_staff` cookie (`Secure`) on `http://localhost:8000` and on `http://127.0.0.1:8000`.
+    With the API running with `VECTAPILOT_PUBLIC_ORIGIN` set to that origin and a synthetic member
+    (`uv run python -m vectapilot_api.staff add`, then `issue-link`), open `<origin>/docs` in each
+    browser, run `fetch('/v1/staff/login', {method: 'POST', headers: {'content-type':
+    'application/json'}, body: JSON.stringify({token: '<the t= value>'})})` in its console, then
+    `fetch('/v1/staff/me')`: a 200 means the cookie was kept and sent, a 401 that it was dropped
+    (also visible under the browser's stored cookies). Repeat with a fresh link per try; if a
+    browser drops it, repeat with `VECTAPILOT_COOKIE_INSECURE_DEV=true` (cookie `vp_staff`).
+    Write the browser versions and the four results into the PR.
+- **Step B3 (2026-11-24, diego): zara's and leo's review findings and the mutation probes.**
+  Applied as found (each tightens a proposal; none changes a decided item, D1–D15 or P1–P7):
+  - **One-way revocation and use** (migration 0008, not yet merged, so edited in place): two
+    RESTRICTIVE `UPDATE` policies for the app role, `revoke_once` on `sessions` and `use_once` on
+    `staff_login_links` (`USING (col IS NULL) WITH CHECK (col IS NOT NULL)`), as 0006's
+    `app_writes_are_actions`. An un-revoke or un-use updates no row; clearing the column on a live
+    row is 42501. `UPDATE` policies, not `SELECT` ones, so B1's `UPDATE ... RETURNING` trap does
+    not apply.
+  - **A disabled member's link opens nothing**: S5's link use reads the member in the same
+    statement (a scalar subquery that pairs the business, so a lost pairing raises SQLSTATE 21000
+    on the owner's connection instead of choosing); for a disabled member the login commits the
+    use, stores no session and answers the one 401. The owner's `disable` also revokes the
+    member's live sessions in the same transaction, so a hand re-enable revives none.
+  - **No staff-login window** (zara's recommendation; her finding asked shesha, but it changes no
+    decided item, so it is applied and shown here for review): a window keyed by the token's
+    business prefix, which the caller writes, runs before any lookup and only lets anyone lock a
+    business's staff out (and makes login depend on Redis). Removed:
+    `staff_login_limit_business_per_minute`, `RouteSlug.STAFF_LOGIN`, the login's limiter call.
+    The link's 256 bits and single use are the control; per-IP limits are M10's (Risks). To
+    reverse: restore the setting, the slug and the call, and record the lockout in the note.
+  - **An undecodable body is typed**: `SessionRoute` also answers FastAPI's own `HTTPException`
+    (a body that is not UTF-8, 400) with a typed `{detail, error: "invalid_request"}` body of
+    fixed text and `no-store`. The documented order now starts with it.
+  - **Origins**: an IPv4 host is refused by WHATWG's "ends in a number" (decimal or `0x` hex last
+    label), so `https://0x7f000001` and `https://1.2.3.0x4` are refused like `https://10.0.0.1`.
+  - **Canary**: the revocation joins `AUTH_PATHS` with a red proof on the owner's connection, the
+    link use's member pairing gets its own red proof (21000), and a login with an expired link
+    joins the route tests (the one 401, the link unused, no session row).
+  - **Leo**: the route inventory walks every session route's request-body schema (no
+    `customer_ref`, `session_id` or `staff_id`; `business_id` only on session creation), so PR 2's
+    message and confirm routes are checked the day they exist; the MCP process may not load the
+    session code (`NEVER_LOADED`); the MCP's refusal text says "asserted, never authenticated"
+    (no change is coming after M8); G9's docstring says what changes for a session reference.
+  - **Mutation probes**: one test per surviving non-equivalent mutant (11), each shown to fail on
+    its mutant and pass on the restored code.
 
 ## PR 2 — `m8/widget-api` (diego; leo reviews confirm, zara parity and honesty, noah turns and feedback) · L · after PR 1, D2, D6, D7, D11, D15
 - **Migration M8-b `handoffs_and_turns`:**
@@ -1062,6 +1176,9 @@ open questions stay open.
   Q4c.
 - **One-time links are bearer credentials** printed in a terminal: 15 minutes, single use,
   local, test and ci only.
+- **Staff login has no rate window in M8** (step B3, zara's review): the link's 256 random bits
+  and single use are the control, and a per-business window keyed by a caller-written token
+  prefix would only be a lockout switch. Per-IP limits wait for M10's edge.
 - **No idle timeout on staff sessions** (8 h absolute): logout revokes; revisit in M10.
 - **Migrations and the measurement database:** local integration runs must end at 0005, so every
   M8 downgrade is tested; numbering races M7 PR 11 (P4).

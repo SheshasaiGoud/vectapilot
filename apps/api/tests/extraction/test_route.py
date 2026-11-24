@@ -143,6 +143,7 @@ def test_production_refuses_the_route_before_anything_is_read(
         voyage_api_key="not-a-real-key",
         extraction_config_dir=EXTRACTION_DIR,
         corpus_dir=CORPUS_DIR,
+        public_origin="https://api.vectapilot.example",  # production needs one (M8 PR 1)
     )
     response, store, provider = post(settings=settings)
 

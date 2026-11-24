@@ -14,7 +14,8 @@ escapes the app, "Exception in ASGI application" with `exc_info` (`uvicorn.error
 both as uvicorn does.
 
 **The two server lines PR 1 pinned as known gaps are hard assertions since PR 3:**
-- **G10-S1** (11 cases, one per route in `ESCAPES`): a forced exception that escapes a route was
+- **G10-S1** (17 cases, one per route in `ESCAPES`: M7's 11 and M8 PR 1's 6 session routes): a
+  forced exception that escapes a route was
   written by the server's error line with its message, canary included. Decided 2026-11-16
   (shesha, D-error-line): the `uvicorn.error` record's `exception` is the exception's class name
   and stack frames, never its message (`guards.redact.frames_only`), and masked once H2 exists.
@@ -25,6 +26,11 @@ both as uvicorn does.
   template, `[unmatched]` for a 404 (`guards.redact.AccessLine`), so no canary part at all is
   left, not only the PII ones.
 
+**M8 PR 1's session routes** (the widget's and the staff's) run here too, on `ScriptedDatabase`
+(`tests/auth/fakes.py`) and the fake limiter, with the canary in the query, the user agent and,
+where there is one, the body. Their own credentials (tokens, hashes, cookies, `Authorization`) are
+`tests/auth/test_route_log_canary.py`'s check.
+
 The canary is synthetic: the phone number is not dialable (+91 numbers never start with 0, as
 the repository's other fixtures) and the e-mail is under `example.com` (RFC 2606).
 """
@@ -33,8 +39,10 @@ import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any, Final, Literal, NoReturn
 from urllib.parse import quote, unquote_plus
+from uuid import uuid4
 
 import httpx2
 import pytest
@@ -52,6 +60,13 @@ from tests.agent.providers import BlockCheckingProvider, reply_json
 from tests.agent.test_service import ALL, RETAIL, CannedAnswers, RecordingStore
 from tests.answer.apps import answer_service, gateway_for
 from tests.answer.providers import CitingProvider
+from tests.auth.fakes import (
+    TOKEN,
+    ScriptedConnection,
+    ScriptedDatabase,
+    customer_row,
+    staff_row,
+)
 from tests.conftest import make_settings
 from tests.extraction.fakes import SUNRISE_ID, referral
 from tests.extraction.helpers import EXTRACTION_DIR
@@ -71,6 +86,8 @@ from tests.kb.test_routes import PARAMS as KB_PARAMS
 from tests.kb.test_routes import build_kb
 from tests.retrieval.standins import build_search, hit
 from tests.tools.helpers import CORPUS_DIR, SANDBOX_DIR
+from tests.widget.helpers import ORIGIN, WIDGET_DIR
+from tests.widget.served import inserted
 from vectapilot_api import health, main
 from vectapilot_api.actions.confirm import ConfirmService
 from vectapilot_api.agent.profiles import build_profile
@@ -86,6 +103,8 @@ from vectapilot_api.agent.types import (
     TurnReply,
 )
 from vectapilot_api.answer.router import get_answer_service
+from vectapilot_api.auth.cookies import STAFF_COOKIE
+from vectapilot_api.auth.tokens import token_sha256
 from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import Settings
 from vectapilot_api.db import Database
@@ -101,6 +120,7 @@ from vectapilot_api.log import JsonFormatter
 from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.router import get_search_service
 from vectapilot_api.tools.config import ToolName
+from vectapilot_api.widget.models import WidgetConfigResponse
 
 MARK: Final = "zq7canary4e1b"
 """Free text with no PII shape: found anywhere, it means customer text reached a log."""
@@ -242,6 +262,8 @@ def settings(tmp_path_factory: pytest.TempPathFactory) -> Settings:
         extraction_config_dir=EXTRACTION_DIR,
         corpus_dir=CORPUS_DIR,
         guard_config_dir=sample_guard_dir(tmp_path_factory.mktemp("canary") / "guard"),
+        widget_config_dir=WIDGET_DIR,  # M8 PR 1
+        public_origin=ORIGIN,
         log_level="INFO",
     )
 
@@ -500,6 +522,118 @@ def extractions(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch)
     return Exchange(app, send, status, started)
 
 
+# ── M8 PR 1: the session routes, on `ScriptedDatabase` and the fake limiter ─────────────────
+
+WIDGET_BUSINESS: Final = "paws-and-co"
+SAME_ORIGIN: Final = {"origin": ORIGIN}
+
+
+def session_app(
+    settings: Settings, script: list[list[Any] | BaseException]
+) -> tuple[FastAPI, Callable[[FastAPI], None]]:
+    """The app on the fake limiter, and the `started` hook that gives it a database answering
+    `script` (each statement takes the next item)."""
+
+    def started(app: FastAPI) -> None:
+        app.state.database = ScriptedDatabase(ScriptedConnection(list(script)))
+
+    return create_app(settings, limiter=FakeLimiter()), started
+
+
+def widget_config(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Exchange:
+    if kind == "forced":
+        monkeypatch.setattr(WidgetConfigResponse, "of", raising)
+    app, started = session_app(settings, [])
+    business = f"no-{MARK}" if kind == "refusal" else WIDGET_BUSINESS
+    status = {"success": 200, "refusal": 404, "forced": 500}[kind]
+    return Exchange(app, get(f"/v1/widget/{business}/config"), status, started)
+
+
+def widget_sessions(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Exchange:
+    script: list[list[Any] | BaseException] = (
+        [RuntimeError(FORCED)] if kind == "forced" else [[inserted()]]
+    )
+    app, started = session_app(settings, script)
+    body: dict[str, str] = {"business_id": WIDGET_BUSINESS, "ui_language": "en"}
+    if kind == "refusal":
+        body["note"] = CANARY  # a closed body: the 422 echoes nothing
+
+    def send(client: TestClient) -> httpx2.Response:
+        return client.post(
+            "/v1/widget/sessions", json=body, params={"note": CANARY}, headers=SAME_ORIGIN
+        )
+
+    return Exchange(app, send, {"success": 201, "refusal": 422, "forced": 500}[kind], started)
+
+
+def widget_session(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Exchange:
+    script: list[list[Any] | BaseException] = (
+        [RuntimeError(FORCED)] if kind == "forced" else [[customer_row()], [object()]]
+    )
+    app, started = session_app(settings, script)
+    token = f"{MARK}.{CANARY}" if kind == "refusal" else TOKEN
+
+    def send(client: TestClient) -> httpx2.Response:
+        return client.delete(
+            "/v1/widget/session",
+            params={"note": CANARY},
+            headers={"authorization": f"Bearer {token}"},
+        )
+
+    return Exchange(app, send, {"success": 204, "refusal": 401, "forced": 500}[kind], started)
+
+
+def staff_login(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Exchange:
+    used = SimpleNamespace(
+        business_id=WIDGET_BUSINESS,
+        staff_id=uuid4(),
+        token_sha256=token_sha256(TOKEN),
+        enabled=True,
+    )
+    script: list[list[Any] | BaseException] = (
+        [RuntimeError(FORCED)] if kind == "forced" else [[used], [inserted()]]
+    )
+    app, started = session_app(settings, script)
+    token = CANARY if kind == "refusal" else TOKEN
+
+    def send(client: TestClient) -> httpx2.Response:
+        return client.post(
+            "/v1/staff/login", json={"token": token}, params={"note": CANARY}, headers=SAME_ORIGIN
+        )
+
+    return Exchange(app, send, {"success": 204, "refusal": 401, "forced": 500}[kind], started)
+
+
+def staff_logout(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Exchange:
+    script: list[list[Any] | BaseException] = (
+        [RuntimeError(FORCED)] if kind == "forced" else [[staff_row()], [object()]]
+    )
+    app, started = session_app(settings, script)
+    origin = {} if kind == "refusal" else SAME_ORIGIN  # no Origin: S5's 403
+
+    def send(client: TestClient) -> httpx2.Response:
+        return client.post(
+            "/v1/staff/logout",
+            params={"note": CANARY},
+            headers={**origin, "cookie": f"{STAFF_COOKIE}={TOKEN}"},
+        )
+
+    return Exchange(app, send, {"success": 204, "refusal": 403, "forced": 500}[kind], started)
+
+
+def staff_me(kind: Kind, settings: Settings, monkeypatch: pytest.MonkeyPatch) -> Exchange:
+    script: list[list[Any] | BaseException] = (
+        [RuntimeError(FORCED)] if kind == "forced" else [[staff_row()]]
+    )
+    app, started = session_app(settings, script)
+    cookie = {} if kind == "refusal" else {"cookie": f"{STAFF_COOKIE}={TOKEN}"}
+
+    def send(client: TestClient) -> httpx2.Response:
+        return client.get("/v1/staff/me", params={"note": CANARY}, headers=cookie)
+
+    return Exchange(app, send, {"success": 200, "refusal": 401, "forced": 500}[kind], started)
+
+
 ROUTES: Final[dict[tuple[str, str], Builder]] = {
     ("GET", "/healthz"): healthz,
     ("GET", "/readyz"): readyz,
@@ -516,6 +650,12 @@ ROUTES: Final[dict[tuple[str, str], Builder]] = {
     ("POST", "/v1/agent"): agent,
     ("POST", "/v1/agent/actions/{action_id}/confirm"): confirm,
     ("POST", "/v1/extractions"): extractions,
+    ("GET", "/v1/widget/{business_id}/config"): widget_config,
+    ("POST", "/v1/widget/sessions"): widget_sessions,
+    ("DELETE", "/v1/widget/session"): widget_session,
+    ("POST", "/v1/staff/login"): staff_login,
+    ("POST", "/v1/staff/logout"): staff_logout,
+    ("GET", "/v1/staff/me"): staff_me,
 }
 ESCAPES: Final = frozenset(
     {
@@ -530,11 +670,18 @@ ESCAPES: Final = frozenset(
         ("POST", "/v1/answer"),
         ("POST", "/v1/agent/actions/{action_id}/confirm"),
         ("POST", "/v1/extractions"),
+        ("GET", "/v1/widget/{business_id}/config"),
+        ("POST", "/v1/widget/sessions"),
+        ("DELETE", "/v1/widget/session"),
+        ("POST", "/v1/staff/login"),
+        ("POST", "/v1/staff/logout"),
+        ("GET", "/v1/staff/me"),
     }
 )
 """The routes whose forced exception escapes the app (a 500, written by the server's error line):
-11 of them, so G10-S1 has 11 cases. `/readyz` turns it into a failed check and `/v1/agent` into
-its `agent_error` hand-off."""
+17 of them (M7's 11 and M8 PR 1's 6), so G10-S1 has 17 cases. `/readyz` turns it into a failed
+check and `/v1/agent` into its `agent_error` hand-off. A session route turns only a database or
+timeout error into its typed 503; anything else escapes, as here."""
 
 PATH_CASES: Final[dict[str, tuple[str, int]]] = {
     "confirm action id": (f"/v1/agent/actions/{CANARY}/confirm", 422),
@@ -563,7 +710,9 @@ def test_every_route_of_the_app_has_its_canary_paths(settings: Settings) -> None
     # The routers `create_app` includes, read directly: a route with `include_in_schema=False`
     # is missing from the schema, and FastAPI wraps included routers so `app.routes` hides it.
     routers = [router for router in vars(main).values() if isinstance(router, APIRouter)]
-    assert len(routers) == 7  # health, kb, search, answer, actions, agent, extraction
+    assert (
+        len(routers) == 9
+    )  # health, kb, search, answer, actions, agent, extraction, widget, staff
     routes |= {
         (method, route.path)
         for router in routers
@@ -573,7 +722,7 @@ def test_every_route_of_the_app_has_its_canary_paths(settings: Settings) -> None
     }
 
     assert routes == ROUTES.keys()
-    assert ROUTES.keys() >= ESCAPES and len(ESCAPES) == 11
+    assert ROUTES.keys() >= ESCAPES and len(ESCAPES) == 17
     # The startup self-test ran on the answer-key stand-in (the autouse fixture), not on H1.
     assert app.state.guard_selftest.status is SelftestStatus.PASSED
 

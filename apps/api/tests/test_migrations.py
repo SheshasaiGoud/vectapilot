@@ -19,6 +19,8 @@ from sqlalchemy.pool import NullPool
 
 from tests.canary.catalog import load_key_indexes
 from tests.conftest import integration
+from vectapilot_api.auth import store as auth_store
+from vectapilot_api.auth import tokens as auth_tokens
 from vectapilot_api.config import MigrationSettings, Settings
 from vectapilot_api.db import APP_ROLE
 from vectapilot_api.extraction import config as extraction_config
@@ -1161,3 +1163,499 @@ async def test_migration_0007s_checks_refuse_every_row_the_service_never_returns
 
     assert extractions == dict.fromkeys(BAD_EXTRACTIONS, "23514")  # check_violation
     assert fields == dict.fromkeys(BAD_FIELDS, "23514")
+
+
+# ── Migration 0008: sessions and staff (ADR 0019, M8 PR 1) ──────────────────────────────────
+
+MIGRATION_0008 = VERSIONS / "0008_sessions_and_staff.py"
+TABLES_0008: Final = ("staff_users", "staff_login_links", "sessions")
+EXPIRING_0008: Final = ("staff_login_links", "sessions")
+ONE_WAY_0008: Final = (
+    ("sessions", "revoke_once", "revoked_at"),
+    ("staff_login_links", "use_once", "used_at"),
+)
+"""Migration 0008's restrictive UPDATE policies (zara's review): (table, policy, column)."""
+COLUMNS_0008: Final = {
+    "staff_users": {"business_id", "id", "display_name", "role", "created_at", "disabled_at"},
+    "staff_login_links": {
+        "business_id",
+        "id",
+        "staff_id",
+        "token_sha256",
+        "created_at",
+        "expires_at",
+        "used_at",
+    },
+    "sessions": {
+        "business_id",
+        "id",
+        "kind",
+        "staff_id",
+        "token_sha256",
+        "channel",
+        "ui_language",
+        "created_at",
+        "expires_at",
+        "revoked_at",
+    },
+}
+"""S3: a hash, never a token; no name, e-mail or other contact detail for a customer (Q4c)."""
+
+
+def migration_0008() -> ModuleType:
+    return load_migration(MIGRATION_0008)
+
+
+def test_migration_0008_upgrade_and_downgrade_run_their_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = migration_0008()
+    recorder = RecordingOp()
+    monkeypatch.setattr(module, "op", recorder)
+
+    module.upgrade()
+    module.downgrade()
+
+    assert recorder.executed == [*module.UPGRADE, *module.DOWNGRADE]
+    assert (module.revision, module.down_revision) == ("0008", "0007")
+
+
+def test_migration_0008_puts_every_table_under_the_business_policy_and_grants_no_delete() -> None:
+    module = migration_0008()
+
+    assert module.TABLES == TABLES_0008
+    assert module.APP_ROLE == APP_ROLE
+    for table in TABLES_0008:
+        for statement in module.row_security(table):
+            assert statement in module.UPGRADE, statement
+        for mode in ("ENABLE", "FORCE"):  # literal: `row_security` comes from the same file
+            assert f"ALTER TABLE {table} {mode} ROW LEVEL SECURITY" in module.UPGRADE, table
+    for table in EXPIRING_0008:
+        assert (
+            f"CREATE POLICY hidden_at_expiry ON {table} AS RESTRICTIVE FOR SELECT TO {APP_ROLE}"
+            " USING (expires_at > now())"
+        ) in module.UPGRADE
+    # Zara's review: revocation and use are one-way for the app role (literal, as above).
+    for table, name, column in ONE_WAY_0008:
+        assert (
+            f"CREATE POLICY {name} ON {table} AS RESTRICTIVE FOR UPDATE TO {APP_ROLE}"
+            f" USING ({column} IS NULL) WITH CHECK ({column} IS NOT NULL)"
+        ) in module.UPGRADE
+    grants = " ".join(module.GRANTS)
+    for privilege in ("DELETE", "TRUNCATE", " ALL "):
+        assert privilege not in grants, privilege
+    assert module.DOWNGRADE == ("DROP TABLE sessions, staff_login_links, staff_users",)
+    # `op.execute` wraps each string in `text()`: no ":name" in it may turn into a bind.
+    dialect = postgresql.asyncpg.dialect()  # type: ignore[no-untyped-call]
+    for statement in (*module.UPGRADE, *module.DOWNGRADE):
+        compiled = text(statement).compile(dialect=dialect)
+        assert (compiled.params, str(compiled)) == ({}, statement)
+
+
+def test_migration_0008s_checks_mirror_the_auth_core() -> None:
+    module = migration_0008()
+
+    assert tuple(kind.value for kind in auth_store.SessionKind) == module.SESSION_KINDS
+    assert tuple(role.value for role in auth_store.StaffRole) == module.STAFF_ROLES
+    assert tuple(channel.value for channel in auth_store.Channel) == module.CHANNELS
+    assert module.UI_LANGUAGE == auth_store.UI_LANGUAGE_PATTERN
+    assert module.UI_LANGUAGE_MAX == auth_store.UI_LANGUAGE_MAX
+    assert module.DISPLAY_NAME_MAX == auth_store.DISPLAY_NAME_MAX
+    assert module.SHA256 == auth_tokens.SHA256_PATTERN
+    assert re.fullmatch(module.SHA256, auth_tokens.token_sha256("x"))
+    # The lifetimes' upper bounds: the CHECK's interval and the code's seconds, both written out.
+    assert (module.MAX_SESSION_LIFETIME, auth_store.MAX_SESSION_LIFETIME_S) == ("24 hours", 86_400)
+    assert (module.MAX_LINK_LIFETIME, auth_store.MAX_LINK_LIFETIME_S) == ("1 hour", 3_600)
+    # The store inserts exactly the columns the app role may insert, in the grant's order.
+    columns = auth_store.INSERT_SESSION.text.split("(", 1)[1].split(")", 1)[0]
+    assert tuple(c.strip() for c in columns.split(",")) == module.SESSION_INSERT_COLUMNS
+    for language in ("en", "hi", "te", "en-IN", "zh-Hant-TW"):
+        assert re.fullmatch(module.UI_LANGUAGE, language), language
+    for language in ("", "e", "EN", "english", "en_IN", "en-"):
+        assert not re.fullmatch(module.UI_LANGUAGE, language), language
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0008_downgrades_and_upgrades_to_the_same_schema() -> None:
+    # As 0006 and 0007: its own downgrade and upgrade SQL in one rolled-back transaction; the
+    # catalog afterwards equals the one before, so the database at head is exactly this file.
+    module = migration_0008()
+    async with owner_rolled_back() as connection:
+        before = await catalog_rows(connection, TABLES_0008)
+        for statement in module.DOWNGRADE:
+            await connection.execute(text(statement))  # as op.execute does
+        gone = await catalog_rows(connection, TABLES_0008)
+        for statement in module.UPGRADE:
+            await connection.execute(text(statement))  # as op.execute does
+        after = await catalog_rows(connection, TABLES_0008)
+
+    assert before["tables"] == [(table, True, True) for table in sorted(TABLES_0008)]
+    assert all(rows == [] for rows in gone.values()), gone
+    assert after == before
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0008_stores_hashes_and_only_the_decided_columns() -> None:
+    async with owner_rolled_back() as connection:
+        schema = await catalog_rows(connection, TABLES_0008)
+
+    types = {(row[0], row[1]): row[2] for row in schema["columns"]}
+    assert {table: {c for t, c in types if t == table} for table in TABLES_0008} == COLUMNS_0008
+    for table in EXPIRING_0008:
+        assert types[(table, "token_sha256")] == "text"
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0008s_app_grants_and_policies_are_the_decided_ones() -> None:
+    module = migration_0008()
+    async with owner_rolled_back() as connection:
+        schema = await catalog_rows(connection, TABLES_0008)
+        granted = await privileged_roles_of(connection, TABLES_0008)
+
+    assert set(schema["table_grants"]) == {(table, "SELECT") for table in TABLES_0008}
+    expected = {
+        ("staff_login_links", "UPDATE", module.LINK_UPDATE_COLUMNS),
+        ("sessions", "INSERT", module.SESSION_INSERT_COLUMNS),
+        ("sessions", "UPDATE", module.SESSION_UPDATE_COLUMNS),
+    }
+    assert set(schema["column_grants"]) == {
+        (table, column, privilege) for table, privilege, columns in expected for column in columns
+    }
+    # The database draws every id and sets `created_at`; the app sets only these afterwards.
+    inserted = {c for t, c, p in schema["column_grants"] if p == "INSERT"}
+    assert not inserted & {"id", "created_at", "revoked_at"}
+    updated = {(t, c) for t, c, p in schema["column_grants"] if p == "UPDATE"}
+    assert updated == {("staff_login_links", "used_at"), ("sessions", "revoked_at")}
+    restrictive = [p for p in schema["policies"] if p[2] == "RESTRICTIVE"]
+    hidden = [
+        (
+            table,
+            "hidden_at_expiry",
+            "RESTRICTIVE",
+            [APP_ROLE],
+            "SELECT",
+            "(expires_at > now())",
+            None,
+        )
+        for table in EXPIRING_0008
+    ]
+    one_way = [  # zara's review: revocation and use are one-way for the app role
+        (
+            table,
+            name,
+            "RESTRICTIVE",
+            [APP_ROLE],
+            "UPDATE",
+            f"({column} IS NULL)",
+            f"({column} IS NOT NULL)",
+        )
+        for table, name, column in ONE_WAY_0008
+    ]
+    assert restrictive == sorted([*hidden, *one_way], key=lambda p: (p[0], p[1]))
+    permissive = sorted((p[0], p[1]) for p in schema["policies"] if p[2] == "PERMISSIVE")
+    assert permissive == sorted((table, "business_isolation") for table in TABLES_0008)
+    # Only the app role holds a privilege: the one the expiry policy hides rows from.
+    assert granted == {table: {APP_ROLE} for table in TABLES_0008}
+
+
+async def privileged_roles_of(
+    connection: AsyncConnection, tables: Sequence[str]
+) -> dict[str, set[str]]:
+    rows = (await connection.execute(PRIVILEGED_ROLES, {"tables": list(tables)})).all()
+    found: dict[str, set[str]] = {table: set() for table in tables}
+    for table, role in rows:
+        found[table].add(role)
+    return found
+
+
+STAFF: Final = text(
+    "INSERT INTO staff_users (business_id, display_name, role, disabled_at)"
+    " VALUES (:b, 'Synthetic Reviewer', 'reviewer', NULL) RETURNING id"
+)
+LINK: Final = text(
+    "INSERT INTO staff_login_links (business_id, staff_id, token_sha256, created_at, expires_at)"
+    " VALUES (:b, :staff_id, :sha256, now() - make_interval(mins => :age),"
+    " now() - make_interval(mins => :age) + interval '15 minutes')"
+)
+SESSION_AS_OWNER: Final = text(
+    "INSERT INTO sessions (business_id, kind, token_sha256, channel, ui_language, created_at,"
+    " expires_at) VALUES (:b, 'customer', :sha256, 'web', 'en',"
+    " now() - make_interval(hours => :age), now() - make_interval(hours => :age)"
+    " + interval '12 hours') RETURNING id"
+)
+VISIBLE_SESSIONS: Final = text("SELECT id FROM sessions")
+VISIBLE_LINKS: Final = text("SELECT token_sha256 FROM staff_login_links")
+DISABLED_STAFF: Final = text(
+    "INSERT INTO staff_users (business_id, display_name, role, disabled_at)"
+    " VALUES (:b, 'Synthetic Disabled', 'reviewer', now()) RETURNING id"
+)
+# Zara's review: statements the one-way policies must stop. Each names its row only, with no
+# `IS NULL` clause of its own, so only `revoke_once` and `use_once` can stop it.
+UNREVOKE: Final = text("UPDATE sessions SET revoked_at = NULL WHERE business_id = :b AND id = :id")
+REREVOKE: Final = text("UPDATE sessions SET revoked_at = now() WHERE business_id = :b AND id = :id")
+UNUSE: Final = text(
+    "UPDATE staff_login_links SET used_at = NULL WHERE business_id = :b AND token_sha256 = :h"
+)
+STILL_REVOKED: Final = text(
+    "SELECT revoked_at IS NOT NULL FROM sessions WHERE business_id = :b AND id = :id"
+)
+STILL_USED: Final = text(
+    "SELECT used_at IS NOT NULL FROM staff_login_links WHERE business_id = :b AND token_sha256 = :h"
+)
+
+
+async def as_app(connection: AsyncConnection, business_id: str) -> None:
+    """The rest of this transaction as the app role, acting for `business_id`."""
+    await connection.exec_driver_sql(f"SET LOCAL ROLE {APP_ROLE}")
+    await connection.execute(SET_BUSINESS, {"b": business_id})
+
+
+def fresh_token(business_id: str) -> auth_tokens.ParsedToken:
+    return auth_tokens.parse_token(auth_tokens.make_token(business_id))
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0008_hides_expired_rows_by_policy_and_lets_the_updates_return() -> None:
+    # PR 1's decision, verified: expiry by a restrictive SELECT policy (the app never sees an
+    # expired session or link), revocation and use by the statements' own clauses, because
+    # Postgres checks the SELECT policies against an UPDATE's new row (the red proof below); and
+    # revocation and use one-way by restrictive UPDATE policies (zara's review).
+    a, b = (f"mig-{letter}-{secrets.token_hex(4)}" for letter in "ab")
+    live_link, old_link, spare_link, disabled_link = (fresh_token(a) for _ in range(4))
+    live, expired, revoked = (fresh_token(a) for _ in range(3))
+    async with owner_rolled_back() as connection:
+        for business in (a, b):
+            await connection.execute(
+                text("INSERT INTO businesses (business_id) VALUES (:b)"), {"b": business}
+            )
+        staff_id = await connection.scalar(STAFF, {"b": a})
+        others_staff = await connection.scalar(STAFF, {"b": b})
+        disabled_staff = await connection.scalar(DISABLED_STAFF, {"b": a})
+        for token, age, member in (
+            (live_link, 0, staff_id),
+            (old_link, 30, staff_id),
+            (spare_link, 0, staff_id),
+            (disabled_link, 0, disabled_staff),
+        ):
+            await connection.execute(
+                LINK, {"b": a, "staff_id": member, "sha256": token.sha256, "age": age}
+            )
+        old_session = await connection.scalar(
+            SESSION_AS_OWNER, {"b": a, "sha256": expired.sha256, "age": 13}
+        )
+
+        await as_app(connection, a)
+        stored = await auth_store.insert_session(
+            connection,
+            live,
+            kind=auth_store.SessionKind.CUSTOMER,
+            lifetime_s=43_200,
+            ui_language="en",
+        )
+        to_revoke = await auth_store.insert_session(
+            connection,
+            revoked,
+            kind=auth_store.SessionKind.CUSTOMER,
+            lifetime_s=60,
+            ui_language="hi",
+        )
+        staff_token = fresh_token(a)
+        await auth_store.insert_session(
+            connection,
+            staff_token,
+            kind=auth_store.SessionKind.STAFF,
+            lifetime_s=28_800,
+            staff_id=staff_id,
+        )
+        created = await connection.scalar(
+            text("SELECT created_at FROM sessions WHERE id = :id"), {"id": stored.session_id}
+        )
+        sessions_seen = set(await connection.scalars(VISIBLE_SESSIONS))
+        links_seen = set(await connection.scalars(VISIBLE_LINKS))
+        revoked_now = await auth_store.revoke_session(connection, a, to_revoke.session_id)
+        revoked_again = await auth_store.revoke_session(connection, a, to_revoke.session_id)
+        found = {
+            name: await auth_store.find_customer_session(connection, token)
+            for name, token in (("live", live), ("expired", expired), ("revoked", revoked))
+        }
+        staff_found = await auth_store.find_staff_session(connection, staff_token)
+        used = [await auth_store.use_login_link(connection, live_link) for _ in range(2)]
+        old_used = await auth_store.use_login_link(connection, old_link)
+        disabled_used = await auth_store.use_login_link(connection, disabled_link)
+        refusals = {
+            case: await refused_sqlstate(connection, text(sql), params)
+            for case, (sql, params) in session_refusals(a, b, others_staff, staff_id).items()
+        }
+        # Zara's review: revocation and use are one-way (`revoke_once`, `use_once`). A revoked
+        # session or a used link is out of reach of any UPDATE (USING filters it: 0 rows), and
+        # clearing the column on a live row is refused (WITH CHECK: 42501).
+        session_key = {"b": a, "id": to_revoke.session_id}
+        link_key = {"b": a, "h": live_link.sha256}
+        undone = {
+            "un-revoke a revoked session": (
+                await connection.execute(UNREVOKE, session_key)
+            ).rowcount,
+            "re-revoke a revoked session": (
+                await connection.execute(REREVOKE, session_key)
+            ).rowcount,
+            "un-use a used link": (await connection.execute(UNUSE, link_key)).rowcount,
+        }
+        still = (
+            await connection.scalar(STILL_REVOKED, session_key),
+            await connection.scalar(STILL_USED, link_key),
+        )
+        cleared = {
+            "clear revoked_at on a live session": await refused_sqlstate(
+                connection, UNREVOKE, {"b": a, "id": stored.session_id}
+            ),
+            "clear used_at on an unused link": await refused_sqlstate(
+                connection, UNUSE, {"b": a, "h": spare_link.sha256}
+            ),
+        }
+
+        # The red proof: revocation or use in a restrictive policy would refuse the UPDATE's new
+        # row (rowsecurity.c adds the SELECT policies as WITH CHECK options when the statement
+        # reads the table), so the logout and S5's link use could not work.
+        await connection.exec_driver_sql("RESET ROLE")
+        for table, column in (("sessions", "revoked_at"), ("staff_login_links", "used_at")):
+            await connection.exec_driver_sql(
+                f"CREATE POLICY probe_{column} ON {table} AS RESTRICTIVE FOR SELECT"
+                f" TO {APP_ROLE} USING ({column} IS NULL)"
+            )
+        await as_app(connection, a)
+        probes = {
+            "revoke": await refused_sqlstate(
+                connection,
+                auth_store.REVOKE_SESSION,
+                {"business_id": a, "session_id": stored.session_id},
+            ),
+            "use a link": await refused_sqlstate(
+                connection,
+                auth_store.USE_LOGIN_LINK,
+                {"business_id": a, "token_sha256": spare_link.sha256},
+            ),
+        }
+
+    assert stored.expires_at - created == timedelta(hours=12)  # the database's clock (P1)
+    assert old_session not in sessions_seen  # expired: hidden from the app by the policy
+    assert {stored.session_id, to_revoke.session_id} <= sessions_seen
+    # The expired link is hidden.
+    assert links_seen == {live_link.sha256, spare_link.sha256, disabled_link.sha256}
+    assert (revoked_now, revoked_again) == (True, False)  # UPDATE ... RETURNING under the policy
+    assert found["live"] is not None and found["live"].session_id == stored.session_id
+    assert found["live"].customer_ref == f"s-{stored.session_id.hex}"
+    assert (found["expired"], found["revoked"]) == (None, None)
+    assert staff_found is not None and staff_found.staff_id == staff_id
+    assert used == [auth_store.UsedLink(a, staff_id, enabled=True), None]  # S5: once
+    assert old_used is None
+    # Zara's review: a disabled member's link is used up, and says the member is not enabled
+    # (the subquery reads `staff_users` under the app role's RLS).
+    assert disabled_used == auth_store.UsedLink(a, disabled_staff, enabled=False)
+    assert refusals == SESSION_REFUSALS
+    assert undone == dict.fromkeys(undone, 0) and still == (True, True)
+    assert cleared == dict.fromkeys(cleared, "42501")  # the policies' WITH CHECK
+    assert probes == {"revoke": "42501", "use a link": "42501"}
+
+
+SESSION_REFUSALS: Final = {
+    "choose an id": "42501",  # insufficient_privilege: no column grant
+    "choose created_at": "42501",
+    "insert revoked": "42501",
+    "update the kind": "42501",
+    "extend expires_at": "42501",
+    "delete a session": "42501",
+    "insert a staff member": "42501",
+    "update a role": "42501",
+    "insert a link": "42501",
+    "extend a link": "42501",
+    "delete a link": "42501",
+    "insert for b": "42501",  # the business policy's WITH CHECK
+    "a staff session for b's member": "23503",  # the composite key: (a, b's id) does not exist
+    "a lifetime past 24 hours": "23514",
+    "a staff session without a member": "23514",
+    "a customer session with a member": "23514",  # the CHECK, before the key (an after-trigger)
+    "a customer session without a language": "23514",
+    "a staff session with a language": "23514",
+    "an uppercase hash": "23514",
+    "another channel": "23514",
+    "a language that is not a tag": "23514",
+}
+
+
+def session_refusals(
+    a: str, b: str, others_staff: object, staff_id: object
+) -> dict[str, tuple[str, Mapping[str, object]]]:
+    """Each statement the app role must never get through, as (SQL, parameters), acting for a."""
+    values = (
+        "VALUES (:b, :kind, :staff, :sha256, :channel, :language,"
+        " now() + make_interval(hours => :hours))"
+    )
+    insert = (
+        "INSERT INTO sessions (business_id, kind, staff_id, token_sha256, channel, ui_language,"
+        f" expires_at) {values}"
+    )
+    good: dict[str, object] = {
+        "b": a,
+        "kind": "customer",
+        "staff": None,
+        "sha256": fresh_token(a).sha256,
+        "channel": "web",
+        "language": "en",
+        "hours": 1,
+    }
+
+    def session(**changes: object) -> tuple[str, Mapping[str, object]]:
+        return insert, {**good, "sha256": fresh_token(a).sha256, **changes}
+
+    extra = (
+        "INSERT INTO sessions (business_id, kind, token_sha256, channel, ui_language, expires_at,"
+        " {column}) VALUES (:b, 'customer', :sha256, 'web', 'en', now() + interval '1 hour',"
+        " {value})"
+    )
+    return {
+        "choose an id": (
+            extra.format(column="id", value="gen_random_uuid()"),
+            {"b": a, "sha256": fresh_token(a).sha256},
+        ),
+        "choose created_at": (
+            extra.format(column="created_at", value="now() - interval '1 day'"),
+            {"b": a, "sha256": fresh_token(a).sha256},
+        ),
+        "insert revoked": (
+            extra.format(column="revoked_at", value="now()"),
+            {"b": a, "sha256": fresh_token(a).sha256},
+        ),
+        "update the kind": ("UPDATE sessions SET kind = 'staff'", {}),
+        "extend expires_at": ("UPDATE sessions SET expires_at = expires_at + interval '1 day'", {}),
+        "delete a session": ("DELETE FROM sessions", {}),
+        "insert a staff member": (
+            "INSERT INTO staff_users (business_id, display_name, role)"
+            " VALUES (:b, 'Synthetic Admin', 'admin')",
+            {"b": a},
+        ),
+        "update a role": ("UPDATE staff_users SET role = 'admin'", {}),
+        "insert a link": (
+            "INSERT INTO staff_login_links (business_id, staff_id, token_sha256, expires_at)"
+            " VALUES (:b, :staff, :sha256, now() + interval '15 minutes')",
+            {"b": a, "staff": staff_id, "sha256": fresh_token(a).sha256},
+        ),
+        "extend a link": (
+            "UPDATE staff_login_links SET expires_at = expires_at + interval '1 day'",
+            {},
+        ),
+        "delete a link": ("DELETE FROM staff_login_links", {}),
+        "insert for b": session(b=b, sha256=fresh_token(b).sha256),
+        "a staff session for b's member": session(kind="staff", staff=others_staff, language=None),
+        "a lifetime past 24 hours": session(hours=25),
+        "a staff session without a member": session(kind="staff", language=None),
+        "a customer session with a member": session(staff=others_staff),
+        "a customer session without a language": session(language=None),
+        "a staff session with a language": session(kind="staff", staff=staff_id),
+        "an uppercase hash": session(sha256="A" * 64),
+        "another channel": session(channel="whatsapp"),
+        "a language that is not a tag": session(language="English"),
+    }

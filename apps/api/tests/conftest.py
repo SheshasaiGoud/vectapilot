@@ -79,6 +79,22 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "guard_limit_customer_per_minute": 100_000,
     "guard_budget_usd_per_business_per_day": "100",
     "guard_redis_timeout_seconds": 0.25,
+    # M8 PR 1 (ADR 0019). No origin: every Origin-checked route refuses unless a test sets one
+    # (TestClient's own is `http://testserver`, which `auth.origins` refuses; tests use https).
+    "public_origin": None,
+    "widget_config_dir": None,
+    "ui_dir": None,
+    "customer_session_lifetime_seconds": 43_200,
+    "staff_session_lifetime_seconds": 28_800,
+    "staff_link_lifetime_seconds": 900,
+    # Far above test volume, as the guard limits above; `test_session_settings.py` pins the
+    # defaults.
+    "session_limit_business_per_minute": 100_000,
+    "session_lookup_timeout_seconds": 2.0,
+    "cookie_insecure_dev": False,
+    "cors_dev_origins": (),
+    "widget_turn_bound_seconds": 60.0,
+    "widget_confirm_timeout_seconds": 15.0,
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 

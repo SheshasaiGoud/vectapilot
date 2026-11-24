@@ -1,0 +1,39 @@
+{
+  "business_id": "sunrise-clinic",
+  "synthetic": true,
+  "review": "synthetic, agent-drafted (diego-backend, M8 PR 1); hi not reviewed by a native speaker (D9)",
+  "enabled": true,
+  "display_name": "Sunrise Clinic",
+  "allowed_origins": ["https://www.sunrise-clinic.example"],
+  "languages": ["en", "hi"],
+  "texts": [
+    {
+      "language": "en",
+      "greeting": "Hello! Ask about appointments, opening hours, fees and lab tests at Sunrise Clinic.",
+      "contact_fallback": [
+        "Phone: +91 00000 10001 (fictional)",
+        "E-mail: desk@sunrise-clinic.example",
+        "Monday to Friday 8:00 to 20:00, Saturday 9:00 to 14:00"
+      ],
+      "quick_replies": [
+        "What are your opening hours?",
+        "How do I book an appointment?"
+      ]
+    },
+    {
+      "language": "hi",
+      "greeting": "नमस्ते! सनराइज़ क्लिनिक में अपॉइंटमेंट, समय, फ़ीस और लैब टेस्ट के बारे में पूछें।",
+      "contact_fallback": [
+        "फ़ोन: +91 00000 10001 (काल्पनिक)",
+        "ई-मेल: desk@sunrise-clinic.example",
+        "सोमवार से शुक्रवार 8:00 से 20:00, शनिवार 9:00 से 14:00"
+      ],
+      "quick_replies": [
+        "क्लिनिक कब खुला रहता है?",
+        "अपॉइंटमेंट कैसे बुक करें?"
+      ]
+    }
+  ],
+  "handoff_retention_days": 30,
+  "accent_color": "#0f5c8c"
+}

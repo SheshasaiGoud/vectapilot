@@ -5,12 +5,14 @@ Each refusal is fixed text: it names the flag, setting or rule, never the value 
 
 import asyncio
 from pathlib import Path
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from tests.fakes import CORPUS_DIR, SANDBOX_DIR, stub_database
 from tests.settings import UNREACHABLE_DB, make_settings
+from vectapilot_api.auth.store import customer_ref_for
 from vectapilot_api.config import Settings
 from vectapilot_api.db import Database, UnsafeDatabaseRole
 from vectapilot_api.tools.config import ToolsConfigError
@@ -23,6 +25,7 @@ from vectapilot_mcp.startup import (
     NO_TOOLS_DIR,
     NOT_REGISTERED,
     REFUSED_ENVIRONMENT,
+    SESSION_CUSTOMER,
     StartupRefused,
     business_config,
     check_database,
@@ -100,6 +103,32 @@ def test_a_bad_customer_flag_is_refused_without_its_value(customer_ref: str) -> 
 def test_good_flags_pass() -> None:
     flags = validate_flags("paws-and-co", "cust-001")
     assert (flags.business_id, flags.customer_ref) == ("paws-and-co", "cust-001")
+
+
+@pytest.mark.parametrize(
+    "session_id",
+    [uuid4(), UUID(int=0), UUID("0f0e0d0c-0b0a-4908-8706-050403020100")],
+    ids=["random", "all zeros", "fixed"],
+)
+def test_a_widget_sessions_reference_is_refused_without_its_value(session_id: UUID) -> None:
+    # M8 PR 1 (ADR 0019 decision 9, leo's proposal): the API's own session form (S4), so a local
+    # MCP run cannot read a widget session's bookings. A valid customer reference otherwise.
+    customer_ref = customer_ref_for(session_id)
+
+    with pytest.raises(StartupRefused) as refused:
+        validate_flags("paws-and-co", customer_ref)
+
+    assert str(refused.value) == SESSION_CUSTOMER
+    assert session_id.hex not in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "customer_ref",
+    ["s-001", "s-" + "a" * 31, "s-" + "a" * 33, "x-" + "a" * 32, "cust-s-" + "a" * 32],
+    ids=["short", "31 hex", "33 hex", "another prefix", "embedded"],
+)
+def test_a_reference_near_the_session_form_still_passes(customer_ref: str) -> None:
+    assert validate_flags("paws-and-co", customer_ref).customer_ref == customer_ref
 
 
 def test_the_tool_configuration_folder_is_required() -> None:
