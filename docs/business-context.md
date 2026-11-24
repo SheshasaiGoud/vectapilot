@@ -256,7 +256,7 @@ same topic again within 24 hours.
 | | Faithfulness | Every claim supported by a cited, approved source | ≥ 95 % (playbook) | M2–M3 |
 | | Retrieval hit@5 | The right source chunk is in the top 5 | ≥ 90 % (playbook) | M2 |
 | **Successful resolution** | Auto-resolution rate | Conversations "resolved" (definition above) *at* the correctness target | ≥ 50 % (playbook) | Real pilot (M11) |
-| | Wrong-answer rate | Auto-sent answers later marked wrong by staff | ≤ 2 % (Claude's proposal) | Staff review (M8) + real pilot |
+| | Wrong-answer rate | Auto-sent answers later marked wrong by staff | ≤ 2 % (Claude's proposal) | Real pilot (M11); moved from "Staff review (M8)" on 2026-11-24 (shesha, M8 D14: M8 stores no labelled answers) |
 | **Response time** | Latency p50 / p95 | Message received → reply sent, per channel | p95 < 6 s for web chat (playbook) | M1 (per call), M9 (per conversation) |
 | **Customer satisfaction** | Thumbs-up rate | 👍/👎 after a conversation | Set at the real pilot after a 2–4-week baseline | Real pilot (M11) |
 | | Optional CSAT score | 1–5 survey | Set at the real pilot after a baseline | Real pilot (M11) |

@@ -229,3 +229,11 @@ the model never sees, executes exactly once. Each part:
 - Any unconfirmed or duplicate write, or any safety miss, appears in any run: stop and fix
   before any other work.
 - Pending actions or audit rows hold real data (M11): retention and masking (M7, M9).
+
+**Amended 2026-11-24 (shesha, M8 plan D1, D3, D5; [ADR 0019](0019-sessions-staff-access-and-ui-hosting.md)).**
+W2's one response that carries the token now names two: `/v1/agent` and `/v1/widget/messages`
+(same guard, services and dependency functions); widget confirm uses the same `ConfirmService`
+and limits, and no staff route can carry the token. The trigger "M8 authenticates customers" is
+answered: on widget routes `customer_ref` comes from the session (`s-` plus its uuid's hex), so
+the IDOR closes there; MCP stays flag-scoped to local, test and ci with no session and nothing to
+confirm, and a later MCP confirm path confirms in the widget, never in the MCP host.

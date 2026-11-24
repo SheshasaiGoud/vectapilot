@@ -276,3 +276,11 @@ runs first and depends on nothing that can fail. Each part:
 - M10 picks a load balancer and a regression gate: Redis as a readiness dependency, edge limits,
   a separate red-team job (D8 (b)).
 - Any hard red-team case fails, or a real miss is reported: stop and fix the screen first.
+
+**Amended 2026-11-24 (shesha, M8 plan; [ADR 0019](0019-sessions-staff-access-and-ui-hosting.md)).**
+"M8 authenticates customers": the widget routes call the same `agent_guard` and confirm limits as
+`/v1/agent` with no unguarded branch (G13 holds), the per-customer window becomes per session
+with no limiter change, the widget enforces the length limit in code points, staff labels are
+stored for precision (computed in M11), and contact details stay out until Q4c. The frozen agent
+and confirm cases replay through the widget routes (a parity gate). PR 11's migration takes the
+next free number (M8 plan P4).
