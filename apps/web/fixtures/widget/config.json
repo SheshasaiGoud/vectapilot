@@ -1,0 +1,280 @@
+{
+  "synthetic": true,
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (pending PR 2's merge) validates every case.",
+  "route": "GET /v1/widget/{business_id}/config",
+  "api": "PR 1 (merged): vectapilot_api.widget.models.WidgetConfigResponse",
+  "cases": {
+    "sunrise-clinic": {
+      "status": 200,
+      "model": "WidgetConfigResponse",
+      "body": {
+        "business_id": "sunrise-clinic",
+        "display_name": "Sunrise Clinic",
+        "languages": [
+          "en",
+          "hi"
+        ],
+        "texts": [
+          {
+            "language": "en",
+            "greeting": "Hello! Ask about appointments, opening hours, fees and lab tests at Sunrise Clinic.",
+            "contact_fallback": [
+              "Phone: +91 00000 10001 (fictional)",
+              "E-mail: desk@sunrise-clinic.example",
+              "Monday to Friday 8:00 to 20:00, Saturday 9:00 to 14:00"
+            ],
+            "quick_replies": [
+              "What are your opening hours?",
+              "How do I book an appointment?"
+            ]
+          },
+          {
+            "language": "hi",
+            "greeting": "नमस्ते! सनराइज़ क्लिनिक में अपॉइंटमेंट, समय, फ़ीस और लैब टेस्ट के बारे में पूछें।",
+            "contact_fallback": [
+              "फ़ोन: +91 00000 10001 (काल्पनिक)",
+              "ई-मेल: desk@sunrise-clinic.example",
+              "सोमवार से शुक्रवार 8:00 से 20:00, शनिवार 9:00 से 14:00"
+            ],
+            "quick_replies": [
+              "क्लिनिक कब खुला रहता है?",
+              "अपॉइंटमेंट कैसे बुक करें?"
+            ]
+          }
+        ],
+        "guidance": [
+          "We cannot treat emergencies.",
+          "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+          "You do not have to handle this alone.",
+          "Do not wait for a reply in the chat."
+        ],
+        "guidance_language": "en",
+        "accent_color": "#0f5c8c"
+      }
+    },
+    "paws-and-co": {
+      "status": 200,
+      "model": "WidgetConfigResponse",
+      "body": {
+        "business_id": "paws-and-co",
+        "display_name": "Paws & Co",
+        "languages": [
+          "en",
+          "te"
+        ],
+        "texts": [
+          {
+            "language": "en",
+            "greeting": "Hello! Ask about vet visits, grooming, opening hours and your orders at Paws & Co.",
+            "contact_fallback": [
+              "Phone: +91 00000 20002 (fictional)",
+              "E-mail: hello@paws-and-co.example",
+              "Vet clinic: Monday to Saturday 9:00 to 19:00, Sunday 10:00 to 13:00"
+            ],
+            "quick_replies": [
+              "What are your opening hours?",
+              "Where is my order?"
+            ]
+          },
+          {
+            "language": "te",
+            "greeting": "నమస్కారం! పాస్ & కో లో వెట్ సందర్శనలు, గ్రూమింగ్, సమయాలు, మీ ఆర్డర్ల గురించి అడగండి.",
+            "contact_fallback": [
+              "ఫోన్: +91 00000 20002 (కల్పితం)",
+              "ఇ-మెయిల్: hello@paws-and-co.example",
+              "వెట్ క్లినిక్: సోమవారం నుండి శనివారం 9:00 నుండి 19:00, ఆదివారం 10:00 నుండి 13:00"
+            ],
+            "quick_replies": [
+              "మీరు ఎప్పుడు తెరిచి ఉంటారు?",
+              "నా ఆర్డర్ ఎక్కడ ఉంది?"
+            ]
+          }
+        ],
+        "guidance": [
+          "During clinic hours, call our emergency line: +91 00000 20911 (fictional). Do not wait for a reply in the chat.",
+          "Outside clinic hours",
+          "Go to Example 24-Hour Animal Hospital (fictional), 12 Sample Ring Road, open day and night, phone +91 00000 20999 (fictional). Call them while you are on the way.",
+          "If you know what your pet ate, bring the packaging or a photo of it.",
+          "Do not give your pet any medicine or home remedy unless a vet tells you to."
+        ],
+        "guidance_language": "en",
+        "accent_color": "#7a3e00"
+      }
+    },
+    "sunrise-clinic-follow-ups": {
+      "status": 200,
+      "model": "WidgetConfigResponse",
+      "note": "The sample file leaves both follow-ups out (Q9, shesha); these fixture texts exist to test D11.",
+      "body": {
+        "business_id": "sunrise-clinic",
+        "display_name": "Sunrise Clinic",
+        "languages": [
+          "en",
+          "hi"
+        ],
+        "texts": [
+          {
+            "language": "en",
+            "greeting": "Hello! Ask about appointments, opening hours, fees and lab tests at Sunrise Clinic.",
+            "contact_fallback": [
+              "Phone: +91 00000 10001 (fictional)",
+              "E-mail: desk@sunrise-clinic.example",
+              "Monday to Friday 8:00 to 20:00, Saturday 9:00 to 14:00"
+            ],
+            "quick_replies": [
+              "What are your opening hours?",
+              "How do I book an appointment?"
+            ],
+            "handoff_follow_up": "Fixture text: a member of our team will reply here during opening hours.",
+            "urgent_follow_up": "Fixture text: staff have been alerted. Please follow the steps above now."
+          },
+          {
+            "language": "hi",
+            "greeting": "नमस्ते! सनराइज़ क्लिनिक में अपॉइंटमेंट, समय, फ़ीस और लैब टेस्ट के बारे में पूछें।",
+            "contact_fallback": [
+              "फ़ोन: +91 00000 10001 (काल्पनिक)",
+              "ई-मेल: desk@sunrise-clinic.example",
+              "सोमवार से शुक्रवार 8:00 से 20:00, शनिवार 9:00 से 14:00"
+            ],
+            "quick_replies": [
+              "क्लिनिक कब खुला रहता है?",
+              "अपॉइंटमेंट कैसे बुक करें?"
+            ],
+            "handoff_follow_up": "फ़िक्स्चर पाठ: हमारी टीम का कोई सदस्य खुलने के समय में यहाँ जवाब देगा।",
+            "urgent_follow_up": "फ़िक्स्चर पाठ: स्टाफ़ को सूचित कर दिया गया है। कृपया ऊपर दिए गए कदम अभी उठाएँ।"
+          }
+        ],
+        "guidance": [
+          "We cannot treat emergencies.",
+          "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+          "You do not have to handle this alone.",
+          "Do not wait for a reply in the chat."
+        ],
+        "guidance_language": "en",
+        "accent_color": "#0f5c8c"
+      }
+    },
+    "paws-and-co-follow-ups": {
+      "status": 200,
+      "model": "WidgetConfigResponse",
+      "note": "The sample file leaves both follow-ups out (Q9, shesha); these fixture texts (te unreviewed) exist to test D11 and Z4 (b) in te.",
+      "body": {
+        "business_id": "paws-and-co",
+        "display_name": "Paws & Co",
+        "languages": [
+          "en",
+          "te"
+        ],
+        "texts": [
+          {
+            "language": "en",
+            "greeting": "Hello! Ask about vet visits, grooming, opening hours and your orders at Paws & Co.",
+            "contact_fallback": [
+              "Phone: +91 00000 20002 (fictional)",
+              "E-mail: hello@paws-and-co.example",
+              "Vet clinic: Monday to Saturday 9:00 to 19:00, Sunday 10:00 to 13:00"
+            ],
+            "quick_replies": [
+              "What are your opening hours?",
+              "Where is my order?"
+            ],
+            "handoff_follow_up": "Fixture text: a member of our team will reply here during clinic hours.",
+            "urgent_follow_up": "Fixture text: staff have been alerted. Please follow the steps above now."
+          },
+          {
+            "language": "te",
+            "greeting": "నమస్కారం! పాస్ & కో లో వెట్ సందర్శనలు, గ్రూమింగ్, సమయాలు, మీ ఆర్డర్ల గురించి అడగండి.",
+            "contact_fallback": [
+              "ఫోన్: +91 00000 20002 (కల్పితం)",
+              "ఇ-మెయిల్: hello@paws-and-co.example",
+              "వెట్ క్లినిక్: సోమవారం నుండి శనివారం 9:00 నుండి 19:00, ఆదివారం 10:00 నుండి 13:00"
+            ],
+            "quick_replies": [
+              "మీరు ఎప్పుడు తెరిచి ఉంటారు?",
+              "నా ఆర్డర్ ఎక్కడ ఉంది?"
+            ],
+            "handoff_follow_up": "ఫిక్స్చర్ పాఠ్యం: మా బృందంలోని ఒకరు క్లినిక్ వేళల్లో ఇక్కడ సమాధానం ఇస్తారు.",
+            "urgent_follow_up": "ఫిక్స్చర్ పాఠ్యం: సిబ్బందికి తెలియజేశాం. దయచేసి పైన ఉన్న దశలను ఇప్పుడే అనుసరించండి."
+          }
+        ],
+        "guidance": [
+          "During clinic hours, call our emergency line: +91 00000 20911 (fictional). Do not wait for a reply in the chat.",
+          "Outside clinic hours",
+          "Go to Example 24-Hour Animal Hospital (fictional), 12 Sample Ring Road, open day and night, phone +91 00000 20999 (fictional). Call them while you are on the way.",
+          "If you know what your pet ate, bring the packaging or a photo of it.",
+          "Do not give your pet any medicine or home remedy unless a vet tells you to."
+        ],
+        "guidance_language": "en",
+        "accent_color": "#7a3e00"
+      }
+    },
+    "fixture-shop": {
+      "status": 200,
+      "model": "WidgetConfigResponse",
+      "note": "A non-health fixture business without guidance (open question 4: fixtures only).",
+      "body": {
+        "business_id": "fixture-shop",
+        "display_name": "Fixture Shop",
+        "languages": [
+          "en"
+        ],
+        "texts": [
+          {
+            "language": "en",
+            "greeting": "Hello! Ask about your orders at Fixture Shop.",
+            "handoff_follow_up": "Fixture text: a member of our team will reply here.",
+            "contact_fallback": [
+              "E-mail: help@fixture-shop.example"
+            ],
+            "quick_replies": []
+          }
+        ],
+        "guidance": [],
+        "guidance_language": "en",
+        "accent_color": null
+      }
+    },
+    "xss": {
+      "status": 200,
+      "model": "WidgetConfigResponse",
+      "body": {
+        "business_id": "sunrise-clinic",
+        "display_name": "<img src=x onerror=alert(1)>",
+        "languages": [
+          "en"
+        ],
+        "texts": [
+          {
+            "language": "en",
+            "greeting": "javascript:alert(1)",
+            "handoff_follow_up": "<img src=x onerror=alert(1)>",
+            "urgent_follow_up": "javascript:alert(1)",
+            "contact_fallback": [
+              "<img src=x onerror=alert(1)>",
+              "javascript:alert(1)"
+            ],
+            "quick_replies": [
+              "javascript:alert(1)",
+              "<img src=x onerror=alert(1)>"
+            ]
+          }
+        ],
+        "guidance": [
+          "<img src=x onerror=alert(1)>",
+          "javascript:alert(1)",
+          "Do not wait for a reply in the chat."
+        ],
+        "guidance_language": "en",
+        "accent_color": "#0f5c8c"
+      }
+    },
+    "not-found": {
+      "status": 404,
+      "model": "TypedError",
+      "body": {
+        "detail": "this business has no widget",
+        "error": "widget_not_found"
+      }
+    }
+  }
+}

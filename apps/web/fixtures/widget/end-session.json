@@ -1,0 +1,25 @@
+{
+  "synthetic": true,
+  "note": "Fixture data for the widget's browser tests (M8 PR 4, step 4b). A 204 has no body, so its `model` is `none`; the widget ignores the answer either way (End chat clears the page whatever comes back).",
+  "route": "DELETE /v1/widget/session",
+  "api": "PR 1 (merged): vectapilot_api.widget.router.end_session (204, no body); 401 is auth/http.py's TypedError",
+  "cases": {
+    "revoked": {
+      "status": 204,
+      "model": "none",
+      "body": null,
+      "text": ""
+    },
+    "unauthorized": {
+      "status": 401,
+      "model": "TypedError",
+      "body": {
+        "detail": "authentication required",
+        "error": "unauthorized"
+      },
+      "headers": {
+        "WWW-Authenticate": "Bearer"
+      }
+    }
+  }
+}

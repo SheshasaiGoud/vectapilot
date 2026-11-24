@@ -1,6 +1,6 @@
 # Lint, type-check and test every pull request and every push to main.
-# Branch protection on main requires api, api image and web; mcp is not required until shesha
-# changes the setting (rule 1).
+# Branch protection on main requires api, api image and web; mcp and web e2e are not required
+# until shesha changes the setting (rule 1).
 name: CI
 
 on:
@@ -192,6 +192,46 @@ jobs:
 
       - run: npm ci
       - run: npm run lint
+      # M8 PR 4: the widget's state logic (node --test, Node's type stripping; fixtures only, $0)
+      # and the i18n completeness check (en, hi, te: every key, same placeholders).
+      - run: npm run test:unit
+      - run: npm run check:i18n
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+      # The product pages for the API's ui_dir (out-ui/), then the split check: out/ (GitHub
+      # Pages) holds no product page and no API path; out-ui/ holds the widget (positive control).
+      - run: npm run build:ui
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+      - run: npm run check:out
+
+  # M8 PR 4 (D8 (a)): the customer widget in a real browser. Every state at 360×800 and
+  # 1280×800, keyboard only, reduced motion, en/hi/te, axe per state (WCAG 2.0–2.2 A and AA tags,
+  # zero violations), retries 0. The API is stubbed inside the browser and any other request fails
+  # the test: no server, no network beyond the browser download below, $0. Not required until
+  # shesha changes the setting (rule 1), after its run and flake counts across M8's PRs.
+  web-e2e:
+    name: web e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - run: npm ci
+      # Chromium's headless shell only, at the version @playwright/test pins, with the system
+      # libraries it needs (apt). Downloaded from Playwright's CDN on each run.
+      - run: npx playwright install --with-deps --only-shell chromium
+      - run: npm run build:ui
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+      - run: npm run test:e2e

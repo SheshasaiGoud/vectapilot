@@ -2,7 +2,8 @@
 
 A static Next.js site introducing VectaPilot's virtual team. It is built from the real Claude Code
 subagent files in [`.claude/agents/`](../../.claude/agents), so the published team cannot drift
-from the actual one. Later this app will also host the customer chat widget and staff dashboard.
+from the actual one. The same app also builds the customer chat widget (M8, below) for the API to
+serve; the staff dashboard follows in M8 PR 5.
 
 ## Run it
 
@@ -51,3 +52,78 @@ they disagree (a teammate without a persona, an unknown milestone owner, a missi
 
 Deployment: [`.github/workflows/deploy-site.yml`](../../.github/workflows/deploy-site.yml).
 Decision record: [ADR 0002](../../docs/adr/0002-team-site-static-nextjs.md).
+
+## Product pages (M8): the customer widget
+
+One app, two static builds ([ADR 0019](../../docs/adr/0019-sessions-staff-access-and-ui-hosting.md),
+D2 (a) with (i)). The team site never contains a product page; the product build is served by
+the API from its `ui_dir`, on the API's own origin.
+
+```bash
+npm run build:ui     # product pages only (*.product.tsx) into out-ui/; never with a base path
+npm run check:out    # out/ has no product page and no API path; out-ui/ has the widget
+npm run test:unit    # the widget's state logic: node --test, fixtures only, no network
+npm run check:i18n   # en, hi, te: every key, the same placeholders, no safety key
+npm run test:e2e     # every state in Chromium (after build:ui); see "Browser tests" below
+npm run demo:host -- --business sunrise-clinic   # the widget framed by a business's page
+npm run measure:js -- out-ui widget.html         # initial JS, gzipped (M8's one measurement)
+```
+
+Run the two builds one after the other, never in parallel: both use `.next/`.
+
+| Piece | Where |
+|---|---|
+| Which files are pages in which build | `next.config.ts` (`pageExtensions`) |
+| Requests and every state (no React) | `src/widget/core/controller.ts`, `state.ts` |
+| What each state shows (pure) | `src/widget/core/view.ts` |
+| Markup (text only, never HTML) | `src/widget/ui/WidgetView.tsx` |
+| The only `sessionStorage` access | `src/widget/ui/browser.ts` |
+| API routes the widget may call (S10) | `src/widget/api/routes.ts` |
+| Chrome text (`en`, `hi`, `te`) and English-only safety text | `src/widget/i18n/` |
+| API bodies the tests replay | `fixtures/widget/*.json` (synthetic) |
+| Browser tests and their closed stack | `playwright.config.ts`, `e2e/` (`support/serve.ts`, `stack.ts`) |
+| The demo host page | `demo/host.html`, `scripts/demo-host.ts` |
+
+Rules the lint enforces on the product pages (`eslint.config.mjs`): no `dangerouslySetInnerHTML`,
+no `innerHTML`, no `console`, no Web Storage outside `browser.ts`, no `postMessage` or `message`
+listener, no `document.title`. Rules and the decisions behind them:
+[`docs/plans/m8-pr-checks.md`](../../docs/plans/m8-pr-checks.md) (S8, S9, S14, S16, S18, D11).
+
+### Browser tests (`web e2e`)
+
+`npm run test:e2e` runs Playwright's Chromium against `out-ui/` (build it first). Each test's
+browser answers every request itself: the build's files from `out-ui/`, the API from
+`fixtures/widget/`, at `http://localhost:8000` (compose's origin) without a server or an open
+port. Any other request fails the test, so a run costs $0 and nothing leaves the machine.
+
+- **The matrix:** every state × en, hi, te (sunrise-clinic for en and hi, paws-and-co for te) ×
+  two projects, 360×800 and 1280×800, under `prefers-reduced-motion: reduce`
+  (`e2e/motion.spec.ts` checks the other preference). Keyboard only: `tabTo` presses Tab and
+  checks the focus ring at every stop.
+- **Each state ends with** the guidance check (first, verbatim, `role="alert"`, `lang="en"`,
+  its heading by state, on screen, never animated, or absent on success), nothing stored but the
+  session token (`localStorage`, IndexedDB and Cache Storage empty), no horizontal overflow, axe
+  with the WCAG 2.0–2.2 A and AA tags and zero violations (disabled rules: none), and one Tab
+  round with a visible focus ring everywhere (`e2e/support/checks.ts`).
+- **`e2e/xss.spec.ts`** puts payloads that would set a canary into every place untrusted text
+  reaches the widget and checks, under the page's CSP, that none ran and nothing was created.
+  Specs import `test` from `e2e/support/stack.ts` (ESLint refuses Playwright's own): its
+  catch-all keeps the run closed.
+- **`retries: 0`.** A flaky test is a failing test. Timers never wait: `page.clock` moves the
+  countdowns, the 5 s poll and the client timeouts.
+- **`e2e/harness.spec.ts`** makes each check fail on purpose (an unstubbed request, a CSP
+  refusal, an axe violation, a hidden focus ring, animated guidance), so a green run means
+  something.
+- Automated checks are a floor, never a conformance claim: the manual pass (keyboard, VoiceOver,
+  200 % zoom, 320 px) is recorded separately (S15).
+
+### The demo host page
+
+`npm run demo:host -- --business <id>` opens Chromium on that business's allowed origin
+(`data/widget/businesses/<id>.json`, e.g. `https://www.sunrise-clinic.example`) with the widget
+framed in `demo/host.html`, the one-line embed. The origin exists only inside that browser, so
+`frame-ancestors` lets it in without changing any configuration. By default it runs on fixtures
+(closed, $0; every message gets today's real-stack answer, an urgent hand-off). With `--stack`
+it passes the widget's requests to the local stack (`make up`, once PR 2 serves `ui_dir`).
+`--check` loads it headless and exits.
+

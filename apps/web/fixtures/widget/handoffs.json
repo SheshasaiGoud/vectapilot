@@ -1,0 +1,37 @@
+{
+  "synthetic": true,
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (pending PR 2's merge) validates every case.",
+  "route": "POST /v1/widget/handoffs",
+  "api": "PR 2 (m8/widget-api, not merged): vectapilot_api.widget.models.HandoffQueued ({id, queued}; id is null exactly when not queued)",
+  "cases": {
+    "created": {
+      "status": 200,
+      "model": "HandoffQueued",
+      "note": "the session's open hand-off, made now or found (S17): its priority is not sent",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "queued": true
+      }
+    },
+    "not-stored": {
+      "status": 200,
+      "model": "HandoffQueued",
+      "note": "the store failed or hung (S14): never a 5xx",
+      "body": {
+        "id": null,
+        "queued": false
+      }
+    },
+    "unauthorized": {
+      "status": 401,
+      "model": "TypedError",
+      "body": {
+        "detail": "authentication required",
+        "error": "unauthorized"
+      },
+      "headers": {
+        "WWW-Authenticate": "Bearer"
+      }
+    }
+  }
+}

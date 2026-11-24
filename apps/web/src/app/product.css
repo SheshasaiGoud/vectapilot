@@ -1,0 +1,56 @@
+/* The product pages' styles (M8 PR 4): only the product build imports this file
+   (`layout.product.tsx`). `source(none)` stops Tailwind scanning the whole project, so the
+   widget's CSS holds the widget's utilities only, never the team site's. */
+@import "tailwindcss" source(none);
+@source "../widget";
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+  body {
+    background-color: #ffffff;
+    color: #1f2937;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans",
+      "Noto Sans Devanagari", "Noto Sans Telugu", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible {
+    outline: 3px solid #1d4ed8;
+    outline-offset: 2px;
+  }
+}
+
+/* The one animation: the "working" dots explain that a request is in flight. Off when the visitor
+   prefers reduced motion (the dots stay, still). Guidance never animates in either mode (S15). */
+@keyframes vp-pulse {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .vp-dot {
+    animation: vp-pulse 1.2s ease-in-out infinite;
+  }
+  .vp-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .vp-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

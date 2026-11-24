@@ -1,0 +1,67 @@
+<!doctype html>
+<!--
+  The demo host page (M8 PR 4): stands in for a business's own website and frames the customer
+  widget, the one-line embed of ADR 0019 decision 5. Served by `npm run demo:host` and by the e2e
+  test `e2e/embed.spec.ts` at the business's allowed origin (data/widget/businesses/<id>.json),
+  inside the browser only, so the widget's `frame-ancestors` lets it in. Never copied into a build
+  (outside `public/`). The placeholders are filled, escaped, by `e2e/support/serve.ts`.
+
+  The embed is the iframe below and nothing else: no loader script, no `postMessage` (S18). Its
+  `src` names the business in the path and may add `?lang=`; nothing else may be passed, since a
+  query would land in the API's access log.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{display_name}}: demo host page (fictional)</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        color: #1f2937;
+        background: #f3f4f6;
+      }
+      main {
+        max-width: 72rem;
+        margin: 0 auto;
+        padding: 1rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1.5rem;
+        align-items: flex-start;
+      }
+      .about {
+        flex: 1 1 18rem;
+      }
+      .note {
+        border: 2px solid #92400e;
+        background: #fffbeb;
+        padding: 0.75rem;
+        border-radius: 0.5rem;
+      }
+      iframe {
+        flex: 1 1 22rem;
+        max-width: 28rem;
+        width: 100%;
+        height: 40rem;
+        border: 1px solid #4b5563;
+        border-radius: 0.5rem;
+        background: #ffffff;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="about">
+        <h1>{{display_name}}</h1>
+        <p class="note">{{note}}</p>
+        <p>
+          This page stands in for the business's own website. The chat on this page is the
+          VectaPilot widget, framed from the API's origin.
+        </p>
+      </div>
+      <iframe title="Chat with {{display_name}}" src="{{widget_src}}"></iframe>
+    </main>
+  </body>
+</html>

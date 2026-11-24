@@ -1,0 +1,103 @@
+{
+  "synthetic": true,
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (pending PR 2's merge) validates every case.",
+  "route": "GET /v1/widget/handoffs/{id}",
+  "api": "PR 2 (m8/widget-api, not merged): vectapilot_api.widget.models.HandoffStateResponse ({id, status, reply, replied_at})",
+  "cases": {
+    "open": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "open",
+        "reply": null,
+        "replied_at": null
+      }
+    },
+    "claimed": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "claimed",
+        "reply": null,
+        "replied_at": null
+      }
+    },
+    "replied": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "resolved",
+        "reply": "Fixture text: hello, this is the front desk. Your appointment request is noted.",
+        "replied_at": "2026-11-24T12:05:00Z"
+      }
+    },
+    "resolved": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "resolved",
+        "reply": null,
+        "replied_at": null
+      }
+    },
+    "xss-reply": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "resolved",
+        "reply": "<img src=x onerror=alert(1)> javascript:alert(1)",
+        "replied_at": "2026-11-24T12:05:00Z"
+      }
+    },
+    "not-found": {
+      "status": 404,
+      "model": "TypedError",
+      "body": {
+        "detail": "there is no hand-off with this id for this session",
+        "error": "handoff_not_found"
+      }
+    },
+    "rate-limited": {
+      "status": 429,
+      "model": "RateLimited",
+      "headers": {
+        "Retry-After": "4"
+      },
+      "body": {
+        "detail": "too many requests: retry after the number of seconds given",
+        "error": "rate_limited",
+        "retry_after_seconds": 4,
+        "guidance": [
+          "We cannot treat emergencies.",
+          "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+          "You do not have to handle this alone.",
+          "Do not wait for a reply in the chat."
+        ]
+      }
+    },
+    "limits-unavailable": {
+      "status": 503,
+      "model": "TypedError",
+      "body": {
+        "detail": "hand-off status cannot be checked now; try again later",
+        "error": "limits_unavailable"
+      }
+    },
+    "unauthorized": {
+      "status": 401,
+      "model": "TypedError",
+      "body": {
+        "detail": "authentication required",
+        "error": "unauthorized"
+      },
+      "headers": {
+        "WWW-Authenticate": "Bearer"
+      }
+    }
+  }
+}

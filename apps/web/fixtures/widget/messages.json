@@ -1,0 +1,568 @@
+{
+  "synthetic": true,
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (pending PR 2's merge) validates every case.",
+  "route": "POST /v1/widget/messages",
+  "api": "PR 2 (m8/widget-api, not merged): vectapilot_api.widget.models.MessageResponse ({turn: AgentResponse, handoff: HandoffQueued | null})",
+  "cases": {
+    "answer": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "answer",
+          "trace_id": "000000000000000000000000000000a1",
+          "answer": {
+            "outcome": "answered",
+            "answer": "Sunrise Clinic is open Monday to Friday from 8:00 to 20:00 and on Saturday from 9:00 to 14:00 [1].",
+            "sources": [
+              {
+                "chunk_id": "00000000-0000-4000-8000-000000000001",
+                "document_id": "00000000-0000-4000-9000-000000000001",
+                "source_id": "fixture-source-1",
+                "version": "v1",
+                "title": "Opening hours",
+                "page": 1,
+                "chunk_index": 1,
+                "language": "en",
+                "content_kind": "faq",
+                "content": "Opening hours: Monday to Friday 8:00 to 20:00, Saturday 9:00 to 14:00. Closed on Sundays.",
+                "score": 0.81
+              },
+              {
+                "chunk_id": "00000000-0000-4000-8000-000000000002",
+                "document_id": "00000000-0000-4000-9000-000000000002",
+                "source_id": "fixture-source-2",
+                "version": "v1",
+                "title": "Public holidays",
+                "page": null,
+                "chunk_index": 2,
+                "language": "en",
+                "content_kind": "faq",
+                "content": "On public holidays the clinic is closed; the notice board lists them.",
+                "score": 0.81
+              }
+            ],
+            "confidence": {
+              "value": 0.81,
+              "basis": "top_retrieval_score",
+              "calibrated": false
+            },
+            "route": "rag",
+            "trace_id": "000000000000000000000000000000a1",
+            "prompt_version": "fixture-answer.1"
+          }
+        },
+        "handoff": null
+      }
+    },
+    "answer-no-sources": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "answer",
+          "trace_id": "000000000000000000000000000000a2",
+          "answer": {
+            "outcome": "answered",
+            "answer": "An answer that cites nothing must never be shown.",
+            "sources": [],
+            "confidence": {
+              "value": null,
+              "basis": "top_retrieval_score",
+              "calibrated": false
+            },
+            "route": "rag",
+            "trace_id": "000000000000000000000000000000a2",
+            "prompt_version": "fixture-answer.1"
+          }
+        },
+        "handoff": null
+      },
+      "note": "S9: answered, but no sources: the widget shows no answer."
+    },
+    "answer-dont-know": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "answer",
+          "trace_id": "000000000000000000000000000000a3",
+          "answer": {
+            "outcome": "dont_know",
+            "answer": null,
+            "sources": [],
+            "confidence": {
+              "value": null,
+              "basis": "top_retrieval_score",
+              "calibrated": false
+            },
+            "route": "rag",
+            "trace_id": "000000000000000000000000000000a3",
+            "prompt_version": "fixture-answer.1"
+          }
+        },
+        "handoff": null
+      }
+    },
+    "reply": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "reply",
+          "trace_id": "000000000000000000000000000000b1",
+          "text": "Which day would suit you for the appointment?",
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": null
+      }
+    },
+    "confirmation-book": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "confirmation_required",
+          "trace_id": "000000000000000000000000000000c1",
+          "action_id": "3d6f0a52-8b1e-4f7a-9c2d-5e8b1a7f4c30",
+          "tool": "book",
+          "summary": "Book General consultation on Tuesday 1 December 2026 at 10:30 (30 minutes).",
+          "summary_language": "en",
+          "expires_at": "2026-11-24T12:15:00Z",
+          "confirm_token": "Fx7_fixture-token-0001",
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": null
+      }
+    },
+    "confirmation-ticket": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "confirmation_required",
+          "trace_id": "000000000000000000000000000000c2",
+          "action_id": "8a2b4c6d-1e3f-4a5b-8c7d-9e0f1a2b3c4d",
+          "tool": "create_ticket",
+          "summary": "Send a message to staff (Billing question).\nYour message to staff:\n“Please check my last invoice.”",
+          "summary_language": "en",
+          "expires_at": "2026-11-24T12:15:00Z",
+          "confirm_token": "Fx7_fixture-token-0002",
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": null
+      }
+    },
+    "handoff-urgent-guard-error": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d1",
+          "reason": "guard_error",
+          "priority": "urgent",
+          "intent": null,
+          "guidance": [
+            "We cannot treat emergencies.",
+            "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+            "You do not have to handle this alone.",
+            "Do not wait for a reply in the chat."
+          ],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true
+        }
+      },
+      "note": "Today's real stack for a health business: H1 is a stub, so every message is an urgent guard_error."
+    },
+    "handoff-safety": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d2",
+          "reason": "safety",
+          "priority": "urgent",
+          "intent": "emergency",
+          "guidance": [
+            "We cannot treat emergencies.",
+            "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+            "You do not have to handle this alone.",
+            "Do not wait for a reply in the chat."
+          ],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true
+        }
+      }
+    },
+    "handoff-safety-not-stored": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d3",
+          "reason": "safety",
+          "priority": "urgent",
+          "intent": "emergency",
+          "guidance": [
+            "We cannot treat emergencies.",
+            "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+            "You do not have to handle this alone.",
+            "Do not wait for a reply in the chat."
+          ],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": null,
+          "queued": false
+        }
+      },
+      "note": "S8: a failed store keeps the guidance and gives queued false."
+    },
+    "handoff-normal-queued": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d4",
+          "reason": "customer_asked",
+          "priority": "normal",
+          "intent": null,
+          "guidance": [],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true
+        }
+      }
+    },
+    "handoff-normal-not-queued": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d6",
+          "reason": "customer_asked",
+          "priority": "normal",
+          "intent": null,
+          "guidance": [],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": null,
+          "queued": false
+        }
+      }
+    },
+    "handoff-not-covered": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d7",
+          "reason": "not_covered_language",
+          "priority": "high",
+          "intent": null,
+          "guidance": [
+            "We cannot treat emergencies.",
+            "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+            "You do not have to handle this alone.",
+            "Do not wait for a reply in the chat."
+          ],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true
+        }
+      },
+      "note": "guards/agent.py: a health business's uncovered script is a high hand-off with guidance."
+    },
+    "handoff-safety-floor-off": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d5",
+          "reason": "safety_floor_off",
+          "priority": "normal",
+          "intent": null,
+          "guidance": [
+            "We cannot treat emergencies.",
+            "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+            "You do not have to handle this alone.",
+            "Do not wait for a reply in the chat."
+          ],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true
+        }
+      },
+      "note": "agent/service.py W11: a health business while agent_router is off is a normal hand-off with its guidance; no safety step cleared the message (Z4 (b))."
+    },
+    "handoff-turn-timeout": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d8",
+          "reason": "turn_timeout",
+          "priority": "urgent",
+          "intent": null,
+          "guidance": [
+            "We cannot treat emergencies.",
+            "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+            "You do not have to handle this alone.",
+            "Do not wait for a reply in the chat."
+          ],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true
+        }
+      },
+      "note": "D15 (a): the route's outer bound ended the turn; urgent with the guidance for a health business (widget/messages.py turn_timeout)"
+    },
+    "handoff-guards-not-configured": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d9",
+          "reason": "guards_not_configured",
+          "priority": "urgent",
+          "intent": null,
+          "guidance": [
+            "We cannot treat emergencies.",
+            "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+            "You do not have to handle this alone.",
+            "Do not wait for a reply in the chat."
+          ],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true
+        }
+      },
+      "note": "S6: guard_routes = off (local, test, ci) answers this hand-off, never the service"
+    },
+    "unknown-kind": {
+      "status": 200,
+      "model": "none",
+      "body": {
+        "turn": {
+          "kind": "stream",
+          "trace_id": "000000000000000000000000000000e1",
+          "text": "a kind the widget does not know"
+        },
+        "handoff": null
+      },
+      "note": "a kind the API does not send today (S9's safe fallback)"
+    },
+    "malformed": {
+      "status": 200,
+      "model": "none",
+      "body": {
+        "turn": {
+          "kind": "answer",
+          "trace_id": "000000000000000000000000000000e2"
+        },
+        "handoff": null
+      },
+      "note": "not a valid body: the widget treats it as an unknown kind"
+    },
+    "xss-answer": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "answer",
+          "trace_id": "000000000000000000000000000000f1",
+          "answer": {
+            "outcome": "answered",
+            "answer": "<img src=x onerror=alert(1)> javascript:alert(1)",
+            "sources": [
+              {
+                "chunk_id": "00000000-0000-4000-8000-000000000003",
+                "document_id": "00000000-0000-4000-9000-000000000003",
+                "source_id": "fixture-source-3",
+                "version": "v1",
+                "title": "<img src=x onerror=alert(1)>",
+                "page": null,
+                "chunk_index": 3,
+                "language": "en",
+                "content_kind": "faq",
+                "content": "javascript:alert(1) <img src=x onerror=alert(1)>",
+                "score": 0.81
+              }
+            ],
+            "confidence": {
+              "value": 0.81,
+              "basis": "top_retrieval_score",
+              "calibrated": false
+            },
+            "route": "rag",
+            "trace_id": "000000000000000000000000000000f1",
+            "prompt_version": "fixture-answer.1"
+          }
+        },
+        "handoff": null
+      }
+    },
+    "xss-reply": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "reply",
+          "trace_id": "000000000000000000000000000000f2",
+          "text": "javascript:alert(1) <img src=x onerror=alert(1)>",
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": null
+      }
+    },
+    "xss-confirmation": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "confirmation_required",
+          "trace_id": "000000000000000000000000000000f3",
+          "action_id": "0b1c2d3e-4f5a-4b6c-8d7e-8f9a0b1c2d3e",
+          "tool": "create_ticket",
+          "summary": "Send a message to staff (Other).\nYour message to staff:\n<img src=x onerror=alert(1)> javascript:alert(1)",
+          "summary_language": "en",
+          "expires_at": "2026-11-24T12:15:00Z",
+          "confirm_token": "Fx7_fixture-token-0003",
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": null
+      }
+    },
+    "xss-handoff": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000f4",
+          "reason": "safety",
+          "priority": "urgent",
+          "intent": null,
+          "guidance": [
+            "<img src=x onerror=alert(1)>",
+            "javascript:alert(1)"
+          ],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true
+        }
+      }
+    },
+    "unauthorized": {
+      "status": 401,
+      "model": "TypedError",
+      "body": {
+        "detail": "authentication required",
+        "error": "unauthorized"
+      },
+      "headers": {
+        "WWW-Authenticate": "Bearer"
+      }
+    },
+    "invalid": {
+      "status": 422,
+      "model": "ClosedValidation",
+      "body": {
+        "detail": "the request is invalid: see problems (location, type)",
+        "error": "invalid_request",
+        "problems": [
+          {
+            "loc": [
+              "body",
+              "message"
+            ],
+            "type": "string_too_long"
+          }
+        ]
+      }
+    },
+    "widget-not-found": {
+      "status": 404,
+      "model": "TypedError",
+      "note": "the session's business no longer has an enabled widget: nothing ran",
+      "body": {
+        "detail": "this business has no widget",
+        "error": "widget_not_found"
+      }
+    },
+    "rate-limited": {
+      "status": 429,
+      "model": "RateLimited",
+      "headers": {
+        "Retry-After": "12"
+      },
+      "body": {
+        "detail": "too many requests: retry after the number of seconds given",
+        "error": "rate_limited",
+        "retry_after_seconds": 12,
+        "guidance": [
+          "We cannot treat emergencies.",
+          "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+          "You do not have to handle this alone.",
+          "Do not wait for a reply in the chat."
+        ]
+      }
+    },
+    "rate-limited-no-guidance": {
+      "status": 429,
+      "model": "RateLimited",
+      "headers": {
+        "Retry-After": "12"
+      },
+      "body": {
+        "detail": "too many requests: retry after the number of seconds given",
+        "error": "rate_limited",
+        "retry_after_seconds": 12,
+        "guidance": []
+      }
+    },
+    "store-unavailable": {
+      "status": 503,
+      "model": "TypedError",
+      "body": {
+        "detail": "sessions cannot be checked now; try again later",
+        "error": "session_store_unavailable"
+      }
+    },
+    "server-error": {
+      "status": 500,
+      "model": "none",
+      "body": null,
+      "text": "Internal Server Error",
+      "note": "Starlette's plain 500"
+    }
+  }
+}

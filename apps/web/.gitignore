@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# The product build for the API's ui_dir (M8 PR 4: npm run build:ui)
+/out-ui/
+
+# Playwright (M8 PR 4, web e2e): results and reports of local runs
+/test-results/
+/playwright-report/
+/blob-report/
