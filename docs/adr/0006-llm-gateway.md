@@ -117,3 +117,8 @@ above stands; these lines supersede it where they differ.
 **Amended 2026-11-05 (shesha, M4 plan; [ADR 0015](0015-intent-router.md)).** Model choice per
 message and cross-model fallback move from M4 to M9. M4's router falls back from a classifier to
 one `small` call (ADR 0015), which is not a cross-model fallback; the catalog does not change.
+
+**Amended 2026-11-24 (shesha, M8 plan; [ADR 0019](0019-sessions-staff-access-and-ui-hosting.md)).**
+Hands-on streaming does not happen in M8 either: it changes the gateway's output path inside M3's
+measurement window (M8 plan S13), so it waits until that window closes (ADR 0019, "Revisit
+when"). M8 adds no path to a model and does not change the gateway.

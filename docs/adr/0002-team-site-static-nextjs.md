@@ -23,3 +23,8 @@ no hosting cost — while practising the frontend stack the product will use lat
 **Consequences.** Free hosting and the same stack as the future dashboard. No server features
 (server actions, rewrites, request-time data) on the site — acceptable for a static page. The
 customer widget and dashboard will need a server later (separate decision).
+
+**Amended 2026-11-24 (shesha, M8 plan D2; [ADR 0019](0019-sessions-staff-access-and-ui-hosting.md)).**
+That separate decision: the widget and dashboard are static builds from this app, `apps/web`,
+served by the API from its own origin (a read-only `ui_dir`), never from GitHub Pages. The Pages
+build keeps the team site only, with no page that can call an API; production hosting is M10's.

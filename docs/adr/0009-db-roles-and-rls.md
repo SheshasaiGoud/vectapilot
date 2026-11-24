@@ -114,3 +114,9 @@ canary suite grows to cover them as they arrive.
     2026-10-24, shesha). The API-level red proof over a leaking `text_search` lands in M3 PR 4,
     with the hybrid routes (decided 2026-10-24, shesha). Not covered: an xfail built by
     obfuscation or added by a plugin outside those files (review).
+
+**Amended 2026-11-24 (shesha, M8 plan D1, D5; [ADR 0019](0019-sessions-staff-access-and-ui-hosting.md)).**
+"Until M8 auth replaces it": `X-Business-Id` stays a local, test and ci seam on its 7 routes, and
+M8's widget and staff routes take the business from a session row read under that business's
+RLS (no `SECURITY DEFINER`, no `BYPASSRLS`). A route-inventory test proves production reaches no
+header route; the new tables join the canary catalog.
