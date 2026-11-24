@@ -12,7 +12,7 @@ export interface Milestone {
   pending?: string;
 }
 
-export const currentMilestone = "M7";
+export const currentMilestone = "M8";
 
 /** Teammates who review every milestone; shown as always active. */
 export const reviewers: string[] = ["maya-tech-lead"];
@@ -71,11 +71,12 @@ export const milestones: Milestone[] = [
     title: "Safety",
     summary: "PII masking, injection defense, red-team suite",
     owners: ["zara-safety"],
+    pending: "H1, live run and close-out pending",
   },
   {
     id: "M8",
     title: "Staff dashboard",
-    summary: "Review queue, decisions, corrections become evals",
+    summary: "Review queue, decisions, corrections exported as eval candidates",
     owners: ["sofia-frontend"],
   },
   {

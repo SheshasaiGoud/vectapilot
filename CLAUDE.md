@@ -160,6 +160,7 @@ Planned: `scripts/`.
 - [ADR 0016](docs/adr/0016-tools-and-agent-loop.md) — tools and the agent loop (accepted 2026-11-10, D1–D8 decided as recommended): a typed tool core per business, a loop that can read and propose but never write, writes as pending actions executed once by a confirm call with a token no model sees, idempotency in Postgres, a sandbox under RLS, structured output instead of native tool use (M3's window), no tools before a safety step for health businesses (fail closed while M4's router is off), an MCP adapter in its own project that cannot confirm
 - [ADR 0017](docs/adr/0017-document-extraction.md) — document extraction (accepted 2026-11-11, reviewed by ananya-rag, zara-safety and noah-evals, D1–D8 decided as recommended): schemas per business type from configuration compiled into shape-only Pydantic models, one structured `small` call with a verbatim quote per field, confidence as levels from checks in code (quote, value and field label), per-field review routing that fails closed behind a team invariant check, an OCR seam without an engine, file bytes never stored, rows hidden at expiry and purged by hand
 - [ADR 0018](docs/adr/0018-guardrails.md) — guardrails (accepted 2026-11-16, reviewed by zara-safety, noah-evals, diego-backend and leo-agents, D1–D8 decided as recommended): a red-flag screen first that needs neither Redis, the budget nor the model; guards that only tighten and fail closed into a hand-off; one shared text fold and term matcher over per-business-type term files that can only tighten; standard-library PII masking before any provider; Redis limits and budgets with business-scoped keys; guards at the routes and `create_app`, never inside a measured service; a frozen synthetic red-team suite gated in CI
+- [ADR 0019](docs/adr/0019-sessions-staff-access-and-ui-hosting.md) — sessions, staff access and UI hosting (accepted 2026-11-24, D1–D15 decided as recommended): server-side sessions in Postgres under RLS replace the client-asserted `X-Business-Id` and `customer_ref` on customer routes (the header routes stay a local/test/ci seam); the widget is an iframe served by the API with the session token alone in `sessionStorage`; staff log in with one-time links from an owner CLI; the API serves the static UI builds (no new server or image); MCP stays flag-scoped with nothing to confirm
 
 ## Current status
 - **Next steps for shesha, M1–M4 in one ordered checklist** (commands, caps, rules, what runs in
@@ -282,6 +283,15 @@ Planned: `scripts/`.
   `document_scan_unavailable` (the document scan fails closed). PR 8 built the guards on
   `/v1/answer` and `/v1/kb/search` behind `guard_answer = off` (byte-identical goldens at
   6572e29); PR 10 switches them on after M3's last live answer run. H3 (`check_reply`, guide `docs/learning/m7-output-checks.md`) is a stub.
+
+- **M8 (customer widget, staff review dashboard, sessions) — planned and decided 2026-11-24**
+  (`docs/plans/m8-pr-checks.md`, ADR 0019 accepted; drafted by maya from sofia-frontend's and
+  diego-backend's targets; reviewed read-only by zara-safety, noah-evals and leo-agents, 41
+  findings applied). D1–D15 decided by shesha as recommended: Postgres sessions under RLS, the API
+  serves the static builds, iframe widget, one-time staff links, header routes kept as a test seam,
+  a hand-off row per session plus metadata-only turn rows, no `[HAND-WRITE]` in M8 (workload),
+  Playwright and axe as dev-only packages (each install still needs a yes), the wrong-answer rate
+  moved to M11 (a deviation from §6). M8 builds against M7's stand-in matchers: nothing waits on H1.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

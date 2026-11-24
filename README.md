@@ -9,9 +9,9 @@ Details: [docs/business-context.md](docs/business-context.md).
 
 **🌐 Meet the team:** [sheshasaigoud.github.io/vectapilot](https://sheshasaigoud.github.io/vectapilot/)
 
-> **Status:** ✅ M0 (foundations) complete · 🚧 M1 (LLM gateway), M2 (ingestion + cited answers),
-> M3 (hybrid search), M4 (intent router) and M5 (tools + agent loop) code merged except their
-> hand-written pieces still open, live measurements pending · ⏳ M6 (document extraction) planning.
+> **Status:** ✅ M0 (foundations) complete · 🚧 M1 (LLM gateway) to M7 (safety) code merged; M4–M7
+> each still wait for hand-written pieces, and live measurements are pending · ⏳ M8 (staff
+> dashboard + customer chat widget) planned and decided, not yet built.
 > Nothing here serves real customers yet; this README is updated as each milestone lands. Any
 > metric shown here will be a real, measured number — never a placeholder.
 
@@ -27,10 +27,10 @@ take real actions, and give staff no way to supervise them.
 | Principle | What it means in VectaPilot |
 |---|---|
 | **Grounded** | Every factual answer cites its source; the system refuses when evidence is weak |
-| **Supervised** | Staff approve, edit or reject drafts; every correction becomes an eval case |
+| **Supervised** | Staff review hand-offs and extraction fields; corrections are exported as eval candidates a person reviews |
 | **Acts safely** | Write actions need explicit confirmation, idempotency keys and audit logs |
 | **Measured** | An eval suite runs in CI; regressions block merges |
-| **Observable** | Every request is traced with latency, tokens and cost |
+| **Observable** | Every model call writes a metadata-only record (tokens, latency, cost); per-request tracing comes in M9 |
 
 ## Planned architecture
 
@@ -51,9 +51,9 @@ message → guardrails → router (classifier, LLM fallback) → RAG | agent + M
 | M3 | RAG v2 — hybrid search, reranking, abstention | 🚧 Code merged; live runs pending; reranking deferred ([ADR 0014](docs/adr/0014-hybrid-retrieval.md)) |
 | M4 | Intent router — trained classifier + LLM fallback | 🚧 Code merged except the hand-written fallback (H1); eval rows and live runs pending ([plan](docs/plans/m4-pr-checks.md), [ADR 0015](docs/adr/0015-intent-router.md)) |
 | M5 | MCP tools + agent loop with confirmations | 🚧 Code merged except the hand-written agent loop (H1); scenarios and live runs pending ([plan](docs/plans/m5-pr-checks.md), [ADR 0016](docs/adr/0016-tools-and-agent-loop.md)) |
-| M6 | Document extraction pipeline | ⏳ Planning ([plan](docs/plans/m6-pr-checks.md), [ADR 0017](docs/adr/0017-document-extraction.md)); decisions pending |
-| M7 | Safety — PII masking, injection defense, red-team suite | ⏳ |
-| M8 | Staff review dashboard | ⏳ |
+| M6 | Document extraction pipeline | 🚧 Code merged except the hand-written field routing (H1); documents and live runs pending ([plan](docs/plans/m6-pr-checks.md), [ADR 0017](docs/adr/0017-document-extraction.md)) |
+| M7 | Safety — PII masking, injection defense, red-team suite | 🚧 Code merged except the hand-written term matcher (H1) and output checks (H3); live run and close-out pending ([plan](docs/plans/m7-pr-checks.md), [ADR 0018](docs/adr/0018-guardrails.md)) |
+| M8 | Staff review dashboard | ⏳ Planned and decided: the dashboard plus the customer chat widget and server-side sessions it needs; not built yet ([plan](docs/plans/m8-pr-checks.md), [ADR 0019](docs/adr/0019-sessions-staff-access-and-ui-hosting.md)) |
 | M9 | Observability + cost optimization | ⏳ |
 | M10 | Deployment + CI eval gates | ⏳ |
 | M11 | Pilot with a real business + case study | ⏳ |
