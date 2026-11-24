@@ -18,7 +18,9 @@ and the plan's G2, G3, G8 and "H3" sections ([`m7-pr-checks.md`](../plans/m7-pr-
 > contract cases pass and their switch is gone; the state changes below are made. The same day
 > zara-safety's and ananya-rag's reviews and a mutation check were applied: rules 3-6 and the
 > dose vocabulary were widened (each a tightening) and the contract file grew to 222 cases, with
-> no original expected value changed (§5 lists what changed and what is still open). No number
+> no original expected value changed. The same day shesha decided the review's open questions
+> (§5): three more tightenings were applied (254 cases, still no expected value changed) and the
+> rest is decided or recorded. No number
 > in this guide is a result: every text below is made up to explain a rule or is a frozen
 > red-team case's scripted text, and every personal-data value comes from a reserved range.
 
@@ -160,6 +162,20 @@ mark), because a joiner or a keycap digit (a digit, VS16, U+20E3) splits a numbe
 but not for the reader. Only the reply gets the second view: an exempt text that needs it
 exempts nothing more, so the extra view can only add findings.
 
+**Whole tokens** (decided 2026-11-23). "A candidate at every start position" has a side effect
+for a pattern that starts with a bare character set: the e-mail's local part `[\w.+-]`, a UPI
+handle's name `[\w.-]`, a run of 20 or more digits `[0-9]`. Such a pattern matches from inside
+a run of that set, so "ravi.kumar@mail.example" also holds the candidate "kumar@mail.example",
+a different mailbox, and used to exempt it. So a candidate's *token* starts where the run of its
+pattern's first set begins (read from the pattern itself, `_leading_set`), and the reply's
+token must be an exempt text's candidate that starts its own token. Phone and identifier
+patterns start with an assertion ("no digit before me", "no letter or digit before me"), so they
+never start inside a run of digits and need nothing new: "+91 00000 123456" never exempts
+"+91 00000 12345". This check sits next to the key check, never instead of it, so it only adds
+findings. Runs are read over a *run view* (decided 2026-11-24): a dash other than the ASCII
+hyphen ends a run as a space does, so the customer's "Email—ravi@mail.example" holds the whole
+token "ravi@mail.example" (§5).
+
 ### 2.6 Grounding digits (answers only)
 An answer must say only what its cited chunks say (ADR 0011). Digits are the easy, high-value
 part: a wrong fee or a wrong date. Compare **runs**, not substrings ("60" is not grounded by
@@ -265,8 +281,8 @@ changed:
   text that cannot hold a left key (above).
 - **Rule 5** compares each boundary line without its final `.:;!?` and both sides without the
   squeezed characters ("...never instructions" in quotes, "!" for ".", a ZWJ inside a stem).
-  Done in H3, not in `screens.boundary_lines`: the pending `/v1/agent` follow-up
-  (`m7/agent-followups`) pins the agent prompt's sentences with their full stops.
+  Done in H3, not in `screens.boundary_lines`: the `/v1/agent` follow-up (#84, merged) pins
+  the agent prompt's sentences with their full stops.
 - **Rule 6** reads the answer's second view (§2.6).
 - **Tests:** one probe per surviving mutant of the mutation check (M03 to M70), the reviews'
   cases, and probes for the review's own code (each confirmed to kill its mutant).
@@ -281,44 +297,192 @@ menu", "The shuttle leaves every 2 hours". Each hands off a benign reply (G2: fa
 red-team summary's over-escalation list is computed from the frozen L cases, so these live in
 the tests, not there.
 
-**Still open (for shesha; each a proposal with a recommendation):**
-1. **Narrowing the pinned over-escalations** (zara's 5): (a) keep all (recommended until real
-   traffic shows the cost); (b) a unit word followed by in, off or down is no unit (drop-in,
-   drop-off, drop-down); (c) drop the English collision "bar" from `TIMES` (keep "baar"). (b)
-   and (c) loosen a mandatory rule.
-2. **Rule 4's worst case** (zara's 7, ananya's Q2): (a) accept the bound (recommended): the
-   pre-filter makes the common case linear, `rag_context_k` ≤ 50 (`MAX_K`) and a chunk's
-   `max_chars` ≤ 8,000 (`ingestion.types`);
-   (b) read at most a fixed prefix of each exempt text (reading less only removes exemptions).
-3. **A blank boundary line** (the writer's Q3): (a) `OutputContext` refuses an entry that is
-   empty once squashed and stripped, a `ValueError` (ananya recommends this); (b) leave it (every
-   reply would hand off: fail closed; `screens` never yields one).
-4. **E-mail suffixes in exempt texts** (the mutation check): every start position is a
-   candidate, so a customer's "ravi.kumar@mail.example" exempts a reply's "kumar@mail.example".
-   (a) read an exempt text's candidates only where no `[\w.+-]` comes before them (recommended:
-   a small tightening, with that case as its test); (b) accept it.
-5. **Look-alike letters in rule 5** (zara's 6, optional part): "<<<ЕND MESSAGE" with a Cyrillic
-   Е gets through. (a) compare sentences of 4 or more words over `fold`, padded with spaces, and
-   keep the stems on clean text (recommended, a contract amendment); (b) leave it to the
-   injection screen on the input.
-6. **A word between day-in and the number** ("din mein sirf do baar"): (a) let the day-in
-   sequence sit within 3 words before the number (still linear); (b) leave it to H1's terms
-   (recommended for now: ranges already cover "do ya teen").
-7. **Mirroring the new English verbs and units in `pf_take_tablets`** (zara's 3, G4): a term
-   review by shesha in `data/safety/platform.json`; not done here (`data/` is outside this
-   PR).
-8. **A PR 10 precondition** (ananya's 5): replay `check_reply` offline over M2/M3's live dev
-   answers and their cited chunks (no model call), and report "x of n faithful answers handed
-   off" per finding code with dataset version and commit, before `guard_answer` goes on. Rule 6
-   and the frequency shape will hand off some faithful answers ("9 am to 2 pm" against "9:00 to
-   14:00", "INR 600.00" against "INR 600"). Recommended: (a) add it, owned by noah-evals; (b)
-   decide rule 6's time, decimal and phone normalisation without data.
-9. **Gaps left by the contract:** "1-0-1" dose shorthand, "one a day", number words ("four
-   hundred and fifty rupees"), phones with dots or brackets (H2's recorded gap), and
-   toxicity beyond the abuse terms (D2 (i)).
-10. **Route dependency:** `/v1/agent`'s answer kind should be checked against the answer
-    prompt's boundary lines. That fix is on `m7/agent-followups` (commit 1683e2e, ananya's
-    finding 1); this branch should merge after it, or name it in its PR.
+**Done (2026-11-23, shesha: "Apply all three"; Claude at shesha's request).** Each one only
+adds findings or refuses a bad context, each has hand-derived cases (sections 4b, 5b and 5c of
+the contract file: 32 new cases, 254 in all), and no expected value changed:
+1. **A blank boundary line is refused** (was open question 3, (a)). `OutputContext` raises a
+   `ValueError` with a fixed message ("a boundary line is blank once normalised", never the
+   line) when an entry has nothing left after rule 5's first comparison normalises it (squashed,
+   its final `.:;!?` removed): "", whitespace, ".", "!? ;:", a lone ZWJ. A test pins that no
+   route builds one: `screens.BOUNDARY_LINES` and `screens.ANSWER_BOUNDARY_LINES` each keep text,
+   and a context is built with each (the red-team probe passes no line at all).
+2. **Whole tokens in rule 4** (was 4, (a), widened as the docstring and §2.5 say). The token
+   boundary is read from each pattern's first item: when it is a character set with no assertion
+   before it, a candidate's token starts where the run of that set holding its start begins. For
+   `generic.email` that set is `[\w.+-]`, the guide's "no `[\w.+-]` before it"; the same problem
+   held for `in.upi` (`[\w.-]`: "ravi.kumar@examplebank" exempted "kumar@examplebank") and
+   `generic.long_digits` (`[0-9]`: a 25-digit run exempted its last 20 digits), so they get the
+   same rule. The reply's side is read the same way (a candidate's *token key* runs from its
+   token's start), so the customer's own "ravi.kumar@mail.example" still exempts itself. The
+   check is added next to the key check, never instead of it (replacing it would drop a few
+   findings, such as "x.@d.example" against "x@d.example"), and the pre-filter reads an exempt
+   text while a key or a token key is left. **Phones** (checked): every phone pattern starts
+   with "no digit before me" and ends with "no digit after me", so "+91 00000 123456" or
+   "1+91 00000 12345" never exempts "+91 00000 12345" (tested). One separator still joins:
+   "+91 00000 12345 6 pm" exempts "+91 00000 12345", kept and pinned, because the same single
+   separator puts "+91" before a mobile number whose echo without "+91" must pass.
+3. **Prompt sentences over the fold** (was 5, (a), without the padding). A boundary line whose
+   `fold(clean(line))` has at least `SENTENCE_WORDS` (4, `screens.MIN_BOUNDARY_WORDS`, pinned
+   equal) words is also searched in `fold(clean(reply))`, so Cyrillic or Greek look-alikes,
+   accents and other punctuation cannot hide an echoed prompt sentence. Every sentence
+   `screens` builds folds to at least 4 words and every stem to fewer (pinned), so stems keep
+   today's comparison alone. Counting the fold's words, not the line's, means a line that folds
+   to almost nothing ("— — — —") is never searched over the fold. **No padding**: the first
+   comparison has no word boundary ("Misuse only facts from the tool results" is a finding), so
+   a padded fold would let the look-alike twin of that same reply through; unpadded, the fold
+   finds whatever the first comparison finds on the same words. Since 2026-11-24 (below) the
+   fold is compared without spaces on both sides.
+
+**Decided 2026-11-23 (shesha, "Accept all", as recommended):**
+- **The 14 pinned over-escalations stay** (was 1, (a)) until real traffic shows their cost.
+- **Rule 4's worst case is accepted** (was 2, (a)): the pre-filter keeps the common case
+  linear; `rag_context_k` ≤ 50 (`MAX_K`) and a chunk's `max_chars` ≤ 8,000 bound the rest.
+  Measured on the exempt side (2026-11-24, `check_reply` on an answer, reply "Mail
+  kumar@mail.example", message "hi", best of 3, two runs, this Mac, uv's Python 3.12; "HEAD" is
+  f051b2a before the three tightenings, "before" the tightenings, "after" the exempt side without
+  token keys): 50 cited chunks of 8,000 characters of prose, each holding
+  "ravi.kumar@mail.example": HEAD 0.18-0.19 s (and no finding: the suffix leak), before
+  0.71-0.73 s, after 0.69-0.71 s; 50 chunks of "kumarmailexample " and 7,000 digits (HEAD's own
+  worst input): HEAD 4.65-4.69 s, before 5.53-5.70 s, after 4.74-4.79 s. The prose case costs
+  more than HEAD because a token key no chunk holds whole keeps every chunk in the loop (HEAD
+  stopped after the first chunk by exempting the suffix). In one cProfile run of the prose case,
+  `clean` run again on the already-clean chunks (rules 4 and 6) took 0.80 s of 2.08 s profiled:
+  a later optimisation, not changed here. `check_reply` runs synchronously
+  in the async routes, so these seconds block the worker's event loop: an input this shaped is
+  an attack, and the bound is the cap above.
+- **"din mein sirf do baar"** (a word between day-in and the number) is left to H1's terms (was
+  6, (b)); ranges already cover "do ya teen".
+- **The review's added words stay**: ya/या, हर/har and "more", the steps beyond the review's
+  own lists (above).
+- **The recorded gaps stay recorded** (was 9): "1-0-1" dose shorthand, "one a day", number
+  words ("four hundred and fifty rupees"), phones with dots or brackets (H2's recorded gap),
+  toxicity beyond the abuse terms (D2 (i)).
+- **The new dose verbs and units go to shesha's G4 term review** (was 7): mirrored in
+  `pf_take_tablets` (`data/safety/platform.json`) as a later small data/safety PR, not here.
+- **PR 10's precondition** (was 8, (a)): an offline replay of H3 over M2/M3's live dev answers
+  (recorded answers and their cited chunks, $0) reports "x of n faithful answers that would be
+  handed off", per finding code with dataset version and commit, before the switch; owned by
+  noah-evals ([`m7-pr-checks.md`](../plans/m7-pr-checks.md), PR 10). Rule 6 and the frequency
+  shape will hand off some faithful answers ("9 am to 2 pm" against "9:00 to 14:00", "INR
+  600.00" against "INR 600").
+- **The route dependency is closed** (was 10): the `/v1/agent` answer kind's boundary lines
+  (commit 1683e2e) merged in #84, and this branch has merged `main`.
+
+**Review of the three applied (2026-11-24: zara-safety, a mutation check; Claude at shesha's
+request).** Each change only adds findings or refuses a bad context; 20 new cases (274 in all),
+each derived by hand, and no existing expected value changed:
+- **Rule 5 without spaces.** The fold keeps a space between letters, so "T e x t inside a
+  block...", "T·e·x·t", a braille blank (U+2800) or parenthesized letters ("⒯⒠⒳⒯", "(t)(e)" after
+  NFKD) and "instruc-" at a line break hid a prompt sentence. The fold of a sentence (4 or more
+  words) is now compared without its spaces inside the folded reply without its spaces. That
+  finds everything the comparison with spaces found (removing spaces keeps a substring a
+  substring), so it replaces it rather than sitting next to it. The word gate stays: a stem
+  must never be compared this way ("endmessage" is inside "sendmessage"). The shortest prompt
+  sentence without spaces is 30 characters ("useonlyfactsfromthetoolresults"); 0 hits over the
+  22 files of `data/sample`.
+- **A boundary line is cleaned first** (rule 5's first comparison): a line that is blank as the
+  reply is read (a lone zero-width space, a soft hyphen and ".") is refused, and a stem with a
+  soft hyphen is compared as the reply is read, where it used to be silently dead. The prompt's
+  own lines are unchanged by `clean` (pinned).
+- **Rule 4's exempt side** builds only its whole-token keys, never token keys (timings above).
+- **Mutation probes** for the eight surviving mutants (B7, B12, B13, C5, C6, C7, C8, C13) and
+  for the new code (the comparison without spaces, the gate, `clean` on the line, each side's
+  keys): each kills its mutant, and `output.py` was restored byte-identical after each.
+- **Rule 4 known limits, pinned as passing:** an exempt address with the same letters and
+  digits in the same order exempts a different one: other punctuation ("ravikumar@mail.example"
+  exempts "ravi.kumar@mail.example"; also "ravik.umar@...", "ravi@mail.ex.ample"); a longer
+  address split by a character outside the pattern's set ("o'brien@..." exempts "brien@...":
+  "'" is valid in an RFC local part but not in `[\w.+-]`; also "%", "/", a ZWJ, and "a+ravi@"
+  for a UPI handle); a UPI handle inside an e-mail ("ravi@paytm.example" exempts "ravi@paytm").
+  None leaks a letter or digit the exempt text does not hold in order. Proposals, later: key
+  e-mail and UPI candidates on their case-folded span with `.`, `+`, `-` and `_` kept (closes
+  the first class); add "'" to `generic.email`'s local-part set in `locales` (H2's pattern).
+- **Rule 4 over-escalation, pinned:** a local part longer than 64 characters echoed whole is a
+  finding (no candidate starts at its token's start; RFC 5321 caps a local part at 64 octets).
+- **Rule 5 known limits, recorded:** leetspeak ("T3xt 1ns1d3 a bl0ck"), "rn" for "m"
+  ("custorner"), HTML entities, a translation or a paraphrase, and any letter `fold` does not
+  map (the Latin small capitals today, below).
+
+**Next, its own small PR (zara's finding 1, major; not on this branch, so H3's diff stays
+reviewable):** `normalize.CONFUSABLES` maps only two Latin small capitals (U+1D04, U+1D0F),
+though its docstring says the small-capital look-alikes are in the table. So "ɢɪᴠᴇ ʜɪᴍ 5 ᴅʀᴏᴘꜱ"
+and "Give him 5 ᴅʀᴏᴘꜱ" get past rule 3 for a health business, "Give him 5 drøps" too (NFKD
+leaves ø alone), a small-caps prompt sentence gets past rule 5, and `fold("ᴄʜᴇꜱᴛ ᴘᴀɪɴ")` is not
+"chest pain" for the red-flag screen. The PR adds the small capitals (U+1D00 a, U+0299 b, U+1D05
+d, U+1D07 e, U+A730 f, U+0262 g, U+029C h, U+026A i, U+1D0A j, U+1D0B k, U+029F l, U+1D0D m,
+U+0274 n, U+1D18 p, U+0280 r, U+A731 s, U+1D1B t, U+1D1C u, U+1D20 v, U+1D21 w, U+028F y,
+U+1D22 z), Cyrillic к (U+043A) to k and г (U+0433) to r and Armenian ո (U+0578) to n after a
+check against Unicode's confusables data, and as a proposal the stroke letters ø, đ, ł, ħ; one
+fold test per letter, an H3 case each for rules 3 and 5, a fold test for "ᴄʜᴇꜱᴛ ᴘᴀɪɴ"; then the
+docstring is fixed. Each mapping only tightens (both sides of every match use the same fold).
+
+**Decided 2026-11-24 (shesha; Claude at shesha's request).** Two changes, 25 new cases (299 in
+all), each derived by hand, no existing expected value changed, and each new probe checked
+against its mutant (`output.py` restored byte-identical after each):
+- **A label joined by a dash** (was open question 3, (b): "treat dashes as spaces"). Rule 4
+  reads a token's run over a *run view*: the ASCII view with each position whose clean
+  character is a dash other than the ASCII hyphen-minus (Unicode `Pd`), or U+2212 MINUS SIGN,
+  as a space (`_label_dash`, `_run_view`); the reply's squeezed view reads the same run view
+  without the same squeezed characters (a dash is none of them). The detector still reads the
+  ASCII view, where each such dash is "-", so a candidate may still span one. Now exempt (the
+  message holds the label, the reply the bare address; section 4c of the contract file):
+  "Email—ravi@mail.example" (em dash), "UPI id–ravi@okaxis" (en dash), "My
+  email―ravi@mail.example" (horizontal bar), "Email−ravi@mail.example" (minus sign). Kept and
+  pinned as over-escalations, next to 2: the ASCII hyphen ("Email-ravi@mail.example", "UPI
+  id-ravi@okaxis"; it can sit inside a real local part) and a glued word of another script
+  ("ईमेलravi@mail.example"), and, from the key check as before, a reply that writes its own
+  label and dash before the customer's bare address ("Email—ravi@…" against "ravi@…"). What a
+  dash never gives (pinned as findings): a suffix of the label joined to the address
+  ("mail.ravi@…" against "Email—ravi@…": the dash adds one token start, right after it), the
+  label joined to the domain ("ravi@…" against "ravi—kumar@…": the key check), and on the
+  reply's side a dash that sets a suffix of the customer's address apart ("ravi—kumar@…"
+  against "ravi-kumar@…", also through the squeezed view: a finding where it used to pass).
+  The hyphens are no label dashes (question 4, decided 2026-11-24): U+2010 HYPHEN and U+2011
+  NON-BREAKING HYPHEN join a run as the ASCII hyphen does, so a customer's
+  "ravi-kumar@mail.example" written with one (a word processor's hyphen) never exempts
+  "kumar@mail.example" (`NOT_LABEL_DASHES`; a test per hyphen).
+- **Six advice verbs from the dose-term review** (shesha, "Accept all"): instill, खिलाइए,
+  डालिए, पिलाइए, daaliye and daliye join `ADVICE_VERBS`. Each was checked after fold (each is
+  its own fold: one word, no nukta, chandrabindu or punctuation; a test pins it) and has a dose
+  case whose only verb it is. No pinned benign sentence changed: none holds one of them, and
+  neither does any frozen case or `data/` file.
+- **Mutation check of the two (2026-11-24):** 23 of 27 non-equivalent mutants killed (2 more
+  were equivalent: `zip(..., strict=False)`, since `ascii_view` keeps one character for one,
+  and "@" as the run breaker, which is in no leading set and not squeezed out). Each of the 4
+  survivors got a probe in section 4c (8 cases, 307 in all), each derived by hand and confirmed
+  to kill its mutant (`output.py` restored byte-identical after each): the run view built from
+  the clean text instead of the ASCII view (D10, leak direction: a Devanagari-digit reference
+  or "ravi．kumar@…", with a fullwidth full stop, would exempt its suffix again); `Sm` counted as a dash, so "+" would split
+  a plus-address (D11, leak direction: "ravi+shop@…" would exempt "shop@…"); a hand-written
+  dash list instead of category `Pd` (D13: the fullwidth hyphen-minus, the small em dash and the
+  two-em dash pinned as label dashes); the squeezed view's token starts read over the
+  unsqueezed run view (D15: a ZWJ or VS16 earlier in the reply would shift every later start).
+
+**Still open (for shesha; proposals):**
+1. **A look-alike inside a marker stem** ("<<<ЕND MESSAGE" with a Cyrillic Е) still gets
+   through rule 5 (pinned as a known limit): the stems keep today's comparison, as decided.
+   (a) leave it (recommended: a stem holds no rule text, so such an echo shows a marker's
+   shape, never a rule); (b) compare stems over a view that maps only `normalize.CONFUSABLES`
+   and keeps `<<<`.
+2. **Whole tokens and a glued word** (recorded): an e-mail typed straight after a word, with
+   no space or punctuation between ("Emailravi@mail.example"), is one token, so a reply that
+   writes "ravi@mail.example" alone hands off (fail closed). (a) accept it (recommended); (b)
+   look for a word boundary inside the local part (no rule tells "Emailravi" from "ravikumar",
+   so it would let suffixes through again).
+3. **Whole tokens and a label joined by a dash** (zara's review, 2026-11-24): decided
+   2026-11-24 (shesha), (b) "treat dashes as spaces", applied above. The question as it was
+   asked: a label joined to the address by a hyphen, a dash or a letter of another script
+   joined its token, so the reply's bare address handed off where it used to pass
+   ("Email-ravi@…", "My email—ravi@…", "UPI id-ravi@okaxis", "ईमेलravi@…"); (b) run starts over
+   a run view with every `Pd` dash but ASCII "-", and U+2212, as a space (not over the clean
+   text as a whole: `[0-9]` would split Devanagari-digit runs and reopen the suffix leak), the
+   ASCII hyphen and the other-script letter pinned next to 2; (a) accept and pin all of them.
+4. **U+2010 and U+2011 as label dashes** (found while applying 3). **Decided 2026-11-24 (b),
+   applied:** shesha's answer was "long dashes", and these two are hyphens: they are left out
+   of the label dashes (`NOT_LABEL_DASHES` in `guards/output.py`), so a word processor's hyphen
+   inside a real address never exempts its suffix, and a label joined by one stays an
+   over-escalation, as "Email-ravi@…" does. Only adds findings; the pinned case flipped (a test
+   per hyphen, each killing its mutant).
 
 ## 6. Explain it back (part of acceptance)
 - Why does a finding replace the whole response instead of deleting the offending sentence?
@@ -332,6 +496,12 @@ the tests, not there.
   tell you about what rule 6 can and cannot prove?
 - Why do the squeezed view (rule 4) and the second digit view (rule 6) read the reply only,
   never an exempt or cited text?
+- Why does "ravi.kumar@mail.example" in the message not exempt "kumar@mail.example" in the
+  reply, while "+91 00000 123456" never needed that rule to stop exempting "+91 00000 12345"?
+  Where does the token boundary come from?
+- Why are prompt sentences also compared over the fold, but marker stems are not? Why is the
+  folded comparison added next to the old one instead of replacing it? Why may the fold be
+  compared without spaces, but a stem never?
 - Why does H3 call the matcher instead of matching phrases itself, and why does it still pass the
   matcher's hits through `verified_hits`?
 - Why can H3 not hang a request on a 1,500-character reply, although `re` has no timeout?

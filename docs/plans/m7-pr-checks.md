@@ -1291,6 +1291,33 @@ check were applied the same day: rules 3-6 and the dose vocabulary widened (each
 the frozen dataset and `data/` unchanged), 222 contract cases with no original expected value
 changed, one probe per surviving mutant. Open questions are in the guide's §5.
 
+**Decided 2026-11-23 (shesha, after H3's review, each as recommended; guide §5).** Three
+tightenings applied (Claude at shesha's request; 254 contract cases, no expected value changed):
+`OutputContext` refuses a boundary line that is blank once rule 5 normalises it (a fixed
+`ValueError`; no route builds one, pinned); rule 4 exempts an e-mail, a UPI handle or a run of
+20 or more digits only when an exempt text holds the same whole token (the token boundary read
+from each pattern's first character set; phones already start and end on a non-digit, checked
+and tested); rule 5 also compares each prompt sentence (4 or more words) over `fold`, so
+look-alikes and accents cannot hide an echo (stems keep today's comparison). The rest: the 14
+pinned over-escalations stay; rule 4's worst case is accepted; "din mein sirf do baar" is left
+to H1's terms; the review's added words (ya/या, हर/har, "more") stay; the recorded gaps stay
+recorded; the new dose verbs and units go to shesha's G4 term review as a later small
+data/safety PR; noah's replay is a PR 10 precondition (below).
+zara-safety's review of the three and a mutation check (2026-11-24) applied (Claude at shesha's
+request; 274 contract cases, no expected value changed): rule 5's fold compared without spaces, a
+boundary line cleaned before rule 5 reads it, rule 4's exempt side without token keys (timed in
+the guide's §5), rule 4's known limits pinned, one probe per surviving mutant. The fold's missing
+small capitals (a dose in small caps passes rule 3) go to their own small PR to
+`normalize.CONFUSABLES`; a label joined by a dash ("Email-ravi@...") is open for shesha (guide
+§5, 3).
+Decided 2026-11-24 (shesha; Claude at shesha's request; 307 contract cases, no expected value
+changed): rule 4 reads a token's run with every dash but the ASCII hyphen (and U+2212) as a space
+("Email—ravi@..." exempts "ravi@..."; the ASCII hyphen and a glued other-script word stay pinned
+over-escalations), and `ADVICE_VERBS` gains the dose-term review's six verbs (instill, खिलाइए,
+डालिए, पिलाइए, daaliye, daliye), each with its own case; a mutation check killed 23 of 27
+non-equivalent mutants and each of the 4 survivors got a probe (guide §5); U+2010/U+2011 are open
+(guide §5, 4).
+
 ## PR 9 — `m7/close-out` (shesha's steps; zara, noah and maya help)
 Agents never pass `--live`, never run a ledgered test, never read the probe file and never see a
 key [carried ADR 0007].
@@ -1313,6 +1340,9 @@ key [carried ADR 0007].
 `guard_answer` defaults to `on`, and Settings refuses `guard_answer = "off"` in production. The
 red-team summary is re-run, and the inventory's G-e 1 (no safety step on `/v1/answer`) is closed.
 This PR is not an M7 blocker.
+- **Precondition:** an offline replay of H3 over M2/M3's live dev answers (recorded answers,
+  $0) reports x of n faithful answers that would be handed off, before the switch (noah-evals;
+  decided 2026-11-23, shesha).
 
 ## PR 11 — `m7/document-review` (later; after M6's live runs)
 `Reason.DOCUMENT_FLAG` in `extraction/routing.py`, migration 0008 (after `make up`, then `make

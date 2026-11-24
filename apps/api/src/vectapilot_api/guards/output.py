@@ -24,7 +24,16 @@ stored folded (`normalize.fold` over `normalize.clean`), so H3 compares it with 
 words as they are. A missing word is a data change with its own test, never H3's job. The phrase
 lists themselves (success claims, advice imperatives with their own numbers, diagnosis, abuse)
 stay in `data/safety/` (G4). The review of 2026-11-23 (zara-safety, ananya-rag) widened the
-vocabulary and rules 3-6 (each a tightening); the guide's §5 lists what it changed.
+vocabulary and rules 3-6 (each a tightening); the guide's §5 lists what it changed. shesha's
+decisions of 2026-11-23 added three more, each one adding findings or refusing a bad context: a
+blank boundary line is refused (`OutputContext`), an e-mail, UPI handle or long digit run is
+exempt only when an exempt text holds the same whole token (rule 4), and a prompt sentence is
+also compared over the fold (rule 5). zara-safety's review of the three and a mutation check
+(2026-11-24) added the fold's comparison without spaces (rule 5), a boundary line read as the
+reply is read (`clean` first), and an exempt text's detector without token keys (rule 4).
+shesha's decisions of 2026-11-24 added two: a dash other than the ASCII hyphen ends a token's
+run as a space does (rule 4: "Email—ravi@mail.example" holds the whole token
+"ravi@mail.example"), and six advice verbs the dose-term review found.
 """
 
 import re
@@ -37,7 +46,7 @@ from types import MappingProxyType
 from typing import Final
 
 from vectapilot_api.guards.caps import Surface, require_within_cap
-from vectapilot_api.guards.locales import Locale, ascii_view
+from vectapilot_api.guards.locales import MINUS_SIGN, Chars, Locale, PiiPattern, ascii_view
 from vectapilot_api.guards.normalize import clean, fold
 from vectapilot_api.guards.pii import SQUEEZED_OUT
 from vectapilot_api.guards.selftest import verified_hits
@@ -113,6 +122,9 @@ ADVICE_VERBS: Final = _folded(
         *("taken", "given", "took", "gave", "put", "apply", "applied", "use", "add"),
         *("administer", "feed", "mix", "place", "instil", "drink", "swallow", "chew"),
         *("dein", "de", "lo", "lena", "daalein", "dalein", "khilao", "pilao"),
+        # the dose-term review (decided 2026-11-24, shesha, "Accept all"): mirrored from it,
+        # each word its own fold, each with its own test
+        *("instill", "खिलाइए", "डालिए", "पिलाइए", "daaliye", "daliye"),
     )
 )
 """Advice imperatives a dose follows (G8), folded."""
@@ -161,6 +173,10 @@ VERB_REACH: Final = 3
 after its unit (Hindi puts the verb last: "दो गोली दें")."""
 UNIT_REACH: Final = 2
 """A dose's unit is one of the `UNIT_REACH` words after its number ("two paracetamol tablets")."""
+SENTENCE_WORDS: Final = 4
+"""Rule 5: a boundary line whose fold has at least this many words is a prompt sentence, also
+compared over the fold. `screens.MIN_BOUNDARY_WORDS`'s value (a test pins the two: `screens`
+imports this module, so this module cannot import it)."""
 
 
 @dataclass(frozen=True)
@@ -180,7 +196,10 @@ class OutputContext:
     - `terms`: the business's output phrases (success claims, medical advice, diagnosis, abuse;
       `config.BusinessGuards.output`), matched with `matcher` over `normalize.fold`'s text;
     - `boundary_lines`: fixed prompt text whose echo is a finding: the boundary markers' stems
-      and the system prompt's sentences that hold no per-turn value (`screens.boundary_lines`);
+      and the system prompt's sentences that hold no per-turn value (`screens.boundary_lines`).
+      An entry with nothing left once rule 5 normalises it (`clean`ed, squashed, its final
+      `.:;!?` removed) is a `ValueError` with a fixed message: it would hand off every reply
+      (decided 2026-11-23, shesha);
     - `locales`: the PII locales (`locales.locales()`) whose patterns are H2's detector.
     """
 
@@ -198,6 +217,8 @@ class OutputContext:
     def __post_init__(self) -> None:
         if self.cited and self.kind is not OutputKind.ANSWER:
             raise ValueError("only an answer has cited chunks")
+        if not all(map(_plain_line, self.boundary_lines)):
+            raise ValueError("a boundary line is blank once normalised")
 
 
 OutputCheck = Callable[[str, OutputContext], tuple[Finding, ...]]
@@ -238,12 +259,33 @@ def check_reply(reply: str, context: OutputContext) -> tuple[Finding, ...]:
        `pii.SQUEEZED_OUT` (H2's second view: a joiner or a keycap mark inside a number), which
        only adds keys. A candidate's *key* is its span's letters and digits, case-folded. A key
        of the reply that is not a key of `context.message`, of a `context.cited` text or of a
-       `context.guidance` line (each found over its ASCII view alone) is a finding. A tool
-       result is never an exemption.
-    5. **Boundary** (`OUTPUT_BOUNDARY`): a `context.boundary_lines` entry, without the sentence
-       punctuation (`.:;!?`) at its end, appears in the reply, both compared without
-       `pii.SQUEEZED_OUT`, case-folded, with every run of whitespace as one space and no space
-       at either end ("<<<END MESSAGE 4f9c..." holds the stem "<<<END MESSAGE ").
+       `context.guidance` line (each found over its ASCII view alone) is a finding. **Whole
+       tokens** (decided 2026-11-23): a pattern whose first item is a character set with no
+       assertion before it (`generic.email`'s local part `[\\w.+-]`, `in.upi`'s name `[\\w.-]`,
+       `generic.long_digits`' `[0-9]`) finds a candidate at every start inside a run of that
+       set, so a candidate's *token* starts where the run of its pattern's first set that holds
+       its start begins, read over the *run view* (decided 2026-11-24): the view with each
+       position whose clean character is a dash other than the ASCII hyphen-minus (Unicode
+       `Pd`), or U+2212 MINUS SIGN, as a space (the squeezed view's run view loses the same
+       positions as it does), so "Email—ravi@mail.example" holds the whole token
+       "ravi@mail.example" while "Email-ravi@mail.example" does not; the detector still reads
+       the view. Any other pattern starts with an assertion (every phone and identifier
+       pattern) and its token is its span. A reply candidate's *token key* (its key from its
+       token's start) that is the key of no exempt text's candidate that starts its own token is
+       a finding too: "ravi.kumar@mail.example" holds "kumar@mail.example", but not as a whole
+       token. A tool result is never an exemption.
+    5. **Boundary** (`OUTPUT_BOUNDARY`): a `context.boundary_lines` entry after `clean`,
+       without the sentence punctuation (`.:;!?`) at its end, appears in `clean(reply)`, both
+       compared without `pii.SQUEEZED_OUT`, case-folded, with every run of whitespace as one
+       space and no space at either end ("<<<END MESSAGE 4f9c..." holds the stem "<<<END
+       MESSAGE "); or (decided 2026-11-23) an entry whose `normalize.fold` over `clean` has at
+       least `SENTENCE_WORDS` words appears in `fold(clean(reply))`, both compared without
+       spaces (review 2026-11-24: "T e x t inside..." and "instruc-" at a line break). So the
+       look-alike letters the fold maps, accents, punctuation and spaces between letters cannot
+       hide an echoed prompt sentence; a letter the fold leaves alone, leetspeak, "rn" for "m",
+       an HTML entity, a translation or a paraphrase can (guide §5). A marker's stem folds to
+       fewer words ("end message") and keeps the first comparison alone: without spaces it
+       would be inside ordinary words ("endmessage" in "sendmessage").
     6. **Ungrounded digits** (`OUTPUT_UNGROUNDED_DIGITS`, the answer kind only). In the reply and
        in every cited text, after `locales.ascii_view(clean(text))`: remove each comma that has a
        digit on both sides (thousands separators: "1,200" and "1,20,000"), then take every
@@ -262,7 +304,7 @@ def check_reply(reply: str, context: OutputContext) -> tuple[Finding, ...]:
         found.add(Finding.OUTPUT_MEDICAL_ADVICE)
     if _unexempt_pii(cleaned, context):  # rule 4
         found.add(Finding.OUTPUT_PII)
-    if _echoes_boundary(cleaned, context.boundary_lines):  # rule 5
+    if _echoes_boundary(cleaned, folded, context.boundary_lines):  # rule 5
         found.add(Finding.OUTPUT_BOUNDARY)
     if context.kind is OutputKind.ANSWER and _ungrounded_digits(cleaned, context.cited):  # rule 6
         found.add(Finding.OUTPUT_UNGROUNDED_DIGITS)
@@ -393,35 +435,103 @@ def _key_text(view: str) -> tuple[str, tuple[int, ...]]:
     return "".join(kept), tuple(accumulate((len(part) for part in kept), initial=0))
 
 
-def _pii_keys(view: str, locales: Sequence[Locale]) -> set[str]:
-    """Rule 4: the key of every candidate of H2's detector in `view`."""
+def _leading_set(pattern: PiiPattern) -> str | None:
+    """Rule 4: the character set a pattern's first item repeats, when nothing comes before it
+    (`generic.email`'s `[\\w.+-]`, `in.upi`'s `[\\w.-]`, `generic.long_digits`' `[0-9]`): read
+    from the pattern, never restated. None for a pattern that starts with an assertion."""
+    first = pattern.items[0]
+    return first.chars if isinstance(first, Chars) else None
+
+
+NOT_LABEL_DASHES: Final = frozenset({"-", "\u2010", "\u2011"})
+"""The hyphens `_label_dash` leaves out: ASCII hyphen-minus, U+2010 HYPHEN, U+2011 NON-BREAKING
+HYPHEN."""
+
+
+def _label_dash(character: str) -> bool:
+    """Rule 4: a long dash (Unicode `Pd`: en and em dashes, the horizontal bar, the fullwidth
+    hyphen-minus) or U+2212 MINUS SIGN; `ascii_view` makes each one "-". It joins a label to an
+    address ("Email—ravi@..."), so it ends a token's run as a space does (decided 2026-11-24,
+    shesha: "long dashes"). The hyphens are not label dashes: the ASCII hyphen-minus, U+2010
+    HYPHEN and U+2011 NON-BREAKING HYPHEN, which a word processor may put inside an address
+    ("ravi-kumar@...") and which must keep its suffix from being exempt (guide §5)."""
+    return character not in NOT_LABEL_DASHES and (
+        unicodedata.category(character) == "Pd" or character == MINUS_SIGN
+    )
+
+
+def _run_view(cleaned: str, view: str) -> str:
+    """Rule 4: where token runs are read (`_run_starts`): `view`, the ASCII view of `cleaned`
+    (one character for one), with each position whose clean character is a label dash as a
+    space. Only runs read it: the detector still reads `view`, so a candidate may span a label
+    dash and its key keeps the letters on both sides."""
+    return "".join(" " if _label_dash(c) else v for c, v in zip(cleaned, view, strict=True))
+
+
+def _run_starts(view: str, chars: str) -> list[int]:
+    """Rule 4: for each position of `view` (a run view), where the run of `chars` (one character
+    set) that holds it starts, or the position itself outside such a run. One pass."""
+    starts = list(range(len(view)))
+    for run in re.finditer(f"(?:{chars})+", view):
+        starts[run.start() : run.end()] = [run.start()] * (run.end() - run.start())
+    return starts
+
+
+def _pii_keys(
+    view: str, runs: str, locales: Sequence[Locale], *, reply: bool
+) -> tuple[set[str], set[str]]:
+    """Rule 4 over one view: the key of every candidate of H2's detector, and then, for the
+    reply (`reply`), each candidate's token key (its key from its token's start), or, for an
+    exempt text, the keys of the candidates that start their own token (whole tokens). Each
+    side builds only what it compares: an exempt text never slices a token key (review
+    2026-11-24; guide §5 has the timings). A token's start is read over `runs`, the view's run
+    view (`_run_view`, the same length)."""
     keys, offsets = _key_text(view)
-    return {
-        keys[offsets[match.start(1)] : offsets[match.end(1)]]
-        for locale in locales
-        for pattern in locale.patterns
-        for match in pattern.anywhere.finditer(view)
-    }
+    every: set[str] = set()
+    tokens: set[str] = set()
+    for locale in locales:
+        for pattern in locale.patterns:
+            chars = _leading_set(pattern)
+            starts = None if chars is None else _run_starts(runs, chars)
+            for match in pattern.anywhere.finditer(view):
+                start, end = match.span(1)
+                token = start if starts is None else starts[start]
+                key = keys[offsets[start] : offsets[end]]
+                every.add(key)
+                if reply:
+                    tokens.add(keys[offsets[token] : offsets[end]])
+                elif token == start:
+                    tokens.add(key)
+    return every, tokens
 
 
 def _unexempt_pii(cleaned: Clean, context: OutputContext) -> bool:
     """Rule 4: a key of the reply (either view) that neither the message, a cited text nor a
-    guidance line holds. Never a tool result. An exempt text is only read while a reply key is
-    left, and its detector only runs when a left key is a substring of its letters and digits
-    (every candidate's key is one: skipping the rest changes nothing)."""
+    guidance line holds, or a token key of the reply that none of them holds as a whole token.
+    Never a tool result. An exempt text is only read while a reply key or token key is left,
+    and its detector only runs when one of them is a substring of its letters and digits (every
+    candidate's key is one: skipping the rest changes nothing)."""
     view = ascii_view(cleaned)
-    left = _pii_keys(view, context.locales)
+    runs = _run_view(cleaned, view)
+    left, tokens = _pii_keys(view, runs, context.locales, reply=True)
     squeezed = _squeezed(view)
     if squeezed != view:
-        left |= _pii_keys(squeezed, context.locales)
+        # A label dash is no `SQUEEZED_OUT` character: both views lose the same positions.
+        more, more_tokens = _pii_keys(squeezed, _squeezed(runs), context.locales, reply=True)
+        left |= more
+        tokens |= more_tokens
     for exempt in (context.message, *context.cited, *context.guidance):
-        if not left:
+        if not (left or tokens):
             break
-        exempt_view = ascii_view(clean(exempt))
+        exempt_clean = clean(exempt)
+        exempt_view = ascii_view(exempt_clean)
         keys, _ = _key_text(exempt_view)
-        if any(key in keys for key in left):
-            left -= _pii_keys(exempt_view, context.locales)
-    return bool(left)
+        if any(key in keys for key in left | tokens):
+            exempt_runs = _run_view(exempt_clean, exempt_view)
+            every, whole = _pii_keys(exempt_view, exempt_runs, context.locales, reply=False)
+            left -= every
+            tokens -= whole
+    return bool(left or tokens)
 
 
 _SENTENCE_FINAL: Final = ".:;!? "
@@ -434,10 +544,28 @@ def _squashed(text: str) -> str:
     return " ".join(_squeezed(text).casefold().split())
 
 
-def _echoes_boundary(cleaned: Clean, lines: Sequence[str]) -> bool:
-    """Rule 5: a boundary line inside the reply (a fixed number of substring searches)."""
+def _plain_line(line: str) -> str:
+    """Rule 5's first comparison: a boundary line `clean`ed as the reply is, squashed, without
+    its final punctuation ("" for a line that is blank as the reply is read, which
+    `OutputContext` refuses)."""
+    return _squashed(clean(line)).rstrip(_SENTENCE_FINAL)
+
+
+def _sentence_in(line: str, despaced: str) -> bool:
+    """Rule 5's second comparison: a line whose fold has at least `SENTENCE_WORDS` words, without
+    its spaces, inside the folded reply without its spaces (`despaced`). It finds whatever the
+    same comparison with spaces would find, and a sentence whose letters are spaced out too. A
+    stem folds to fewer words: it is never compared this way."""
+    sentence = fold(clean(line))
+    return len(sentence.split()) >= SENTENCE_WORDS and sentence.replace(" ", "") in despaced
+
+
+def _echoes_boundary(cleaned: Clean, folded: Folded, lines: Sequence[str]) -> bool:
+    """Rule 5: a boundary line inside the reply, either comparison (at most two substring
+    searches per line)."""
     reply = _squashed(cleaned)
-    return any(_squashed(line).rstrip(_SENTENCE_FINAL) in reply for line in lines)
+    despaced = folded.replace(" ", "")
+    return any(_plain_line(line) in reply or _sentence_in(line, despaced) for line in lines)
 
 
 _GROUPING_COMMA: Final = re.compile(r"(?<=[0-9]),(?=[0-9])")
