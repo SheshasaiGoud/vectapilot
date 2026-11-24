@@ -80,6 +80,8 @@ From the repository root (`make` lists everything):
   vectapilot_api.extracteval check|report|freeze|run|summarize`; `run --live` is shesha's alone).
   Agents run only `check` and `report --counts`, and read misses from `results.jsonl` and
   `summary.md`: never `documents/`, `gold.jsonl`, `values.jsonl` or the full `report`
+- `python -m vectapilot_api.staff add|issue-link|disable` — M8 owner CLI for staff members and
+  one-time login links (owner role; local, test and ci only until M10)
 - `make mcp-check` · `make mcp-test-integration` (stack up, migrations at head) · `make mcp-lock`
   (re-lock `packages/mcp_server`; run it in any PR that changes `apps/api`'s dependencies)
 - `make llm-demo` — the M1 measurement CLI as a dry run (fake provider, $0) into the git-ignored
@@ -297,6 +299,7 @@ Planned: `scripts/`.
   a hand-off row per session plus metadata-only turn rows, no `[HAND-WRITE]` in M8 (workload),
   Playwright and axe as dev-only packages (each install still needs a yes), the wrong-answer rate
   moved to M11 (a deviation from §6). M8 builds against M7's stand-in matchers: nothing waits on H1.
+  PR 1 (`m8/sessions`): migration 0008, `auth/`, widget config, session and staff routes, owner CLI.
 
 ## Environment
 - Node **24 LTS** via nvm, pinned in `.nvmrc` (CI reads the same file). Node 22.11 is still

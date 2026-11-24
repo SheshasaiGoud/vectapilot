@@ -595,6 +595,13 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
     (no change is coming after M8); G9's docstring says what changes for a session reference.
   - **Mutation probes**: one test per surviving non-equivalent mutant (11), each shown to fail on
     its mutant and pass on the restored code.
+- **Decided 2026-11-24 (shesha, as recommended):** the staff-login window stays removed (the
+  links' 256 bits and single use are the control until M10's edge limits); the builders'
+  proposals stand as built (the session body names `business_id`, the check order, strict
+  origins, admin covers reviewer routes, the sample widget files with unreviewed hi and te
+  greetings); `VECTAPILOT_PUBLIC_ORIGIN` joins compose and `auth/` joins the coverage gate in
+  PR 2. **shesha's steps:** the follow-up texts (`handoff_follow_up`, `urgent_follow_up` per
+  language, Q9) and the cookie check by hand (rule 7, steps above).
 
 ## PR 2 — `m8/widget-api` (diego; leo reviews confirm, zara parity and honesty, noah turns and feedback) · L · after PR 1, D2, D6, D7, D11, D15
 - **Migration M8-b `handoffs_and_turns`:**
