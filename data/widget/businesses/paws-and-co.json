@@ -1,0 +1,39 @@
+{
+  "business_id": "paws-and-co",
+  "synthetic": true,
+  "review": "synthetic, agent-drafted (diego-backend, M8 PR 1); te not reviewed by a native speaker (D9)",
+  "enabled": true,
+  "display_name": "Paws & Co",
+  "allowed_origins": ["https://www.paws-and-co.example"],
+  "languages": ["en", "te"],
+  "texts": [
+    {
+      "language": "en",
+      "greeting": "Hello! Ask about vet visits, grooming, opening hours and your orders at Paws & Co.",
+      "contact_fallback": [
+        "Phone: +91 00000 20002 (fictional)",
+        "E-mail: hello@paws-and-co.example",
+        "Vet clinic: Monday to Saturday 9:00 to 19:00, Sunday 10:00 to 13:00"
+      ],
+      "quick_replies": [
+        "What are your opening hours?",
+        "Where is my order?"
+      ]
+    },
+    {
+      "language": "te",
+      "greeting": "నమస్కారం! పాస్ & కో లో వెట్ సందర్శనలు, గ్రూమింగ్, సమయాలు, మీ ఆర్డర్ల గురించి అడగండి.",
+      "contact_fallback": [
+        "ఫోన్: +91 00000 20002 (కల్పితం)",
+        "ఇ-మెయిల్: hello@paws-and-co.example",
+        "వెట్ క్లినిక్: సోమవారం నుండి శనివారం 9:00 నుండి 19:00, ఆదివారం 10:00 నుండి 13:00"
+      ],
+      "quick_replies": [
+        "మీరు ఎప్పుడు తెరిచి ఉంటారు?",
+        "నా ఆర్డర్ ఎక్కడ ఉంది?"
+      ]
+    }
+  ],
+  "handoff_retention_days": 30,
+  "accent_color": "#7a3e00"
+}

@@ -12,7 +12,9 @@ H1's full-text search (`text_search`, M3 PR 3), M3 PR 4's hybrid search (both le
 PR 4), the same two routes with `guard_answer = "on"` in both modes (M7 PR 8's guarded pipeline,
 a PR 10 precondition: "M7's guarded routes" below), and M5 PR 2's tools (`check_slots`,
 `order_status` and the `book` and `reschedule` proposal checks, through the executor, over the
-sandbox bait), and M7 PR 7's KB scan (`guards scan`). Add yours here, with no other change.
+sandbox bait), M7 PR 7's KB scan (`guards scan`), and M8 PR 1's session lookups, login-link use
+and revocation (`auth.store`, over `sessions.py`'s shared bait). Add yours here, with no other
+change.
 
 **The business clause itself (M3 PR 3, ADR 0009 amendment).** Every path above runs as the app
 role, under RLS, so it would pass with a search whose SQL forgot `c.business_id = :business_id`:
@@ -90,12 +92,25 @@ from scripts.canary_gate import pending_reason
 from tests.answer.providers import CitingProvider
 from tests.canary.catalog import business_tables
 from tests.canary.checks import Planted
+from tests.canary.sessions import (
+    BAIT_SESSION_ID,
+    SHARED_CUSTOMER_SHA256,
+    SHARED_LINK_SHA256,
+    SHARED_STAFF_SHA256,
+)
 from tests.conftest import TEST_SETTINGS_FIELDS
 from tests.guards.agent_helpers import FixedCheck, LookupMatcher
 from tests.guards.helpers import SAFETY_DIR
 from tests.tools.helpers import CORPUS_DIR
 from tests.tools.sandbox_db import fresh_engine, owner_url
 from vectapilot_api import main as api_main
+from vectapilot_api.auth.store import (
+    find_customer_session,
+    find_staff_session,
+    revoke_session,
+    use_login_link,
+)
+from vectapilot_api.auth.tokens import ParsedToken
 from vectapilot_api.business import BUSINESS_HEADER
 from vectapilot_api.config import Settings
 from vectapilot_api.db import business_transaction
@@ -739,6 +754,97 @@ async def scan_as_staff(engine: AsyncEngine, me: Planted, *, k: int = MAX_K) -> 
     return {"guards scan": "\n".join(f"{i} {found[i]}" for i in ids)}
 
 
+# ── M8 PR 1: the session lookups and the link use (`auth.store`, migration 0008) ──────────────
+# Each asks with the hash both businesses share (`sessions.SHARED_*_SHA256`), so the other
+# business's row sits under the very key `me` asks for. A lookup returns at most one row, so `k`
+# changes nothing; it is accepted to run on the owner's connection like every other leg.
+
+_SET_BUSINESS_LOCAL: Final = text("SELECT set_config('app.business_id', :b, true)")
+
+
+def _shown(found: object) -> str:
+    return "none" if found is None else json.dumps(vars(found), default=str, sort_keys=True)
+
+
+async def customer_session_by_the_shared_hash(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """`find_customer_session` as `me` for the shared customer hash: `me`'s bait session, shown
+    with the business id of the row it read (`me`'s: the positive control). Without its
+    business clause, on the owner's connection, it reads both businesses' rows and raises."""
+    token = ParsedToken(me.business_id, SHARED_CUSTOMER_SHA256)
+    async with business_transaction(engine, me.business_id) as connection:
+        found = await find_customer_session(connection, token)
+    return {"auth customer session": _shown(found)}
+
+
+async def staff_session_by_the_shared_hash(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """`find_staff_session` as `me` for the shared staff hash: `me`'s bait staff session and its
+    member, whose display name is `me`'s canary. The member's id is shared too, so a join that
+    lost its business pairing reads both members (and raises) on the owner's connection."""
+    token = ParsedToken(me.business_id, SHARED_STAFF_SHA256)
+    async with business_transaction(engine, me.business_id) as connection:
+        found = await find_staff_session(connection, token)
+    return {"auth staff session": _shown(found)}
+
+
+async def login_link_use_of_the_shared_hash(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """S5's `use_login_link` as `me` for the shared link hash, in a transaction that is rolled
+    back (a link is single use, and every run must find it unused): the row's business, its
+    member and whether that member is enabled. Without its business clause, on the owner's
+    connection, it marks both businesses' links and raises; without the member subquery's
+    pairing, it reads both businesses' members of the shared id and raises (SQLSTATE 21000)."""
+    token = ParsedToken(me.business_id, SHARED_LINK_SHA256)
+    async with engine.connect() as connection:
+        try:
+            await connection.execute(_SET_BUSINESS_LOCAL, {"b": me.business_id})
+            used = await use_login_link(connection, token)
+        finally:
+            await connection.rollback()
+    return {"auth login link use": _shown(used)}
+
+
+_REVOKED_BAIT: Final = text(
+    "SELECT business_id FROM sessions WHERE id = :id AND revoked_at IS NOT NULL ORDER BY 1"
+)
+"""On the owner's connection this reads both businesses on purpose: it shows whose bait the
+revocation reached."""
+
+
+async def revoke_of_the_shared_session_id(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """`revoke_session` as `me` for the session id both businesses hold (`BAIT_SESSION_ID`), in
+    a transaction that is rolled back: whether it revoked one, and every business whose bait
+    session is then revoked (`me`'s only: the positive control; the other business's stays
+    unrevoked). Without its business clause, on the owner's connection, it revokes both
+    businesses' sessions and raises (`RETURNING id`, two rows). Zara's review: the one auth
+    statement that takes an id."""
+    async with engine.connect() as connection:
+        try:
+            await connection.execute(_SET_BUSINESS_LOCAL, {"b": me.business_id})
+            revoked = await revoke_session(connection, me.business_id, BAIT_SESSION_ID)
+            reached = (await connection.execute(_REVOKED_BAIT, {"id": BAIT_SESSION_ID})).scalars()
+            businesses = " ".join(reached)
+        finally:
+            await connection.rollback()
+    return {"auth revoke session": f"revoked={revoked}: {businesses}"}
+
+
+AUTH_PATHS: Final[Mapping[str, SearchLegPath]] = {
+    "auth customer session": customer_session_by_the_shared_hash,
+    "auth staff session": staff_session_by_the_shared_hash,
+    "auth login link use": login_link_use_of_the_shared_hash,
+    "auth revoke session": revoke_of_the_shared_session_id,
+}
+"""M8 PR 1's auth statements, each with its own business clause: they run on the owner's
+connection too (`OWNER_CONNECTION_PATHS`)."""
+
+
 READ_PATHS: Final[dict[str, ReadPath]] = {
     "sql": sql_on_every_business_table,
     "vector_search": vector_search_as_staff,
@@ -754,6 +860,7 @@ READ_PATHS: Final[dict[str, ReadPath]] = {
     "POST /v1/answer (hybrid, guarded)": answer_through_the_guarded_api_hybrid,
     **TOOL_PATHS,
     "guards scan": scan_as_staff,
+    **AUTH_PATHS,
 }
 
 OWNER_CONNECTION_PATHS: Final[Mapping[str, SearchLegPath]] = {
@@ -762,6 +869,7 @@ OWNER_CONNECTION_PATHS: Final[Mapping[str, SearchLegPath]] = {
     "hybrid_search": hybrid_search_as_staff,
     **TOOL_PATHS,
     "guards scan": scan_as_staff,
+    **AUTH_PATHS,
 }
 """Read paths that also run on the owner's connection, where RLS never applies: each search leg's
 own `WHERE c.business_id = :business_id` is then the only thing between `me` and the other
@@ -776,7 +884,9 @@ Not "sql" (it reads whole tables on purpose, so it leaks there by design:
 `test_red_proof_a_role_that_skips_rls_leaks_the_canary`), and not the API routes (the app refuses
 such a role). `hybrid_search` (M3 PR 4) runs both legs' clauses through the fusion here. M5 PR 2's
 tool paths (`TOOL_PATHS`) run every tool statement's business clause here, through the executor;
-for them `k` caps the rows shown."""
+for them `k` caps the rows shown. M8 PR 1's auth paths (`AUTH_PATHS`) run each session lookup's,
+the link use's and the revocation's clauses (the staff lookup's join pairing and the link use's
+member pairing included) here; each touches at most one row, so `k` changes nothing for them."""
 
 HYBRID: Final = frozenset({"vector_search", "text_search", "rrf_fuse"})
 """What every hybrid read path runs (M3 PR 4): both legs and the fusion."""

@@ -117,6 +117,7 @@ def test_production_refuses_the_header(header: str, monkeypatch: pytest.MonkeyPa
         api_allow_paid_llm=True,  # production is never fake, so the API needs the opt-in
         embeddings_provider="voyage",
         voyage_api_key="not-a-real-key",
+        public_origin="https://api.vectapilot.example",  # production needs one (M8 PR 1)
     )
 
     with TestClient(probe_app(settings)) as client:

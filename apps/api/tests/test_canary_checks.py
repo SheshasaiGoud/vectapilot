@@ -44,6 +44,7 @@ from tests.canary.checks import (
     relation_problems,
 )
 from tests.canary.read_paths import (
+    AUTH_PATHS,
     BAIT,
     BAIT_SLOT_IDS,
     BAIT_WORD,
@@ -383,17 +384,31 @@ def test_every_search_leg_also_runs_on_the_owners_connection() -> None:
     # hybrid_search: both legs' clauses, through the fusion).
     # M5 PR 2 added the tool paths: every tool statement's own business clause, the same way.
     # M7 PR 7 added the KB scan (`guards scan`): its statement's own business clause.
+    # M8 PR 1 added the session lookups, the login-link use and the revocation (`auth.store`).
     legs = {name for name in READ_PATHS if name != "sql" and not API_ROUTE.match(name)}
     assert (
         legs
         == OWNER_CONNECTION_PATHS.keys()
-        == {"vector_search", "text_search", "hybrid_search", *TOOL_PATHS, "guards scan"}
+        == {
+            "vector_search",
+            "text_search",
+            "hybrid_search",
+            *TOOL_PATHS,
+            "guards scan",
+            *AUTH_PATHS,
+        }
     )
     assert set(TOOL_PATHS) == {
         "tool check_slots",
         "tool order_status",
         "tool book (propose)",
         "tool reschedule (propose)",
+    }
+    assert set(AUTH_PATHS) == {
+        "auth customer session",
+        "auth staff session",
+        "auth login link use",
+        "auth revoke session",
     }
     # The very read path the app role runs, not a copy that could drift from it.
     assert all(OWNER_CONNECTION_PATHS[name] is READ_PATHS[name] for name in legs)

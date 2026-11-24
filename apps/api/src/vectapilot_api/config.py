@@ -10,6 +10,7 @@ from pydantic import Field, PostgresDsn, RedisDsn, Secret, SecretStr, model_vali
 from pydantic_core import PydanticCustomError, ValidationError
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
+from vectapilot_api.auth.origins import Origin, is_loopback_http
 from vectapilot_api.embeddings.catalog import EmbeddingsProvider
 from vectapilot_api.gateway.types import OpaqueId, RetryPolicy, Seconds
 from vectapilot_api.retrieval.fusion import RRF_K
@@ -88,6 +89,32 @@ GUARD_CONFIG_REFUSED: Final = (
     " guard_routes 'on', or guard_answer 'on')"
 )
 """`create_app`'s refusal (M7 PR 1, G4): fixed text, settings names only."""
+
+INSECURE_COOKIE_ENVIRONMENTS: Final = frozenset({"local", "test"})
+"""Where `cookie_insecure_dev` is allowed (M8 PR 1): local development over plain http and the
+tests. Not ci (its tests use an https base URL), never production."""
+
+WIDGET_HTTP_ORIGIN_ENVIRONMENTS: Final = frozenset({"local"})
+"""Where a widget file's `allowed_origins` may name `http://localhost` or `http://127.0.0.1` (M8
+PR 1, as the plan says: "https except `localhost` and `127.0.0.1` in local"): a local demo page
+that frames the widget. https everywhere else, test and ci included; the committed sample files
+name https origins only, so they load in every environment."""
+
+CORS_DEV_ENVIRONMENTS: Final = frozenset({"local"})
+"""Where `cors_dev_origins` is allowed (M8 PR 1, cut 6): only a developer's machine."""
+
+PUBLIC_ORIGIN_REFUSED: Final = (
+    "public_origin (VECTAPILOT_PUBLIC_ORIGIN) is required when environment is 'production':"
+    " session routes compare the browser's Origin with it (S5)"
+)
+"""`create_app`'s refusal (M8 PR 1): fixed text, the setting's name only."""
+
+WIDGET_CLIENT_MARGIN_SECONDS: Final = 5.0
+"""P7 (D15 (a)): the widget waits the server's turn bound plus this, so the server's
+`turn_timeout` hand-off arrives before the client gives up [proposal, not a measurement]."""
+CONFIRM_WRITE_BACKSTOP_SECONDS: Final = 5.0
+"""`tools.spec.WRITE_TIMEOUT_S` (a test compares): the confirm route's write backstop, which the
+widget's confirm timeout must exceed (P7). Not imported, so this module loads no tool code."""
 
 PROCESS_ENV_ONLY: Final = {
     "anthropic_api_key": "VECTAPILOT_ANTHROPIC_API_KEY",
@@ -332,6 +359,67 @@ class Settings(BaseSettings):
     measurement]: each limiter and budget call's limit; expiry fails closed. At most
     `readiness_timeout_seconds`, and inside the agent's turn (`TURN_TIMEOUT_RULE`)."""
 
+    # ── Sessions and staff access (M8 PR 1, ADR 0019; D1, D3, D4, D12 (b)) ──
+    # Lifetimes are configuration (P1), never measurements; each is bounded by migration 0008's
+    # CHECK, so a typo stops startup instead of refusing every session with SQLSTATE 23514.
+    public_origin: Origin | None = None
+    """`VECTAPILOT_PUBLIC_ORIGIN`: the API's own origin as a browser names it
+    (`scheme://host[:port]`, strict: `auth.origins`). S5's CSRF check compares every non-GET
+    staff request's `Origin` with it, and session creation too. Required in production
+    (`require_public_origin`, `create_app` only: the MCP server and the CLIs never serve a
+    session), and https there. None elsewhere means no `Origin` matches: those routes answer 403.
+    Under D12 (b) the widget and the dashboard share it; separate origins are an M10
+    requirement."""
+    widget_config_dir: Path | None = None
+    """`VECTAPILOT_WIDGET_CONFIG_DIR`: the folder of per-business widget files
+    (`data/widget/businesses/<business_id>.json`, read-only under compose). Optional: without it no
+    business has a widget, and a business without a file has none either. Read whole and validated
+    at startup (`widget.config.load_widget_dir`, `create_app`): any problem stops the app. Needs
+    `corpus_dir` (each business's type and languages)."""
+    ui_dir: Path | None = None
+    """`VECTAPILOT_UI_DIR`: the read-only folder of `apps/web`'s product build that the API serves
+    (D2 (a) with (i)). Served from PR 2; until then it changes nothing."""
+    customer_session_lifetime_seconds: int = Field(default=43_200, gt=0, le=86_400)
+    """`VECTAPILOT_CUSTOMER_SESSION_LIFETIME_SECONDS` [P1: 12 hours]: a customer session's
+    absolute lifetime, set by the database's clock. At most migration 0008's 24 hours."""
+    staff_session_lifetime_seconds: int = Field(default=28_800, gt=0, le=86_400)
+    """`VECTAPILOT_STAFF_SESSION_LIFETIME_SECONDS` [P1: 8 hours]: a staff session's absolute
+    lifetime (no idle timeout in M8: logout revokes). At most migration 0008's 24 hours."""
+    staff_link_lifetime_seconds: int = Field(default=900, gt=0, le=3_600)
+    """`VECTAPILOT_STAFF_LINK_LIFETIME_SECONDS` [P1: 15 minutes]: a one-time login link's lifetime
+    (the owner CLI writes it). At most migration 0008's hour."""
+    session_limit_business_per_minute: int = Field(default=60, ge=1, le=100_000)
+    """`VECTAPILOT_SESSION_LIMIT_BUSINESS_PER_MINUTE` [proposal: 60, a placeholder, unmeasured]:
+    new customer sessions per business per minute (S14: the per-business creation window, in
+    Redis, failing closed): `POST /v1/widget/sessions` (`RouteSlug.SESSION`). Staff login has no
+    window (step B3, zara's review): one keyed by a caller-written token prefix would only be a
+    lockout switch; the link's 256 bits and single use are the control until M10's edge limits."""
+    session_lookup_timeout_seconds: float = Field(default=2.0, gt=0, le=10, allow_inf_nan=False)
+    """`VECTAPILOT_SESSION_LOOKUP_TIMEOUT_SECONDS` [proposal: 2 s, a safety bound, not a
+    measurement]: one session lookup's limit, the role check and the transaction included. Past
+    it the request gets S14's typed 503, never a hang."""
+    cookie_insecure_dev: bool = False
+    """`VECTAPILOT_COOKIE_INSECURE_DEV`: the staff cookie without `Secure` (and so named
+    `vp_staff`, not `__Host-vp_staff`) for plain `http://localhost` (ADR 0019, Consequences).
+    Local and test only (`INSECURE_COOKIE_ENVIRONMENTS`); anywhere else startup stops."""
+    cors_dev_origins: tuple[Origin, ...] = ()
+    """`VECTAPILOT_CORS_DEV_ORIGINS`: origins a local `next dev` server may call the API from
+    (cut 6). Local only (`CORS_DEV_ENVIRONMENTS`); anywhere else a non-empty list stops startup.
+    CORS stays off otherwise (D2 (a): same origin). Not wired in PR 1: no CORS middleware is
+    installed whatever its value (cut 6; PR 4 decides whether `next dev` needs it)."""
+    widget_turn_bound_seconds: float = Field(default=60.0, gt=0, le=120, allow_inf_nan=False)
+    """`VECTAPILOT_WIDGET_TURN_BOUND_SECONDS` [D15 (a), P7: router 15 + turn 35 + margin 10 = 60 s,
+    arithmetic over the defaults, not a measurement]: the outer bound of `POST
+    /v1/widget/messages` (PR 2), past which the customer gets a `turn_timeout` hand-off. At least
+    `agent_router_timeout_seconds + agent_turn_timeout_seconds`, so it only catches an overrun.
+    The session response (PR 1) gives the widget its client timeout: this plus
+    `WIDGET_CLIENT_MARGIN_SECONDS` (P7: 65 s)."""
+    widget_confirm_timeout_seconds: float = Field(default=15.0, gt=0, le=60, allow_inf_nan=False)
+    """`VECTAPILOT_WIDGET_CONFIRM_TIMEOUT_SECONDS` [P7: 15 s, proposed, not a measurement]: the
+    widget's client timeout for a confirm, handed over in the session response. Above the confirm
+    route's write backstop (`CONFIRM_WRITE_BACKSTOP_SECONDS`), so the client never gives up on a
+    write the server is still allowed to finish."""
+
     @classmethod
     def settings_customise_sources(
         cls,
@@ -415,9 +503,40 @@ class Settings(BaseSettings):
                 " business's type is checked in both"
             )
         problems += self._guard_problems()
+        problems += self._session_problems()
         if problems:
             raise ValueError("; ".join(problems))
         return self
+
+    def _session_problems(self) -> list[str]:
+        """M8 PR 1's fail-fast rules for sessions. Every message names fields, never a value."""
+        problems: list[str] = []
+        production = self.environment == "production"
+        if production and self.public_origin is not None and is_loopback_http(self.public_origin):
+            problems.append("public_origin must be https when environment is 'production'")
+        if self.cookie_insecure_dev and self.environment not in INSECURE_COOKIE_ENVIRONMENTS:
+            problems.append(
+                "cookie_insecure_dev may be true only when environment is local or test"
+            )
+        if self.cors_dev_origins and self.environment not in CORS_DEV_ENVIRONMENTS:
+            problems.append("cors_dev_origins may be set only when environment is local")
+        if self.widget_config_dir is not None and self.corpus_dir is None:
+            problems.append(
+                "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with widget_config_dir: each"
+                " business's type and languages come from its corpus manifest"
+            )
+        turn = self.agent_router_timeout_seconds + self.agent_turn_timeout_seconds
+        if self.widget_turn_bound_seconds < turn:
+            problems.append(
+                "widget_turn_bound_seconds must be >= agent_router_timeout_seconds +"
+                " agent_turn_timeout_seconds (D15: the bound only catches an overrun)"
+            )
+        if self.widget_confirm_timeout_seconds <= CONFIRM_WRITE_BACKSTOP_SECONDS:
+            problems.append(
+                "widget_confirm_timeout_seconds must be above the confirm route's write backstop"
+                f" ({CONFIRM_WRITE_BACKSTOP_SECONDS:g} s, P7)"
+            )
+        return problems
 
     def _guard_problems(self) -> list[str]:
         """M7 PR 1's fail-fast rules for the guards. Every message names fields, never a value."""
@@ -550,6 +669,24 @@ class Settings(BaseSettings):
                 {
                     "type": PydanticCustomError("guards_not_configured", GUARD_CONFIG_REFUSED),
                     "loc": ("guard_config_dir",),
+                    "input": None,
+                }
+            ],
+            hide_input=True,
+        )
+
+    def require_public_origin(self) -> None:
+        """The API server's startup rule (M8 PR 1): production needs `public_origin`. Like
+        `require_guard_config`, only `create_app` calls it (the MCP server and the CLIs build
+        Settings without it). Raised as a ValidationError from fixed text."""
+        if self.environment != "production" or self.public_origin is not None:
+            return
+        raise ValidationError.from_exception_data(
+            type(self).__name__,
+            [
+                {
+                    "type": PydanticCustomError("public_origin_required", PUBLIC_ORIGIN_REFUSED),
+                    "loc": ("public_origin",),
                     "input": None,
                 }
             ],

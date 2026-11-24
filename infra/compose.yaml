@@ -33,6 +33,10 @@ x-api-environment: &api-environment
   # matcher unavailable, so once PR 6–8 guard the routes, each guarded route hands off (fail
   # closed). No route is guarded before PR 6.
   VECTAPILOT_GUARD_CONFIG_DIR: /app/data/safety
+  # M8 PR 1 (ADR 0019, rule 9): the widget files per business (synthetic), mounted read-only
+  # below. The API validates the whole folder at startup: strict origins, each UI language one its
+  # corpus manifest supports, and an enabled health business needs its guard guidance (S8).
+  VECTAPILOT_WIDGET_CONFIG_DIR: /app/data/widget
 
 services:
   postgres:
@@ -95,6 +99,9 @@ services:
       # M7 PR 4: takes effect when the api container is next recreated (`make up`); a recreate,
       # not a reset.
       - ../data/safety:/app/data/safety:ro
+      # M8 PR 1: takes effect when the api container is next recreated (`make up`); a recreate,
+      # not a reset.
+      - ../data/widget:/app/data/widget:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

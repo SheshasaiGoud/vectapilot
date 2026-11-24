@@ -159,8 +159,36 @@ def test_the_policy_reads_the_settings_placeholders() -> None:
         guard_budget_usd_per_business_per_day="0.50",
     )
     assert LimitPolicy.from_settings(settings) == LimitPolicy(
-        business=Window(120, 60), customer=Window(10, 60), budget_micro_usd=500_000
+        business=Window(120, 60),
+        customer=Window(10, 60),
+        budget_micro_usd=500_000,
+        # M8 PR 1: session creation has its own per-business window (the test settings' value).
+        routes={RouteSlug.SESSION: Window(100_000, 60)},
     )
+
+
+def test_m8s_session_route_reads_its_own_placeholder_and_the_rest_keep_the_business_window() -> (
+    None
+):
+    settings = make_settings(
+        guard_limit_business_per_minute=120,
+        guard_limit_customer_per_minute=10,
+        session_limit_business_per_minute=60,
+    )
+
+    policy = LimitPolicy.from_settings(settings)
+
+    assert policy.business_window(RouteSlug.SESSION) == Window(60, 60)
+    for route in set(RouteSlug) - {RouteSlug.SESSION}:
+        assert policy.business_window(route) == Window(120, 60)
+    # Step B3 (zara's review): staff login has no slug and no window of its own.
+    assert "staff_login" not in {route.value for route in RouteSlug}
+    with pytest.raises(TypeError):
+        policy.routes[RouteSlug.AGENT] = Window(1, 1)  # type: ignore[index]  # read-only
+
+
+def test_a_policy_without_route_windows_uses_the_business_window_everywhere() -> None:
+    assert all(POLICY.business_window(route) == POLICY.business for route in RouteSlug)
 
 
 def test_a_window_and_a_budget_are_positive() -> None:
@@ -331,6 +359,26 @@ async def test_without_a_customer_only_the_business_window_counts() -> None:
     stub = StubRedis(rate=[1, 0])
     await limiter(stub).admit("rt-shop", RouteSlug.EXTRACTION)
     assert stub.calls == [("rate", ["vp:rt-shop:rl:extraction:all"], [5, 60_000])]
+
+
+@pytest.mark.parametrize(
+    ("route", "limit"), [(RouteSlug.SESSION, 3), (RouteSlug.CONFIRM, 1), (RouteSlug.AGENT, 5)]
+)
+async def test_a_route_with_its_own_window_sends_that_window(route: RouteSlug, limit: int) -> None:
+    # M8 PR 1: the same script and key grammar, the route's own limit (any slug may have one; the
+    # second here only shows two route windows never mix).
+    policy = LimitPolicy(
+        Window(5, 60),
+        Window(2, 60),
+        budget_micro_usd=1_000,
+        routes={RouteSlug.SESSION: Window(3, 60), RouteSlug.CONFIRM: Window(1, 60)},
+    )
+    stub = StubRedis(rate=[1, 0])
+    built = RedisLimiter(cast(Redis, stub), policy, timeout_s=0.25, clock=lambda: NOON)
+
+    await built.admit("rt-shop", route)
+
+    assert stub.calls == [("rate", [f"vp:rt-shop:rl:{route.value}:all"], [limit, 60_000])]
 
 
 @pytest.mark.parametrize(("ttl_ms", "retry_after"), [(12_001, 13), (1, 1), (0, 1), (60_000, 60)])

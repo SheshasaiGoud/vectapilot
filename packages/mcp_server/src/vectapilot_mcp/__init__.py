@@ -5,8 +5,10 @@ enters the API's lock or image. One process serves one business and one customer
 command line (`--business-id`, `--customer-ref`), sandbox only:
 
 - **Context is injected, never chosen (W7).** The business and the customer come from the flags,
-  exactly as `X-Business-Id` and `customer_ref` do in the API, and are refused outside local, test
-  and ci. No listed input schema has a field for either (the tools' input models forbid them).
+  exactly as `X-Business-Id` and `customer_ref` do on the API's header routes: asserted, never
+  authenticated, so refused outside local, test and ci (the MCP server gets no session, ADR 0019
+  decision 9). No listed input schema has a field for either (the tools' input models forbid
+  them).
 - **Reads run through the executor** (`ToolExecutor.run`): snapshot transactions, server
   timeouts, the observation caps, the leak fence and an audit row per call, as for the agent.
 - **Writes are only proposed** (`ToolExecutor.propose`): the result is the summary and

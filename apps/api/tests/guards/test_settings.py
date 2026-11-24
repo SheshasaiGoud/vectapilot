@@ -47,6 +47,7 @@ PRODUCTION: Final[dict[str, Any]] = {
     "api_allow_paid_llm": True,  # production is never fake, so the API needs the opt-in
     "embeddings_provider": "voyage",
     "voyage_api_key": "not-a-real-key",
+    "public_origin": "https://api.vectapilot.example",  # production needs one (M8 PR 1)
 }
 GUARD_ENV: Final = (
     "VECTAPILOT_GUARD_ROUTES",

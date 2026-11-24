@@ -125,6 +125,7 @@ def test_production_refuses_the_route_before_the_service() -> None:
         api_allow_paid_llm=True,
         embeddings_provider="voyage",
         voyage_api_key="not-a-real-key",
+        public_origin="https://api.vectapilot.example",  # production needs one (M8 PR 1)
     )
 
     response, stand_in = post(EXECUTED, settings)

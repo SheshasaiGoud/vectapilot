@@ -224,13 +224,16 @@ class GuardAction(StrEnum):
 
 
 class RouteSlug(StrEnum):
-    """A guarded route, as a fixed slug (G9's key grammar): never a path."""
+    """A rate-limited route, as a fixed slug (G9's key grammar): never a path. The first five are
+    M7's guarded routes; `session` is M8 PR 1's per-business window on creating a customer session
+    (S14), which no guard record names. Staff login has no window (M8 PR 1, step B3)."""
 
     AGENT = "agent"
     CONFIRM = "confirm"
     EXTRACTION = "extraction"
     ANSWER = "answer"
     SEARCH = "search"
+    SESSION = "session"
 
 
 class Check(StrEnum):
