@@ -7,9 +7,9 @@ The real term files (`data/safety/`, PR 4) and the sample businesses' corpus, th
 `create_app` wires it: an `AnswerService` over `ScreeningSearchService` (the retrieval stand-ins,
 no SQL, the scripted fake embedder) on a `BudgetedGateway` over the fake provider and the same
 limiter, handed to the route through its dependency; search runs over the same stand-ins.
-Masking is H2's `mask_pii` (written); output checks are `FixedCheck` (not H3), or H3's stub where
-a test says so. `create_app`'s own seams are checked apart (`test_guarded_create_app_*`). Every
-model-facing test asserts the fake provider was called.
+Masking is H2's `mask_pii` (written); output checks are `FixedCheck` or `RaisingCheck` (not H3),
+or H3 itself (written 2026-11-23) where a test says so. `create_app`'s own seams are checked
+apart (`test_guarded_create_app_*`). Every model-facing test asserts the fake provider was called.
 """
 
 import functools
@@ -27,7 +27,13 @@ from fastapi.testclient import TestClient
 from tests.answer.providers import reply
 from tests.conftest import make_settings
 from tests.embeddings.scripted import ScriptedEmbedder
-from tests.guards.agent_helpers import FixedCheck, LookupMatcher, RaisingMask, budgeted
+from tests.guards.agent_helpers import (
+    FixedCheck,
+    LookupMatcher,
+    RaisingCheck,
+    RaisingMask,
+    budgeted,
+)
 from tests.guards.helpers import (
     SAFETY_DIR,
     SAMPLE_CORPUS_DIR,
@@ -498,14 +504,46 @@ def test_an_h3_finding_replaces_the_whole_answer_with_a_handoff(
     )
 
 
-def test_the_h3_stub_fails_closed_on_an_answer(caplog: pytest.LogCaptureFixture) -> None:
-    with served(caplog, steps=[cites(KEPT)]) as app:  # no FixedCheck: H3's own stub
+def test_h3_passes_a_grounded_answer(caplog: pytest.LogCaptureFixture) -> None:
+    # H3 itself (no stand-in check): the answer's only digit run, "9", is a run of the cited
+    # chunk's clean text, "We open at 9 on weekdays." (rule 6); nothing else fires.
+    with served(caplog, steps=[cites(KEPT)]) as app:
+        response = app.ask()
+
+    assert app.provider.calls  # non-vacuous: the model was called
+    body = response.json()
+    assert (body["outcome"], body["answer"]) == ("answered", ANSWER)
+    assert app.record()["decided_by"] == "none"
+
+
+def test_h3_replaces_an_ungrounded_answer_with_a_handoff(caplog: pytest.LogCaptureFixture) -> None:
+    # H3 itself: "8" is no digit run of the cited chunk (whose only run is "9"), rule 6.
+    ungrounded = "We open at 8 on weekdays."
+    with served(caplog, steps=[cites(KEPT, answer=ungrounded)]) as app:
+        response = app.ask()
+
+    body = handoff(response)
+    assert app.provider.calls  # non-vacuous: the model was called
+    assert (body["reason"], body["priority"]) == ("guard_output", "high")
+    assert ungrounded not in response.text
+    record = app.record()
+    assert (record["decided_by"], record["findings"]) == (
+        "output:ungrounded_digits",
+        {"output:ungrounded_digits": 1},
+    )
+
+
+def test_an_output_check_that_raises_fails_closed_on_an_answer(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    check = RaisingCheck()
+    with served(caplog, steps=[cites(KEPT)], check=check) as app:
         body = handoff(app.ask())
 
     assert app.provider.calls  # non-vacuous: the model was called
-    assert (body["reason"], body["priority"]) == ("guard_error", "high")
+    assert (body["reason"], body["priority"], check.calls) == ("guard_error", "high", 1)
     record = app.record()
-    assert (record["decided_by"], record["error_type"]) == ("guard_error", "NotImplementedError")
+    assert (record["decided_by"], record["error_type"]) == ("guard_error", "RuntimeError")
 
 
 def test_an_answer_over_the_reply_cap_fails_closed_unread(

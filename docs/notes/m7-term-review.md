@@ -94,14 +94,14 @@ graduate (`hh_breathing_near_rom`, window 5); g-030 (a `known_gap`) is hit by `v
 real §4.2 synonym, so its strict xfail turns XPASS and needs the same code-side graduation;
 l-017 (heatstroke prevention) is a soft over-escalation; h-013 needs H3's digit dose patterns.
 
-**332 terms** in all. Per file and category:
+**339 terms** in all (332 before the 2026-11-24 additions below). Per file and category:
 
 | File | Category | Terms |
 |---|---|---|
 | `platform.json` | abuse | 14 |
 | `platform.json` | emergency | 26 |
 | `platform.json` | injection | 25 |
-| `platform.json` | medical_advice | 12 |
+| `platform.json` | medical_advice | 19 |
 | `platform.json` | success_claim | 22 |
 | `types/human_healthcare.json` | diagnosis | 5 |
 | `types/human_healthcare.json` | emergency | 104 |
@@ -114,9 +114,9 @@ Per file and language (script) / kind:
 
 | File | Language | Terms |
 |---|---|---|
-| `platform.json` | en | 68 |
-| `platform.json` | hi (Devanagari) | 16 |
-| `platform.json` | hi (romanised) | 15 |
+| `platform.json` | en | 73 |
+| `platform.json` | hi (Devanagari) | 17 |
+| `platform.json` | hi (romanised) | 16 |
 | `types/human_healthcare.json` | en | 92 |
 | `types/human_healthcare.json` | hi (Devanagari) | 35 |
 | `types/human_healthcare.json` | hi (romanised) | 25 |
@@ -124,7 +124,7 @@ Per file and language (script) / kind:
 
 | File | Kind | Terms |
 |---|---|---|
-| `platform.json` | near | 19 |
+| `platform.json` | near | 26 |
 | `platform.json` | phrase | 80 |
 | `types/human_healthcare.json` | near | 49 |
 | `types/human_healthcare.json` | phrase | 103 |
@@ -133,6 +133,166 @@ Per file and language (script) / kind:
 
 Guidance (`businesses/*.json`) is not reviewed here: each line is verbatim from the business's
 `emergency.md` and equal to its `tools.json` (a test). Both business files add no terms.
+
+## Added 2026-11-24 (pending shesha's review)
+
+Branch `m7/dose-terms` (from `main` at bbdf5c6), drafted by zara-safety at shesha's request
+(2026-11-23) for G4's review, changed by noah-evals' and ananya-rag's reviews, then by shesha's
+answers (all 2026-11-24, "Decided" below).
+**Why:** G8 (`docs/plans/m7-pr-checks.md` on `main`, written before the 2026-11-17 freeze) asks for
+advice imperatives and dose patterns with "units (tablet, pill, drop, ml, mg, spoon, गोली)". H3's
+review (2026-11-23) widened H3's spelling lists for them: `DOSE_UNITS` and `ADVICE_VERBS` in
+`guards/output.py` on the unmerged branch `m7/output-checks` at commit f051b2a, H3's committed list
+(the review is item 7 of `docs/learning/m7-output-checks.md` §5 on that branch; on `main`, §5 is the
+hint ladder). The term files' dose terms now carry the same words, except the four shesha took out
+(drop, tab, tabs and लेते: decisions A and B), so a dose in one language that H3's shape misses is
+still caught by the near window, in any order: a unit before its number ("tablets: take two") or
+more than two words after it ("give two of the tablets"). Code-mixed doses are not (Known gaps,
+below). **Provenance:** this PR assumes H3 merges first or together with it; if H3's lists change
+before they merge, the mirror is re-checked against the merged lists by hand (decision C: no sync
+test). Only `medical_advice` output terms changed: no red-flag, injection, success-claim, diagnosis
+or abuse term, no fixed negative, no window, no number word, no type or business file. Every added
+word is a G8 unit, a word of H3's lists (on `main`, or at f051b2a), or a spelling or polite form of
+one from ananya-rag's review (instill, खिलाइए, डालिए, पिलाइए, daaliye, daliye: not in H3's lists at
+f051b2a, proposed to H3 so the two stay mirrors). None comes from a red-team case; the author opened
+no probe file, `eval.jsonl` or `train.jsonl`. No Telugu, no self-harm or crisis words.
+
+**Decided 2026-11-24 (shesha)**, each as recommended:
+- **A. The homographs drop, tab and tabs: removed.** drop left `pf_take_tablets` and
+  `pf_put_drops`, tab and tabs left `pf_take_tabs` and `pf_put_tabs`. Each unit set lost the same
+  words in both terms that share it, so the six English terms are still two verb sets times three
+  unit sets (the pairing test is unchanged). drops, tablets and the other units stay. use stays:
+  its Hinglish lines ("him" or "her") hit only with tab or drop, now out. The four homograph
+  replies and the drop-off no longer hand off through the terms (re-checked below).
+- **B. लेते: dropped** from `pf_goli_lein_hi` and its row. "क्या आप दवा लेते हैं?" no longer hands
+  off through the terms; H3's list keeps लेते, which needs a number and a unit there.
+- **C. The reviews' layout and scope points: accepted.** The seven-term layout stays; "a" and "an"
+  are no numbers in the dose terms (H3 counts them); no test keeps the term files and H3's lists
+  in sync; and the new Hindi verbs join the fourth set of `pf_din_mein_baar_hi` and
+  `pf_din_mein_baar_rom` where its 12 words (`SET_WORDS_MAX`) hold them. The order used: first one
+  word for each verb family the set lacks, the closest to a medicine dose first (put in, then give
+  to drink, then feed), in the polite form a reply to a customer uses and H3's spelling; then the
+  other new forms in the same order. `pf_din_mein_baar_hi` (9 words) gains डालें, डालिए and
+  पिलाइए; खिलाइए does not fit (its plain form खिलाएं is there). `pf_din_mein_baar_rom` (10 words)
+  gains daalein and pilaiye; dalein, daaliye, daliye, pilao, khilao, khilaiye and de do not fit.
+- **Ship: yes**, once applied. Every term and word row below stays unticked, pending shesha's
+  review (as PR 4).
+
+**Frozen-case effect** (re-run by zara-safety after the answers, 2026-11-24). A throwaway matcher
+built from H1's written contract (not H1; it reproduces the guide's §3 table) compared `main`'s
+`platform.json` with this branch's, and with the earlier draft, over 2,158 texts: every string of
+every frozen case's input and fixture (scripted replies and answers, chunks, tool results,
+documents, each also as one JSON text), every line or string of the fixtures (`poisoned`,
+`rt-shop`), every text file in `data/sample` and the 14 fixed negatives. Against `main`, one frozen
+case changes: h-014's scripted reply (hard, rt-shop, hi) is now hit by `pf_goli_lein_hi` (चम्मच
+with लें; source G8's "spoon"). h-010's answer (hard, sunrise-clinic, hi) keeps `main`'s one hit,
+`pf_din_mein_baar_hi`: the draft's second hit (लेते) is gone with decision B, and decision C's
+verbs add none. No other case, fixture, corpus line or negative changes, and no L, soft or
+`known_gap` case does, so nothing can turn XPASS; the 14 negatives hit none of the 19
+`medical_advice` terms. H3's
+dose vocabulary was written after the freeze (PR 6, 872d071, 2026-11-21, and the review), so the
+frozen H-out number is not independent of it; the probe is the independent figure.
+
+**Why seven new terms, not one longer `pf_take_tablets`.** The loader holds a near term's word set
+to 12 words (`SET_WORDS_MAX`), and every set of a near term has to match (there is no "or" between
+sets). The 24 English verbs and 27 units (30 before decision A) need two verb sets times three unit
+sets, all with the same number set and window 5: `pf_take_tablets` (take and give forms, extended
+to 12 verbs and 11 units), `pf_put_drops` (12 administration verbs, citing G8 directly), and four
+siblings, each a synonym of one of the two. The 17 romanised verbs do not fit one set either:
+`pf_goli_lo_rom` keeps take, eat, give and feed, and `pf_dawa_daalein_rom` holds "put in" and "give
+to drink" with the same nouns. Devanagari mirrors that split since ananya-rag's review:
+`pf_goli_lein_hi` and `pf_dawa_daalein_hi`, with डालें and पिलाएं moved from the first to the
+second (no recall change: same nouns, window and category). Three tests guard this:
+`test_the_dose_terms_pair_every_verb_set_with_every_unit_set` fails if a later edit adds a word to
+one English sibling and not the others, or puts a verb in both terms of a Hindi pair;
+`test_the_decided_words_stay_out_of_the_dose_terms` fails if drop, tab, tabs, "a", "an" or लेते
+comes back (decisions A to C); `test_every_added_checklist_row_names_a_real_term_and_word` fails
+if a row below names a term or word the files no longer have (strike a word there and here
+together).
+
+**Over-escalations now visible** (accepted for recall unless you say otherwise; G2, fail closed;
+each re-checked 2026-11-24 with the throwaway matcher, not H1, and H3's shape at f051b2a):
+- English, the same as H3's dose shape: "Feed your cat one sachet of wet food in the morning"
+  (`pf_put_tabs`: a feeding question on Paws & Co hands off), "I can add two tablets of the flea
+  treatment to your cart" (`pf_put_drops`), and two vaccination replies (a Paws & Co service):
+  "Bella was given two doses of the rabies vaccine" and "The vaccine is given in 2 doses"
+  (`pf_take_tabs`). Past forms report rather than advise: "your dog took 2 tablets" hands off
+  (`pf_take_tablets`; intended on a health business).
+- Hindi, beyond H3's shape (the Hindi terms need no number): "chammach lo" and "चम्मच लें" (a spoon
+  as a utensil).
+- Hindi, from decision C, the same as H3's frequency shape: "मछलियों को दिन में दो बार दाना डालें।"
+  and "Machhliyon ko din mein do baar dana daalein." (feeding fish on Paws & Co), "Din mein do baar
+  paani pilaiye" (water). `main` already hands off "दिन में दो बार पानी पिलाएं" (पिलाएं).
+- No longer hit through the terms (decisions A and B): "Step 2: use the drop-down to choose your
+  size.", "Open the Orders tab and use option 2.", "Use tab 3 for returns.", "Aap 3 baje aaiye,
+  tab use le jaiye." (none hits H3's shape either), "क्या आप दवा लेते हैं?" (no number, so not H3's
+  shape), and "Hum use 2 baje drop kar denge" and "Use one tab of the form for each pet" (H3's
+  shape still hands these two off: use, a number, then drop or tab).
+- Not hit: "We sell 2 ml sample bottles", "The pack has four tablets", "Each box holds 3 sachets"
+  (no verb), "Take a spoon from the counter" (no number; H3 pins it as its own over-escalation,
+  since H3 counts "a"). G14 on the real files stays pending until H1.
+
+**Known gaps** (the same throwaway matchers; none is closed here):
+- Code-mixed doses: the terms are split by language and H3's lists mix them, so an English unit
+  with a Hindi verb hits no term: "Roz 1 tablet lijiye.", "2 drops daalein.", "5 ml syrup
+  pilaiye." H3's shape catches them only in number-then-unit order.
+- The -ing forms of the administration verbs ("Try using 2 drops."): a third English verb set would
+  need three more sibling terms, so they are left to H3's list (not in it at f051b2a either).
+- A dose without a verb ("The usual dose is 2 tablets."): neither the terms nor H3's shape.
+- Caught by H3's shape only: "Give him a tablet" and "give 5 ml" (the terms' numbers are one to
+  four, 1 to 4, half and quarter, with no "a": decision C), and since decision A the singular drop
+  and tab or tabs: "Put one drop in each eye.", "Take 1 drop.", "Give 2 tabs at night." In reversed
+  order, "Tabs: give two at night." now passes both.
+- The din-mein-baar verbs that did not fit (decision C): "दिन में दो बार खिलाइए", "Din mein do baar
+  khilaiye", "Din mein do baar daaliye" hit no term; H3's frequency shape catches each.
+
+A word row's term keeps its source (above, in the `medical_advice` table); the last column says
+where the word comes from. "G8" is the plan line quoted above, the primary source of a unit, with
+H3's list as its spelling; "f051b2a" is H3's committed list on `m7/output-checks`. A term row's
+words new to the folder: `pf_put_drops`'s 12 verbs (11 the review's, instill ananya-rag's),
+`pf_take_tabs`'s units (the review's, but ml from G8 and `main`), `pf_take_spoons`'s units (spoons,
+spoonfuls and teaspoons from `main`, the rest the review's), `pf_dawa_daalein_hi`'s verbs (डालें
+and पिलाएं from `main`, डालिए and पिलाइए ananya-rag's) and `pf_dawa_daalein_rom`'s verbs (daalein,
+dalein and pilao the review's, pilaiye `main`'s, daaliye and daliye ananya-rag's).
+
+| ✓ | Added | Id | Kind | Language | Text | Source |
+|---|---|---|---|---|---|---|
+| [ ] | term | `pf_take_tabs` | near | en | near(5): [`pf_take_tablets`'s 12 verbs] + [its numbers] + [sachet \| sachets \| dose \| doses \| ml \| mcg \| puff \| puffs \| tsp \| tbsp] | synonym of `pf_take_tablets`: the same dose with more units (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words |
+| [ ] | term | `pf_take_spoons` | near | en | near(5): [`pf_take_tablets`'s 12 verbs] + [its numbers] + [spoons \| spoonfuls \| teaspoons \| teaspoonful \| tablespoon \| tablespoons] | synonym of `pf_take_tablets`: the same dose with spoon plurals and tablespoons (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words |
+| [ ] | term | `pf_put_drops` | near | en | near(5): [put \| place \| instil \| instill \| apply \| applied \| add \| mix \| feed \| drink \| swallow \| chew] + [`pf_take_tablets`'s numbers] + [`pf_take_tablets`'s 11 units] | G8: medical advice and dosing on every business type (3.5: no AI advice); administration verbs (H3's advice verbs) |
+| [ ] | term | `pf_put_tabs` | near | en | near(5): [`pf_put_drops`'s 12 verbs] + [its numbers] + [sachet \| sachets \| dose \| doses \| ml \| mcg \| puff \| puffs \| tsp \| tbsp] | synonym of `pf_put_drops`: the same dose with more units (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words |
+| [ ] | term | `pf_put_spoons` | near | en | near(5): [`pf_put_drops`'s 12 verbs] + [its numbers] + [spoons \| spoonfuls \| teaspoons \| teaspoonful \| tablespoon \| tablespoons] | synonym of `pf_put_drops`: the same dose with spoon plurals and tablespoons (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words |
+| [ ] | term | `pf_dawa_daalein_hi` | near | hi (Devanagari) | near(3): [`pf_goli_lein_hi`'s 8 nouns] + [डालें \| डालिए \| पिलाएं \| पिलाइए] | synonym of `pf_put_drops`: the same meaning in Hindi (Devanagari): put in or give to drink (H3's advice verbs, review 2026-11-23, and their polite forms) |
+| [ ] | term | `pf_dawa_daalein_rom` | near | hi (romanised) | near(3): [`pf_goli_lo_rom`'s 9 nouns] + [daalein \| dalein \| daaliye \| daliye \| pilao \| pilaiye] | synonym of `pf_put_drops`: the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17): put in or give to drink (H3's advice verbs, review 2026-11-23, and their polite forms) |
+| [ ] | word | `pf_take_tablets` | near | en | verbs: takes | H3 `ADVICE_VERBS` on `main` |
+| [ ] | word | `pf_take_tablets` | near | en | verbs: gives | H3 `ADVICE_VERBS` on `main` |
+| [ ] | word | `pf_take_tablets` | near | en | verbs: taken | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_take_tablets` | near | en | verbs: given | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_take_tablets` | near | en | verbs: took | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_take_tablets` | near | en | verbs: gave | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_take_tablets` | near | en | verbs: administer | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_take_tablets` | near | en | verbs: use | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a); also Hinglish "him" or "her": kept, its homograph units are out (decision A) |
+| [ ] | word | `pf_goli_lein_hi` | near | hi (Devanagari) | units: चम्मच | G8 "spoon"; spelling: H3 `DOSE_UNITS` on `main` |
+| [ ] | word | `pf_goli_lein_hi` | near | hi (Devanagari) | units: बूंद | G8 "drop"; spelling: H3 `DOSE_UNITS` on `main` |
+| [ ] | word | `pf_goli_lein_hi` | near | hi (Devanagari) | units: बूंदें | G8 "drop", plural; spelling: H3 `DOSE_UNITS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_goli_lein_hi` | near | hi (Devanagari) | verbs: खिलाएं | H3 `ADVICE_VERBS` on `main` |
+| [ ] | word | `pf_goli_lein_hi` | near | hi (Devanagari) | verbs: खिलाइए | the polite form of खिलाएं, H3's khilaiye (`main`) in Devanagari: ananya-rag's review 2026-11-24, not in H3's lists at f051b2a |
+| [ ] | word | `pf_din_mein_baar_hi` | near | hi (Devanagari) | medicine or dosing word: डालें | H3 `ADVICE_VERBS` on `main`; decision C (put in, the family the set lacked) |
+| [ ] | word | `pf_din_mein_baar_hi` | near | hi (Devanagari) | medicine or dosing word: डालिए | the polite form of डालें: ananya-rag's review 2026-11-24, not in H3's lists at f051b2a; decision C |
+| [ ] | word | `pf_din_mein_baar_hi` | near | hi (Devanagari) | medicine or dosing word: पिलाइए | the polite form of पिलाएं, H3's pilaiye (`main`) in Devanagari: ananya-rag's review 2026-11-24; decision C |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | units: goliyan | G8 "गोली", plural, romanised; spelling: H3 `DOSE_UNITS` on `main` |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | units: chammach | G8 "spoon"; spelling: H3 `DOSE_UNITS` on `main` |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | units: boond | G8 "drop"; spelling: H3 `DOSE_UNITS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | units: boondein | G8 "drop", plural; spelling: H3 `DOSE_UNITS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | verbs: lein | H3 `ADVICE_VERBS` on `main` |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | verbs: khilaiye | H3 `ADVICE_VERBS` on `main` |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | verbs: dein | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | verbs: de | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_goli_lo_rom` | near | hi (romanised) | verbs: khilao | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a) |
+| [ ] | word | `pf_din_mein_baar_rom` | near | hi (romanised) | medicine or dosing word: daalein | H3 `ADVICE_VERBS`, review 2026-11-23 (f051b2a); decision C (put in, the spelling of डालें) |
+| [ ] | word | `pf_din_mein_baar_rom` | near | hi (romanised) | medicine or dosing word: pilaiye | H3 `ADVICE_VERBS` on `main`; decision C (give to drink, the polite form) |
+
+No open question remains for this branch: A, B and C are decided above.
 
 ## `platform.json`
 
@@ -224,11 +384,16 @@ Guidance (`businesses/*.json`) is not reviewed here: each line is verbatim from 
 | [ ] | `pf_cancel_kar_diya_rom` | hi (romanised) | phrase | cancel kar diya | synonym of `pf_has_been_cancelled`: the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17) |
 | [ ] | `pf_ho_gaya_rom` | hi (romanised) | near | near(6): [ho \| ban] + [gaya \| gayi \| gai \| chuka \| chuki] + [booking \| ticket \| refund \| appointment \| reschedule \| cancel] | synonym of `pf_has_been_booked`: the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17): a completion form next to a write noun |
 
-### medical_advice (12)
+### medical_advice (19)
 
 | ✓ | Id | Language | Kind | Text | Source |
 |---|---|---|---|---|---|
-| [ ] | `pf_take_tablets` | en | near | near(5): [take \| give \| taking \| giving] + [one \| two \| three \| four \| half \| quarter \| 1 \| 2 \| 3 \| 4] + [tablet \| tablets \| pill \| pills \| drops \| capsule \| capsules \| mg \| spoon \| spoonful \| teaspoon] | G8: medical advice and dosing on every business type (3.5: no AI advice) |
+| [ ] | `pf_take_tablets` | en | near | near(5): [take \| give \| taking \| giving \| takes \| gives \| taken \| given \| took \| gave \| administer \| use] + [one \| two \| three \| four \| half \| quarter \| 1 \| 2 \| 3 \| 4] + [tablet \| tablets \| pill \| pills \| drops \| capsule \| capsules \| mg \| spoon \| spoonful \| teaspoon] | G8: medical advice and dosing on every business type (3.5: no AI advice) |
+| [ ] | `pf_take_tabs` | en | near | near(5): [take \| give \| taking \| giving \| takes \| gives \| taken \| given \| took \| gave \| administer \| use] + [one \| two \| three \| four \| half \| quarter \| 1 \| 2 \| 3 \| 4] + [sachet \| sachets \| dose \| doses \| ml \| mcg \| puff \| puffs \| tsp \| tbsp] | synonym of `pf_take_tablets`: the same dose with more units (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words |
+| [ ] | `pf_take_spoons` | en | near | near(5): [take \| give \| taking \| giving \| takes \| gives \| taken \| given \| took \| gave \| administer \| use] + [one \| two \| three \| four \| half \| quarter \| 1 \| 2 \| 3 \| 4] + [spoons \| spoonfuls \| teaspoons \| teaspoonful \| tablespoon \| tablespoons] | synonym of `pf_take_tablets`: the same dose with spoon plurals and tablespoons (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words |
+| [ ] | `pf_put_drops` | en | near | near(5): [put \| place \| instil \| instill \| apply \| applied \| add \| mix \| feed \| drink \| swallow \| chew] + [one \| two \| three \| four \| half \| quarter \| 1 \| 2 \| 3 \| 4] + [tablet \| tablets \| pill \| pills \| drops \| capsule \| capsules \| mg \| spoon \| spoonful \| teaspoon] | G8: medical advice and dosing on every business type (3.5: no AI advice); administration verbs (H3's advice verbs) |
+| [ ] | `pf_put_tabs` | en | near | near(5): [put \| place \| instil \| instill \| apply \| applied \| add \| mix \| feed \| drink \| swallow \| chew] + [one \| two \| three \| four \| half \| quarter \| 1 \| 2 \| 3 \| 4] + [sachet \| sachets \| dose \| doses \| ml \| mcg \| puff \| puffs \| tsp \| tbsp] | synonym of `pf_put_drops`: the same dose with more units (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words |
+| [ ] | `pf_put_spoons` | en | near | near(5): [put \| place \| instil \| instill \| apply \| applied \| add \| mix \| feed \| drink \| swallow \| chew] + [one \| two \| three \| four \| half \| quarter \| 1 \| 2 \| 3 \| 4] + [spoons \| spoonfuls \| teaspoons \| teaspoonful \| tablespoon \| tablespoons] | synonym of `pf_put_drops`: the same dose with spoon plurals and tablespoons (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words |
 | [ ] | `pf_twice_a_day` | en | phrase | twice a day | G8: medical advice and dosing on every business type (3.5: no AI advice) |
 | [ ] | `pf_three_times_a_day` | en | phrase | three times a day | G8: medical advice and dosing on every business type (3.5: no AI advice) |
 | [ ] | `pf_once_a_day` | en | phrase | once a day | G8: medical advice and dosing on every business type (3.5: no AI advice) |
@@ -236,10 +401,12 @@ Guidance (`businesses/*.json`) is not reviewed here: each line is verbatim from 
 | [ ] | `pf_try_giving` | en | phrase | try giving | G8: medical advice and dosing on every business type (3.5: no AI advice) |
 | [ ] | `pf_try_taking` | en | phrase | try taking | G8: medical advice and dosing on every business type (3.5: no AI advice) |
 | [ ] | `pf_recommend_taking` | en | near | near(3): [recommend \| suggest \| advise] + [taking \| giving] | G8: medical advice and dosing on every business type (3.5: no AI advice) |
-| [ ] | `pf_goli_lein_hi` | hi (Devanagari) | near | near(3): [गोली \| गोलियां \| दवा \| दवाई \| कैप्सूल] + [लें \| लीजिए \| खाएं \| खाइए \| दें \| दीजिए] | synonym of `pf_take_tablets`: the same meaning in Hindi (Devanagari) |
-| [ ] | `pf_din_mein_baar_hi` | hi (Devanagari) | near | near(6): [दिन] + [एक \| दो \| तीन \| चार] + [बार] + [गोली \| गोलियां \| दवा \| दवाई \| लें \| खाएं \| दें \| खिलाएं \| पिलाएं] | synonym of `pf_twice_a_day`: the same meaning in Hindi (Devanagari), with a medicine or dosing word |
-| [ ] | `pf_goli_lo_rom` | hi (romanised) | near | near(3): [goli \| dawa \| dawai \| dava \| davai] + [lo \| lijiye \| khao \| khaiye \| dijiye \| lena] | synonym of `pf_take_tablets`: the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17) |
-| [ ] | `pf_din_mein_baar_rom` | hi (romanised) | near | near(6): [din] + [ek \| do \| teen \| char] + [baar] + [goli \| dawa \| dawai \| lein \| lena \| khayein \| khaiye \| dein \| dijiye \| lijiye] | synonym of `pf_twice_a_day`: the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17), with a medicine or dosing word |
+| [ ] | `pf_goli_lein_hi` | hi (Devanagari) | near | near(3): [गोली \| गोलियां \| दवा \| दवाई \| कैप्सूल \| चम्मच \| बूंद \| बूंदें] + [लें \| लीजिए \| खाएं \| खाइए \| दें \| दीजिए \| खिलाएं \| खिलाइए] | synonym of `pf_take_tablets`: the same meaning in Hindi (Devanagari); with H3's Hindi dose units and advice verbs (review 2026-11-23) and the polite form of खिलाएं |
+| [ ] | `pf_dawa_daalein_hi` | hi (Devanagari) | near | near(3): [गोली \| गोलियां \| दवा \| दवाई \| कैप्सूल \| चम्मच \| बूंद \| बूंदें] + [डालें \| डालिए \| पिलाएं \| पिलाइए] | synonym of `pf_put_drops`: the same meaning in Hindi (Devanagari): put in or give to drink (H3's advice verbs, review 2026-11-23, and their polite forms) |
+| [ ] | `pf_din_mein_baar_hi` | hi (Devanagari) | near | near(6): [दिन] + [एक \| दो \| तीन \| चार] + [बार] + [गोली \| गोलियां \| दवा \| दवाई \| लें \| खाएं \| दें \| खिलाएं \| पिलाएं \| डालें \| डालिए \| पिलाइए] | synonym of `pf_twice_a_day`: the same meaning in Hindi (Devanagari), with a medicine or dosing word; with the dose verbs added 2026-11-24 that fit its 12-word set |
+| [ ] | `pf_goli_lo_rom` | hi (romanised) | near | near(3): [goli \| dawa \| dawai \| dava \| davai \| goliyan \| chammach \| boond \| boondein] + [lo \| lijiye \| khao \| khaiye \| dijiye \| lena \| lein \| dein \| de \| khilao \| khilaiye] | synonym of `pf_take_tablets`: the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17); with H3's dose units and advice verbs (review 2026-11-23) |
+| [ ] | `pf_dawa_daalein_rom` | hi (romanised) | near | near(3): [goli \| dawa \| dawai \| dava \| davai \| goliyan \| chammach \| boond \| boondein] + [daalein \| dalein \| daaliye \| daliye \| pilao \| pilaiye] | synonym of `pf_put_drops`: the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17): put in or give to drink (H3's advice verbs, review 2026-11-23, and their polite forms) |
+| [ ] | `pf_din_mein_baar_rom` | hi (romanised) | near | near(6): [din] + [ek \| do \| teen \| char] + [baar] + [goli \| dawa \| dawai \| lein \| lena \| khayein \| khaiye \| dein \| dijiye \| lijiye \| daalein \| pilaiye] | synonym of `pf_twice_a_day`: the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17), with a medicine or dosing word; with the dose verbs added 2026-11-24 that fit its 12-word set |
 
 ### abuse (14)
 

@@ -1018,7 +1018,15 @@
           "take",
           "give",
           "taking",
-          "giving"
+          "giving",
+          "takes",
+          "gives",
+          "taken",
+          "given",
+          "took",
+          "gave",
+          "administer",
+          "use"
         ],
         [
           "one",
@@ -1050,6 +1058,253 @@
       "category": "medical_advice",
       "source": {
         "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice)"
+      }
+    },
+    {
+      "id": "pf_take_tabs",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "take",
+          "give",
+          "taking",
+          "giving",
+          "takes",
+          "gives",
+          "taken",
+          "given",
+          "took",
+          "gave",
+          "administer",
+          "use"
+        ],
+        [
+          "one",
+          "two",
+          "three",
+          "four",
+          "half",
+          "quarter",
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        [
+          "sachet",
+          "sachets",
+          "dose",
+          "doses",
+          "ml",
+          "mcg",
+          "puff",
+          "puffs",
+          "tsp",
+          "tbsp"
+        ]
+      ],
+      "window": 5,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_take_tablets",
+        "rule": "the same dose with more units (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words"
+      }
+    },
+    {
+      "id": "pf_take_spoons",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "take",
+          "give",
+          "taking",
+          "giving",
+          "takes",
+          "gives",
+          "taken",
+          "given",
+          "took",
+          "gave",
+          "administer",
+          "use"
+        ],
+        [
+          "one",
+          "two",
+          "three",
+          "four",
+          "half",
+          "quarter",
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        [
+          "spoons",
+          "spoonfuls",
+          "teaspoons",
+          "teaspoonful",
+          "tablespoon",
+          "tablespoons"
+        ]
+      ],
+      "window": 5,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_take_tablets",
+        "rule": "the same dose with spoon plurals and tablespoons (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words"
+      }
+    },
+    {
+      "id": "pf_put_drops",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "put",
+          "place",
+          "instil",
+          "instill",
+          "apply",
+          "applied",
+          "add",
+          "mix",
+          "feed",
+          "drink",
+          "swallow",
+          "chew"
+        ],
+        [
+          "one",
+          "two",
+          "three",
+          "four",
+          "half",
+          "quarter",
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        [
+          "tablet",
+          "tablets",
+          "pill",
+          "pills",
+          "drops",
+          "capsule",
+          "capsules",
+          "mg",
+          "spoon",
+          "spoonful",
+          "teaspoon"
+        ]
+      ],
+      "window": 5,
+      "category": "medical_advice",
+      "source": {
+        "rule": "G8: medical advice and dosing on every business type (3.5: no AI advice); administration verbs (H3's advice verbs)"
+      }
+    },
+    {
+      "id": "pf_put_tabs",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "put",
+          "place",
+          "instil",
+          "instill",
+          "apply",
+          "applied",
+          "add",
+          "mix",
+          "feed",
+          "drink",
+          "swallow",
+          "chew"
+        ],
+        [
+          "one",
+          "two",
+          "three",
+          "four",
+          "half",
+          "quarter",
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        [
+          "sachet",
+          "sachets",
+          "dose",
+          "doses",
+          "ml",
+          "mcg",
+          "puff",
+          "puffs",
+          "tsp",
+          "tbsp"
+        ]
+      ],
+      "window": 5,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_put_drops",
+        "rule": "the same dose with more units (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words"
+      }
+    },
+    {
+      "id": "pf_put_spoons",
+      "language": "en",
+      "kind": "near",
+      "sets": [
+        [
+          "put",
+          "place",
+          "instil",
+          "instill",
+          "apply",
+          "applied",
+          "add",
+          "mix",
+          "feed",
+          "drink",
+          "swallow",
+          "chew"
+        ],
+        [
+          "one",
+          "two",
+          "three",
+          "four",
+          "half",
+          "quarter",
+          "1",
+          "2",
+          "3",
+          "4"
+        ],
+        [
+          "spoons",
+          "spoonfuls",
+          "teaspoons",
+          "teaspoonful",
+          "tablespoon",
+          "tablespoons"
+        ]
+      ],
+      "window": 5,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_put_drops",
+        "rule": "the same dose with spoon plurals and tablespoons (H3's dose units and advice verbs, review 2026-11-23); one word set holds 12 words"
       }
     },
     {
@@ -1143,7 +1398,10 @@
           "गोलियां",
           "दवा",
           "दवाई",
-          "कैप्सूल"
+          "कैप्सूल",
+          "चम्मच",
+          "बूंद",
+          "बूंदें"
         ],
         [
           "लें",
@@ -1151,14 +1409,45 @@
           "खाएं",
           "खाइए",
           "दें",
-          "दीजिए"
+          "दीजिए",
+          "खिलाएं",
+          "खिलाइए"
         ]
       ],
       "window": 3,
       "category": "medical_advice",
       "source": {
         "synonym_of": "pf_take_tablets",
-        "rule": "the same meaning in Hindi (Devanagari)"
+        "rule": "the same meaning in Hindi (Devanagari); with H3's Hindi dose units and advice verbs (review 2026-11-23) and the polite form of खिलाएं"
+      }
+    },
+    {
+      "id": "pf_dawa_daalein_hi",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "गोली",
+          "गोलियां",
+          "दवा",
+          "दवाई",
+          "कैप्सूल",
+          "चम्मच",
+          "बूंद",
+          "बूंदें"
+        ],
+        [
+          "डालें",
+          "डालिए",
+          "पिलाएं",
+          "पिलाइए"
+        ]
+      ],
+      "window": 3,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_put_drops",
+        "rule": "the same meaning in Hindi (Devanagari): put in or give to drink (H3's advice verbs, review 2026-11-23, and their polite forms)"
       }
     },
     {
@@ -1187,14 +1476,17 @@
           "खाएं",
           "दें",
           "खिलाएं",
-          "पिलाएं"
+          "पिलाएं",
+          "डालें",
+          "डालिए",
+          "पिलाइए"
         ]
       ],
       "window": 6,
       "category": "medical_advice",
       "source": {
         "synonym_of": "pf_twice_a_day",
-        "rule": "the same meaning in Hindi (Devanagari), with a medicine or dosing word"
+        "rule": "the same meaning in Hindi (Devanagari), with a medicine or dosing word; with the dose verbs added 2026-11-24 that fit its 12-word set"
       }
     },
     {
@@ -1207,7 +1499,11 @@
           "dawa",
           "dawai",
           "dava",
-          "davai"
+          "davai",
+          "goliyan",
+          "chammach",
+          "boond",
+          "boondein"
         ],
         [
           "lo",
@@ -1215,14 +1511,51 @@
           "khao",
           "khaiye",
           "dijiye",
-          "lena"
+          "lena",
+          "lein",
+          "dein",
+          "de",
+          "khilao",
+          "khilaiye"
         ]
       ],
       "window": 3,
       "category": "medical_advice",
       "source": {
         "synonym_of": "pf_take_tablets",
-        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17)"
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17); with H3's dose units and advice verbs (review 2026-11-23)"
+      }
+    },
+    {
+      "id": "pf_dawa_daalein_rom",
+      "language": "hi",
+      "kind": "near",
+      "sets": [
+        [
+          "goli",
+          "dawa",
+          "dawai",
+          "dava",
+          "davai",
+          "goliyan",
+          "chammach",
+          "boond",
+          "boondein"
+        ],
+        [
+          "daalein",
+          "dalein",
+          "daaliye",
+          "daliye",
+          "pilao",
+          "pilaiye"
+        ]
+      ],
+      "window": 3,
+      "category": "medical_advice",
+      "source": {
+        "synonym_of": "pf_put_drops",
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17): put in or give to drink (H3's advice verbs, review 2026-11-23, and their polite forms)"
       }
     },
     {
@@ -1252,14 +1585,16 @@
           "khaiye",
           "dein",
           "dijiye",
-          "lijiye"
+          "lijiye",
+          "daalein",
+          "pilaiye"
         ]
       ],
       "window": 6,
       "category": "medical_advice",
       "source": {
         "synonym_of": "pf_twice_a_day",
-        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17), with a medicine or dosing word"
+        "rule": "the same meaning in romanised Hindi, matched as written (PR 2 decision, 2026-11-17), with a medicine or dosing word; with the dose verbs added 2026-11-24 that fit its 12-word set"
       }
     },
     {

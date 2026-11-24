@@ -3,12 +3,12 @@
 The real term files (`data/safety/`, PR 4), the sample businesses' tool files and corpus, the
 fake limiter (unit tests run with a dead Redis) and `create_app(..., matcher=...)`'s test seam
 with `LookupMatcher`, a fixed lookup that is not H1. Masking is H2's `mask_pii` (written
-2026-11-20); output checks are H3's stub. On the sample businesses (health types, `agent_router`
-off) a message the red-flag screen clears is masked and reaches W11's normal `safety_floor_off`,
-a hand-off H3 passes byte for byte: these tests check the order, the outages and that every
-refusal for a health business carries its guidance. A guard failing after the screen is a
-test-only raising masker (`served(..., mask=...)`, never H2). The startup self-test runs on the
-answer-key stand-in, never H1 (`use_answer_key_selftest`).
+2026-11-20); output checks are H3's `check_reply` (written 2026-11-23). On the sample businesses
+(health types, `agent_router` off) a message the red-flag screen clears is masked and reaches
+W11's normal `safety_floor_off`, a hand-off H3 never reads (G8): these tests check the order, the
+outages and that every refusal for a health business carries its guidance. A guard failing after
+the screen is a test-only raising masker (`served(..., mask=...)`, never H2). The startup
+self-test runs on the answer-key stand-in, never H1 (`use_answer_key_selftest`).
 """
 
 import asyncio
