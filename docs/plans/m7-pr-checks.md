@@ -1345,8 +1345,9 @@ This PR is not an M7 blocker.
   decided 2026-11-23, shesha).
 
 ## PR 11 — `m7/document-review` (later; after M6's live runs)
-`Reason.DOCUMENT_FLAG` in `extraction/routing.py`, migration 0008 (after `make up`, then `make
-migrate`), and a document hit forcing every field to review. Category D's forced-review cases
+`Reason.DOCUMENT_FLAG` in `extraction/routing.py`, a migration with the next free migration
+number (M8 plan P4; after `make up`, then `make migrate`), and a document hit forcing every field
+to review. Category D's forced-review cases
 move from `known_gap` to `hard`. This PR is not an M7 blocker.
 
 ## Review notes (2026-11-15)

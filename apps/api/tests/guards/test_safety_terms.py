@@ -47,6 +47,7 @@ from vectapilot_api.guards.config import (
     NotCoveredCategory,
     load_guard_dir,
 )
+from vectapilot_api.guards.normalize import clean, fold
 from vectapilot_api.guards.selftest import SelftestStatus, run_selftest
 from vectapilot_api.guards.types import NearTerm, TermCategory
 from vectapilot_api.intents.policy import BusinessType
@@ -451,6 +452,76 @@ def test_output_categories_are_where_g8_puts_them() -> None:
     assert len(abuse) <= 20
 
 
+DOSE_TERMS_EN: Final = (
+    "pf_take_tablets",
+    "pf_take_tabs",
+    "pf_take_spoons",
+    "pf_put_drops",
+    "pf_put_tabs",
+    "pf_put_spoons",
+)
+"""The English dose terms (G8): a verb, a number and a unit within 5 words. H3's verbs and units
+(review 2026-11-23) need more than one 12-word set each (`config.SET_WORDS_MAX`), and every set of
+a near term must match, so they are two verb sets times three unit sets (added 2026-11-24)."""
+DOSE_TERMS_HI: Final = (
+    ("pf_goli_lein_hi", "pf_dawa_daalein_hi"),
+    ("pf_goli_lo_rom", "pf_dawa_daalein_rom"),
+)
+"""The Hindi dose terms, Devanagari then romanised: one noun set, its verbs split over two terms
+(take, eat, give or feed; put in or give to drink)."""
+
+
+def _near(term_id: str) -> NearTerm:
+    term = by_id()[term_id].term
+    assert isinstance(term, NearTerm), term_id
+    return term
+
+
+def test_the_dose_terms_pair_every_verb_set_with_every_unit_set() -> None:
+    # A word added to one sibling and not the others would meet only some of the units (or verbs):
+    # every verb set meets every unit set exactly once, with one number set and one window.
+    dose = [_near(term_id) for term_id in DOSE_TERMS_EN]
+    assert {(len(t.sets), t.sets[1], t.window, t.category) for t in dose} == {
+        (3, dose[0].sets[1], 5, TermCategory.MEDICAL_ADVICE)
+    }
+    verbs = {frozenset(t.sets[0]) for t in dose}
+    units = {frozenset(t.sets[2]) for t in dose}
+    pairs = {(frozenset(t.sets[0]), frozenset(t.sets[2])) for t in dose}
+
+    assert (len(verbs), len(units)) == (2, 3)
+    assert pairs == {(v, u) for v in verbs for u in units}
+    assert len(pairs) == len(dose)
+    # Each word in one verb set and one unit set only.
+    assert sum(map(len, verbs)) == len(frozenset().union(*verbs))
+    assert sum(map(len, units)) == len(frozenset().union(*units))
+
+    for pair in DOSE_TERMS_HI:
+        hi = [_near(term_id) for term_id in pair]
+        assert {(len(t.sets), t.sets[0], t.window, t.category) for t in hi} == {
+            (2, hi[0].sets[0], 3, TermCategory.MEDICAL_ADVICE)
+        }, pair
+        assert not set(hi[0].sets[1]) & set(hi[1].sets[1]), pair
+
+
+DECIDED_OUT_EN: Final = ("drop", "tab", "tabs", "a", "an")
+"""Decided 2026-11-24 (shesha, `m7-term-review.md`): drop (a drop-down, a drop-off) and tab or
+tabs (a screen tab; Hinglish "then") stay out of the English dose terms, which match in any order
+(H3's ordered dose shape keeps them), and "a" and "an" are no number there."""
+DECIDED_OUT_HI: Final = ("लेते",)
+"""Decided 2026-11-24 (shesha): a habitual participle ("do you take", also "accept"), not an advice
+imperative; H3's dose shape keeps it next to a number and a unit."""
+
+
+def test_the_decided_words_stay_out_of_the_dose_terms() -> None:
+    # The pairing test accepts a word added to every sibling alike; these words were taken out on
+    # purpose, so adding one back fails here.
+    for term_ids, out in ((DOSE_TERMS_EN, DECIDED_OUT_EN), (DOSE_TERMS_HI[0], DECIDED_OUT_HI)):
+        folded_out = {fold(clean(word)) for word in out}
+        for term_id in term_ids:
+            words = {w for word_set in _near(term_id).sets for w in word_set}
+            assert not words & folded_out, (term_id, sorted(words & folded_out))
+
+
 def test_business_files_add_guidance_and_languages_only() -> None:
     for file in (SUNRISE, PAWS):
         data = read_json(SAFETY_DIR / file)
@@ -465,6 +536,36 @@ def test_the_review_sheet_lists_every_term_once() -> None:
     rows = re.findall(r"^\| \[[ x]\] \| `([a-z0-9_]+)` \|", sheet, flags=re.MULTILINE)
 
     assert sorted(rows) == sorted(t.term.id for t in CONFIG.terms)
+
+
+ADDED_KINDS: Final = ("term", "word")
+"""An "Added <date>" checklist row adds a whole term or one word to a term's set."""
+
+
+def _added_rows() -> list[tuple[str, str, str]]:
+    """(`term` or `word`, id, text) for each row of an "Added <date>" checklist. Cells split on
+    unescaped pipes: a near term's text writes its alternatives as `\\|`."""
+    rows: list[tuple[str, str, str]] = []
+    for line in REVIEW_SHEET.read_text(encoding="utf-8").splitlines():
+        cells = [cell.strip() for cell in re.split(r"(?<!\\)\|", line)[1:-1]]
+        if len(cells) == 7 and re.fullmatch(r"\[[ x]\]", cells[0]) and cells[1] in ADDED_KINDS:
+            rows.append((cells[1], cells[2].strip("`"), cells[5]))
+    return rows
+
+
+def test_every_added_checklist_row_names_a_real_term_and_word() -> None:
+    # A struck word or a dropped term must leave the checklist too: every term row names a loaded
+    # term, and every word row's word (folded, as the loader folds it) is in one of its term's sets.
+    rows = _added_rows()
+    terms = by_id()
+    assert {added for added, _, _ in rows} == set(ADDED_KINDS)
+
+    for added, term_id, text in rows:
+        assert term_id in terms, term_id
+        if added == "word":
+            words = {w for word_set in _near(term_id).sets for w in word_set}
+            word = text.split(": ", 1)[1]
+            assert fold(clean(word)) in words, (term_id, word)
 
 
 def test_compose_mounts_the_folder_read_only_and_names_it() -> None:
