@@ -46,6 +46,17 @@ ORIGIN: Final = "https://api.vectapilot.example"
 SAME_ORIGIN: Final = {"origin": ORIGIN}
 RED_FLAG_TERM: Final = "pf_this_is_an_emergency"
 """A platform red flag (`data/safety/platform.json`), so every planted business has it."""
+REAL_REDIS_BOUNDS: Final[dict[str, Any]] = {
+    "guard_redis_timeout_seconds": 1.0,
+    "readiness_timeout_seconds": 1.0,
+    "agent_turn_timeout_seconds": 40.0,
+}
+"""Real Redis on a loaded CI runner (under coverage) can take longer than the 0.25 s default, and
+the limiter then fails closed (a typed 503): correct in production, a flake here (PR 4's CI run,
+2026-11-25). Test-only; Settings' timing rules still hold (arithmetic): readiness >= Redis; the
+turn 8 x 4 + 2 x 4 x 1.0 = 40 <= 40; router + turn 15 + 40 = 55 <= 60 and <= the widget's 60 s
+bound; confirm 2.5 + 1.0 + 5 + 2 = 10.5 < 15."""
+
 LIMITS: Final[dict[str, Any]] = {
     "guard_limit_business_per_minute": 100_000,
     "guard_limit_customer_per_minute": 100_000,
@@ -55,8 +66,10 @@ LIMITS: Final[dict[str, Any]] = {
     "handoff_poll_limit_session_per_minute": 100_000,
     "session_lookup_timeout_seconds": 2.5,
     "handoff_store_timeout_seconds": 2.0,
+    **REAL_REDIS_BOUNDS,
 }
-"""Far above any test's volume: these tests plant fresh businesses, never fill a window."""
+"""Far above any test's volume: these tests plant fresh businesses, never fill a window, with
+`REAL_REDIS_BOUNDS`."""
 
 
 def widget_file(business_id: str) -> dict[str, Any]:

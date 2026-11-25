@@ -205,8 +205,9 @@ WAITING: Final = text(
 )
 
 
-async def until_waiting(owner: AsyncEngine, n: int, *, timeout_s: float = 5.0) -> None:
-    """Return once `n` app-role backends wait on a lock; fail after `timeout_s`."""
+async def until_waiting(owner: AsyncEngine, n: int, *, timeout_s: float = 20.0) -> None:
+    """Return once `n` app-role backends wait on a lock; fail after `timeout_s` (wide for a
+    loaded CI runner under coverage: it returns as soon as both wait, PR 4's CI run)."""
     async with asyncio.timeout(timeout_s), owner.connect() as connection:
         # Polling on purpose: the waiters are other Postgres backends, there is no event to await.
         while (await connection.scalar(WAITING) or 0) < n:  # noqa: ASYNC110
