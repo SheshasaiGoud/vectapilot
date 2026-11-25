@@ -6,7 +6,8 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 from pathlib import Path
 from types import ModuleType
-from typing import Final, cast
+from typing import Final, NamedTuple, cast, get_args
+from uuid import UUID
 
 import pytest
 from alembic.config import Config
@@ -19,6 +20,7 @@ from sqlalchemy.pool import NullPool
 
 from tests.canary.catalog import load_key_indexes
 from tests.conftest import integration
+from vectapilot_api.agent.responses import HandoffReason
 from vectapilot_api.auth import store as auth_store
 from vectapilot_api.auth import tokens as auth_tokens
 from vectapilot_api.config import MigrationSettings, Settings
@@ -29,11 +31,13 @@ from vectapilot_api.extraction import text as extraction_text
 from vectapilot_api.extraction.prompt import EXTRACT_PROMPT_VERSION
 from vectapilot_api.extraction.service import STORED_VALUE_MAX
 from vectapilot_api.extraction.signals import EXTRACTION_RULES_VERSION, SPAN_MAX
+from vectapilot_api.handoffs import store as handoff_store
 from vectapilot_api.ingestion.language_map import (
     FALLBACK_CONFIG,
     TEXT_SEARCH_CONFIGS,
     text_search_config,
 )
+from vectapilot_api.intents.policy import Priority
 
 API_ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = API_ROOT / "migrations" / "versions"
@@ -1280,13 +1284,15 @@ def test_migration_0008s_checks_mirror_the_auth_core() -> None:
 async def test_migration_0008_downgrades_and_upgrades_to_the_same_schema() -> None:
     # As 0006 and 0007: its own downgrade and upgrade SQL in one rolled-back transaction; the
     # catalog afterwards equals the one before, so the database at head is exactly this file.
-    module = migration_0008()
+    # M8 PR 2: 0009's tables reference 0008's, so they go first and come back last, as alembic
+    # would step down and up through both.
+    module, later = migration_0008(), migration_0009()
     async with owner_rolled_back() as connection:
         before = await catalog_rows(connection, TABLES_0008)
-        for statement in module.DOWNGRADE:
+        for statement in (*later.DOWNGRADE, *module.DOWNGRADE):
             await connection.execute(text(statement))  # as op.execute does
         gone = await catalog_rows(connection, TABLES_0008)
-        for statement in module.UPGRADE:
+        for statement in (*module.UPGRADE, *later.UPGRADE):
             await connection.execute(text(statement))  # as op.execute does
         after = await catalog_rows(connection, TABLES_0008)
 
@@ -1659,3 +1665,575 @@ def session_refusals(
         "another channel": session(channel="whatsapp"),
         "a language that is not a tag": session(language="English"),
     }
+
+
+# ── Migration 0009: hand-offs, widget turns and turn feedback (ADR 0019, M8 PR 2) ────────────
+
+MIGRATION_0009 = VERSIONS / "0009_handoffs_and_turns.py"
+TABLES_0009: Final = ("handoffs", "widget_turns", "turn_feedback")
+COLUMNS_0009: Final = {
+    "handoffs": {
+        "business_id",
+        "id",
+        "session_id",
+        "trace_id",
+        "origin",
+        "reason",
+        "priority",
+        "count",
+        "intent",
+        "channel",
+        "ui_language",
+        "guidance_shown",
+        "message_masked",
+        "status",
+        "claimed_by",
+        "claimed_at",
+        "resolved_by",
+        "resolved_at",
+        "staff_label",
+        "reply",
+        "replied_at",
+        "raised_at",
+        "pressed_at",
+        "retention_days",
+        "created_at",
+        "expires_at",
+    },
+    "widget_turns": {
+        "business_id",
+        "id",
+        "session_id",
+        "trace_id",
+        "kind",
+        "reason",
+        "priority",
+        "intent",
+        "answer_outcome",
+        "channel",
+        "ui_language",
+        "server_latency_ms",
+        "created_at",
+    },
+    "turn_feedback": {"business_id", "id", "session_id", "trace_id", "rating", "created_at"},
+}
+"""S11, D6 (a): the masked message, the guidance sent and one staff reply are the only text; a
+turn and a rating hold none. No contact detail of a customer (Q4c)."""
+
+
+def migration_0009() -> ModuleType:
+    return load_migration(MIGRATION_0009)
+
+
+def test_migration_0009_upgrade_and_downgrade_run_their_statements(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = migration_0009()
+    recorder = RecordingOp()
+    monkeypatch.setattr(module, "op", recorder)
+
+    module.upgrade()
+    module.downgrade()
+
+    assert recorder.executed == [*module.UPGRADE, *module.DOWNGRADE]
+    assert (module.revision, module.down_revision) == ("0009", "0008")
+
+
+def test_migration_0009_puts_every_table_under_the_business_policy_and_grants_no_delete() -> None:
+    module = migration_0009()
+
+    assert module.TABLES == TABLES_0009
+    assert module.APP_ROLE == APP_ROLE
+    for table in TABLES_0009:
+        for statement in module.row_security(table):
+            assert statement in module.UPGRADE, statement
+        for mode in ("ENABLE", "FORCE"):  # literal: `row_security` comes from the same file
+            assert f"ALTER TABLE {table} {mode} ROW LEVEL SECURITY" in module.UPGRADE, table
+    assert (
+        f"CREATE POLICY hidden_at_expiry ON handoffs AS RESTRICTIVE FOR SELECT TO {APP_ROLE}"
+        " USING (expires_at > now())"
+    ) in module.UPGRADE
+    assert (
+        f"CREATE POLICY resolved_is_final ON handoffs AS RESTRICTIVE FOR UPDATE TO {APP_ROLE}"
+        " USING (status <> 'resolved') WITH CHECK (true)"
+    ) in module.UPGRADE
+    # S17: one open hand-off per session, `business_id` first (uniqueness ignores RLS).
+    assert (
+        "CREATE UNIQUE INDEX handoffs_one_open_per_session ON handoffs (business_id, session_id)"
+        " WHERE status <> 'resolved'"
+    ) in module.UPGRADE
+    grants = " ".join(module.GRANTS)
+    for privilege in ("DELETE", "TRUNCATE", " ALL "):
+        assert privilege not in grants, privilege
+    assert module.DOWNGRADE == ("DROP TABLE turn_feedback, widget_turns, handoffs",)
+    # `op.execute` wraps each string in `text()`: no ":name" in it may turn into a bind.
+    dialect = postgresql.asyncpg.dialect()  # type: ignore[no-untyped-call]
+    for statement in (*module.UPGRADE, *module.DOWNGRADE):
+        compiled = text(statement).compile(dialect=dialect)
+        assert (compiled.params, str(compiled)) == ({}, statement)
+
+
+def test_migration_0009s_checks_mirror_the_code() -> None:
+    from vectapilot_api.agent.responses import GUIDANCE_LINES_MAX
+    from vectapilot_api.answer.types import AnswerOutcome
+    from vectapilot_api.handoffs.at_rest import TEXT_MAX
+    from vectapilot_api.intents.taxonomy import Intent
+    from vectapilot_api.tooleval.metrics import (
+        DECISION_HANDOFF_REASONS,
+        INFRASTRUCTURE_HANDOFF_REASONS,
+    )
+    from vectapilot_api.widget import config as widget_config
+
+    module = migration_0009()
+
+    assert tuple(reason.value for reason in HandoffReason) == module.REASONS
+    # The plan's pin: the system set is tooleval's, and every reason is in exactly one set.
+    assert tuple(sorted(INFRASTRUCTURE_HANDOFF_REASONS)) == module.SYSTEM_REASONS
+    assert set(module.REASONS) == DECISION_HANDOFF_REASONS | INFRASTRUCTURE_HANDOFF_REASONS
+    assert not DECISION_HANDOFF_REASONS & INFRASTRUCTURE_HANDOFF_REASONS
+    assert HandoffReason.CUSTOMER_ASKED.value == module.BUTTON_REASON
+    assert tuple(priority.value for priority in Priority) == module.PRIORITIES
+    assert tuple(p.value for p in handoff_store.RISING_PRIORITIES) == module.RISING
+    assert tuple(reversed(module.PRIORITIES)) == module.RISING
+    assert tuple(intent.value for intent in Intent) == module.INTENTS
+    assert tuple(origin.value for origin in handoff_store.Origin) == module.ORIGINS
+    assert tuple(status.value for status in handoff_store.HandoffStatus) == module.STATUSES
+    assert tuple(kind.value for kind in handoff_store.TurnKind) == module.KINDS
+    assert get_args(AnswerOutcome) == module.ANSWER_OUTCOMES  # noah's PR 2 review
+    assert tuple(channel.value for channel in auth_store.Channel) == module.CHANNELS
+    assert module.UI_LANGUAGE == auth_store.UI_LANGUAGE_PATTERN
+    assert module.UI_LANGUAGE_MAX == auth_store.UI_LANGUAGE_MAX
+    assert module.MESSAGE_MAX == TEXT_MAX
+    assert module.GUIDANCE_LINES_MAX == GUIDANCE_LINES_MAX
+    assert module.RETENTION_DAYS == widget_config.RETENTION_DAYS
+    assert re.fullmatch(module.TRACE_ID, "0123456789abcdef" * 2)
+    # The store inserts exactly the columns the app role may insert, in the grant's order, and
+    # raises exactly the columns it may update (S17).
+    for statement, columns in (
+        (handoff_store.STORE_HANDOFF, module.HANDOFF_INSERT_COLUMNS),
+        (handoff_store.PRESS_BUTTON, module.HANDOFF_INSERT_COLUMNS),
+        (handoff_store.INSERT_TURN, module.TURN_INSERT_COLUMNS),
+    ):
+        named = statement.text.split("(", 1)[1].split(")", 1)[0]
+        assert tuple(c.strip() for c in named.split(",")) == columns
+    raised = {*handoff_store.RAISED_COLUMNS, "count", "raised_at"}
+    assert raised == set(module.HANDOFF_RAISE_COLUMNS)
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0009_downgrades_and_upgrades_to_the_same_schema() -> None:
+    module = migration_0009()
+    async with owner_rolled_back() as connection:
+        before = await catalog_rows(connection, TABLES_0009)
+        for statement in module.DOWNGRADE:
+            await connection.execute(text(statement))  # as op.execute does
+        gone = await catalog_rows(connection, TABLES_0009)
+        for statement in module.UPGRADE:
+            await connection.execute(text(statement))  # as op.execute does
+        after = await catalog_rows(connection, TABLES_0009)
+
+    assert before["tables"] == [(table, True, True) for table in sorted(TABLES_0009)]
+    assert all(rows == [] for rows in gone.values()), gone
+    assert after == before
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0009_stores_only_the_decided_columns() -> None:
+    async with owner_rolled_back() as connection:
+        schema = await catalog_rows(connection, TABLES_0009)
+
+    types = {(row[0], row[1]): row[2] for row in schema["columns"]}
+    assert {table: {c for t, c in types if t == table} for table in TABLES_0009} == COLUMNS_0009
+    assert types[("handoffs", "guidance_shown")] == "text[]"
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0009s_app_grants_and_policies_are_the_decided_ones() -> None:
+    module = migration_0009()
+    async with owner_rolled_back() as connection:
+        schema = await catalog_rows(connection, TABLES_0009)
+        granted = await privileged_roles_of(connection, TABLES_0009)
+
+    assert set(schema["table_grants"]) == {(table, "SELECT") for table in TABLES_0009}
+    expected = {
+        ("handoffs", "INSERT", module.HANDOFF_INSERT_COLUMNS),
+        (
+            "handoffs",
+            "UPDATE",
+            (
+                *module.HANDOFF_RAISE_COLUMNS,
+                *module.HANDOFF_PRESS_COLUMNS,
+                *module.HANDOFF_STAFF_COLUMNS,
+            ),
+        ),
+        ("widget_turns", "INSERT", module.TURN_INSERT_COLUMNS),
+        ("turn_feedback", "INSERT", module.FEEDBACK_INSERT_COLUMNS),
+    }
+    assert set(schema["column_grants"]) == {
+        (table, column, privilege) for table, privilege, columns in expected for column in columns
+    }
+    inserted = {c for t, c, p in schema["column_grants"] if p == "INSERT"}
+    assert not inserted & {"id", "created_at", "expires_at", "status", "count", "staff_label"}
+    updated = {c for t, c, p in schema["column_grants"] if p == "UPDATE"}
+    assert not updated & {"business_id", "session_id", "channel", "ui_language", "retention_days"}
+    restrictive = [p for p in schema["policies"] if p[2] == "RESTRICTIVE"]
+    assert restrictive == [
+        (
+            "handoffs",
+            "hidden_at_expiry",
+            "RESTRICTIVE",
+            [APP_ROLE],
+            "SELECT",
+            "(expires_at > now())",
+            None,
+        ),
+        (
+            "handoffs",
+            "resolved_is_final",
+            "RESTRICTIVE",
+            [APP_ROLE],
+            "UPDATE",
+            "(status <> 'resolved'::text)",
+            "true",
+        ),
+    ]
+    permissive = sorted((p[0], p[1]) for p in schema["policies"] if p[2] == "PERMISSIVE")
+    assert permissive == sorted((table, "business_isolation") for table in TABLES_0009)
+    assert granted == {table: {APP_ROLE} for table in TABLES_0009}
+
+
+SESSION_FOR: Final = text(
+    "INSERT INTO sessions (business_id, kind, token_sha256, channel, ui_language, expires_at)"
+    " VALUES (:b, 'customer', :sha256, 'web', 'en', now() + interval '1 hour') RETURNING id"
+)
+TURN_FOR: Final = text(
+    "INSERT INTO widget_turns (business_id, session_id, trace_id, kind, channel, ui_language,"
+    " server_latency_ms) VALUES (:b, :s, :t, 'reply', 'web', 'en', 1)"
+)
+FEEDBACK_FOR: Final = text(
+    "INSERT INTO turn_feedback (business_id, session_id, trace_id, rating)"
+    " VALUES (:b, :s, :t, 'up')"
+)
+HANDOFF_AS_OWNER: Final = text(
+    "INSERT INTO handoffs (business_id, session_id, trace_id, origin, reason, priority, channel,"
+    " ui_language, retention_days, created_at)"
+    " VALUES (:b, :s, :t, 'turn', 'safety', 'urgent', 'web', 'en', :days,"
+    " now() - make_interval(days => :age)) RETURNING id"
+)
+RESOLVE: Final = text(
+    "UPDATE handoffs SET status = 'resolved', resolved_at = now(), resolved_by = :staff,"
+    " staff_label = 'needed' WHERE business_id = :b AND id = :id RETURNING id"
+)
+REOPEN: Final = text("UPDATE handoffs SET status = 'open', staff_label = NULL WHERE id = :id")
+VISIBLE_HANDOFFS: Final = text("SELECT id FROM handoffs")
+
+
+def new_handoff(
+    business_id: str, session_id: UUID, priority: str, reason: str
+) -> handoff_store.NewHandoff:
+    return handoff_store.NewHandoff(
+        business_id=business_id,
+        session_id=session_id,
+        trace_id=secrets.token_hex(16),
+        origin=handoff_store.Origin.TURN,
+        reason=HandoffReason(reason),
+        priority=Priority(priority),
+        intent=None,
+        ui_language="en",
+        guidance_shown=(f"line {priority}",),
+        message_masked=f"message {priority}",
+        retention_days=30,
+    )
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0009_keeps_one_open_hand_off_per_session_and_raises_it_upwards() -> None:
+    # S17 against Postgres, as the app role: the store's own statements, its partial index and the
+    # app role's grants (the CASE over `array_position` and `ON CONFLICT ... WHERE`).
+    a = f"mig-a-{secrets.token_hex(4)}"
+    async with owner_rolled_back() as connection:
+        await connection.execute(text("INSERT INTO businesses (business_id) VALUES (:b)"), {"b": a})
+        staff = await connection.scalar(STAFF, {"b": a})
+        await as_app(connection, a)
+        session = await connection.scalar(SESSION_FOR, {"b": a, "sha256": fresh_token(a).sha256})
+        add = handoff_store.store_handoff
+        first = await add(connection, new_handoff(a, session, "normal", "safety_floor_off"))
+        same = await add(connection, new_handoff(a, session, "normal", "guard_error"))
+        raised = await add(connection, new_handoff(a, session, "urgent", "safety"))
+        lower = await add(connection, new_handoff(a, session, "high", "budget"))
+        pressed = await handoff_store.press_button(
+            connection,
+            handoff_store.NewHandoff(
+                business_id=a,
+                session_id=session,
+                trace_id=secrets.token_hex(16),
+                origin=handoff_store.Origin.BUTTON,
+                reason=HandoffReason.CUSTOMER_ASKED,
+                priority=Priority.NORMAL,
+                intent=None,
+                ui_language="en",
+                guidance_shown=(),
+                message_masked=None,
+                retention_days=30,
+            ),
+        )
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT reason, priority, count, message_masked, guidance_shown, raised_at"
+                    " IS NOT NULL AS raised, pressed_at IS NOT NULL AS pressed, status"
+                    " FROM handoffs WHERE id = :id"
+                ),
+                {"id": first.id},
+            )
+        ).one()
+        resolved = await connection.scalar(RESOLVE, {"b": a, "id": first.id, "staff": staff})
+        reopened = (await connection.execute(REOPEN, {"id": first.id})).rowcount
+        after = await add(connection, new_handoff(a, session, "normal", "other"))
+
+    assert {first.id, same.id, raised.id, lower.id, pressed.id} == {first.id}
+    assert [h.count for h in (first, same, raised, lower, pressed)] == [1, 2, 3, 4, 4]
+    assert [h.priority.value for h in (first, same, raised, lower)] == [
+        "normal",
+        "normal",
+        "urgent",
+        "urgent",
+    ]
+    assert tuple(row) == (
+        "safety",
+        "urgent",
+        4,
+        "message urgent",
+        ["line urgent"],
+        True,
+        True,  # the press is recorded on the open row (noah's PR 2 review)
+        "open",
+    )
+    # D11 from the row as stored (zara's PR 2 review): a normal system row invites a follow-up;
+    # once raised to an urgent `safety` row, neither the store nor the press does.
+    assert [h.follow_up for h in (first, same, raised, lower, pressed)] == [
+        True,
+        True,
+        False,
+        False,
+        False,
+    ]
+    assert resolved == first.id
+    assert reopened == 0  # `resolved_is_final` [proposal]
+    assert after.id != first.id and after.count == 1  # a resolved row left the index
+
+
+HANDOFF_REFUSALS: Final = {
+    "choose an id": "42501",
+    "choose created_at": "42501",
+    "insert a status": "42501",
+    "move it to another session": "42501",
+    "change its retention": "42501",
+    "delete a hand-off": "42501",
+    "delete a turn": "42501",
+    "update a turn": "42501",
+    "insert for b": "42501",
+    "a second open row": "23505",
+    "a button that is not customer_asked": "23514",
+    "a label on a system reason": "23514",
+    "a label on an open row": "23514",
+    "an unknown reason": "23514",
+    "a masked message over the bound": "23514",
+    "an empty guidance line": "23514",
+    "a hand-off of b's session": "23503",
+    "a turn of b's session": "23503",
+    "a hand-off with a reason and no priority": "23502",
+    "a turn that hands off with no reason": "23514",
+    "an answer without its outcome": "23514",
+    "an outcome on a turn that is no answer": "23514",
+    "an unknown answer outcome": "23514",
+    "a button without its press time": "23514",
+    "a press time before the row": "23514",
+    "a rating of another session's turn": "23503",
+    "a second rating of one turn": "23505",
+}
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0009_refuses_what_the_app_role_must_never_write() -> None:
+    a, b = (f"mig-{letter}-{secrets.token_hex(4)}" for letter in "ab")
+    async with owner_rolled_back() as connection:
+        for business in (a, b):
+            await connection.execute(
+                text("INSERT INTO businesses (business_id) VALUES (:b)"), {"b": business}
+            )
+        others = await connection.scalar(SESSION_FOR, {"b": b, "sha256": fresh_token(b).sha256})
+        staff = await connection.scalar(STAFF, {"b": a})
+        await as_app(connection, a)
+        mine = await connection.scalar(SESSION_FOR, {"b": a, "sha256": fresh_token(a).sha256})
+        second = await connection.scalar(SESSION_FOR, {"b": a, "sha256": fresh_token(a).sha256})
+        trace, unrated = secrets.token_hex(16), secrets.token_hex(16)
+        for turn_trace in (trace, unrated):
+            await connection.execute(TURN_FOR, {"b": a, "s": mine, "t": turn_trace})
+        await connection.execute(
+            text(
+                "INSERT INTO handoffs (business_id, session_id, trace_id, origin, reason, priority,"
+                " channel, ui_language, retention_days) VALUES (:b, :s, :t, 'turn', 'safety',"
+                " 'urgent', 'web', 'en', 30)"
+            ),
+            {"b": a, "s": mine, "t": secrets.token_hex(16)},
+        )
+        await connection.execute(FEEDBACK_FOR, {"b": a, "s": mine, "t": trace})
+        refusals = {
+            case: await refused_sqlstate(connection, text(sql), params)
+            for case, (sql, params) in handoff_refusals(
+                a, b, Sessions(mine, second, others), staff, (trace, unrated)
+            ).items()
+        }
+
+    assert refusals == HANDOFF_REFUSALS
+
+
+class Sessions(NamedTuple):
+    mine: object
+    """a's session with an open hand-off, a rated turn and an unrated one."""
+    second: object
+    """Another session of a, with nothing yet."""
+    others: object
+    """b's session."""
+
+
+def handoff_refusals(
+    a: str, b: str, sessions: Sessions, staff: object, traces: tuple[str, str]
+) -> dict[str, tuple[str, Mapping[str, object]]]:
+    """Each statement the app role must never get through, acting for a (`sessions`; `traces`:
+    the rated and the unrated turn of `sessions.mine`; `staff`: a's member)."""
+    mine, second, others = sessions
+    trace, unrated = traces
+    columns = (
+        "business_id, session_id, trace_id, origin, reason, priority, channel, ui_language,"
+        " retention_days"
+    )
+    good = {
+        "b": a,
+        "s": second,
+        "t": secrets.token_hex(16),
+        "origin": "turn",
+        "reason": "safety",
+        "priority": "urgent",
+    }
+    insert = (
+        f"INSERT INTO handoffs ({columns}) VALUES (:b, :s, :t, :origin, :reason, :priority,"  # noqa: S608 (constants, no input)
+        " 'web', 'en', 30)"
+    )
+
+    def handoff(**changes: object) -> tuple[str, Mapping[str, object]]:
+        return insert, {**good, **changes}
+
+    def extra(column: str, value: str) -> tuple[str, Mapping[str, object]]:
+        sql = (
+            f"INSERT INTO handoffs ({columns}, {column}) VALUES (:b, :s, :t, 'turn', 'safety',"  # noqa: S608 (constants)
+            f" 'urgent', 'web', 'en', 30, {value})"
+        )
+        return sql, {"b": a, "s": second, "t": secrets.token_hex(16)}
+
+    turn = (
+        "INSERT INTO widget_turns (business_id, session_id, trace_id, kind, reason, priority,"
+        " answer_outcome, channel, ui_language, server_latency_ms) VALUES (:b, :s, :t, :kind,"
+        " :reason, :priority, :outcome, 'web', 'en', 1)"
+    )
+
+    def turn_of(**changes: object) -> tuple[str, Mapping[str, object]]:
+        values = {"b": a, "s": mine, "t": secrets.token_hex(16), "kind": "reply"}
+        return turn, {"reason": None, "priority": None, "outcome": None, **values, **changes}
+
+    return {
+        "choose an id": extra("id", "gen_random_uuid()"),
+        "choose created_at": extra("created_at", "now() - interval '1 day'"),
+        "insert a status": extra("status", "'claimed'"),
+        "move it to another session": ("UPDATE handoffs SET session_id = :s", {"s": second}),
+        "change its retention": ("UPDATE handoffs SET retention_days = 90", {}),
+        "delete a hand-off": ("DELETE FROM handoffs", {}),
+        "delete a turn": ("DELETE FROM widget_turns", {}),
+        "update a turn": ("UPDATE widget_turns SET kind = 'answer'", {}),
+        "insert for b": handoff(b=b, s=others),
+        "a second open row": handoff(s=mine),
+        "a button that is not customer_asked": handoff(origin="button"),
+        "a label on a system reason": (
+            "UPDATE handoffs SET status = 'resolved', resolved_at = now(), resolved_by = :staff,"
+            " staff_label = 'needed', reason = 'guard_error' WHERE session_id = :s",
+            {"s": mine, "staff": staff},
+        ),
+        "a label on an open row": (
+            "UPDATE handoffs SET staff_label = 'needed' WHERE session_id = :s",
+            {"s": mine},
+        ),
+        "an unknown reason": handoff(reason="because"),
+        "a masked message over the bound": (
+            "UPDATE handoffs SET message_masked = repeat('m', 2001) WHERE session_id = :s",
+            {"s": mine},
+        ),
+        "an empty guidance line": (
+            "UPDATE handoffs SET guidance_shown = ARRAY['ok', ''] WHERE session_id = :s",
+            {"s": mine},
+        ),
+        "a hand-off of b's session": handoff(s=others),
+        "a turn of b's session": turn_of(s=others),
+        "a hand-off with a reason and no priority": handoff(priority=None),
+        "a turn that hands off with no reason": turn_of(kind="handoff", priority="urgent"),
+        # noah's PR 2 review: an answer and an abstention are told apart, on answers only.
+        "an answer without its outcome": turn_of(kind="answer"),
+        "an outcome on a turn that is no answer": turn_of(outcome="answered"),
+        "an unknown answer outcome": turn_of(kind="answer", outcome="maybe"),
+        "a button without its press time": (
+            "INSERT INTO handoffs (business_id, session_id, trace_id, origin, reason, priority,"
+            " channel, ui_language, retention_days) VALUES (:b, :s, :t, 'button',"
+            " 'customer_asked', 'normal', 'web', 'en', 30)",
+            {"b": a, "s": second, "t": secrets.token_hex(16)},
+        ),
+        "a press time before the row": (
+            "UPDATE handoffs SET pressed_at = created_at - interval '1 second'"
+            " WHERE session_id = :s",
+            {"s": mine},
+        ),
+        "a rating of another session's turn": (  # unrated: only the turn's key can refuse it
+            "INSERT INTO turn_feedback (business_id, session_id, trace_id, rating)"
+            " VALUES (:b, :s, :t, 'down')",
+            {"b": a, "s": second, "t": unrated},
+        ),
+        "a second rating of one turn": (
+            "INSERT INTO turn_feedback (business_id, session_id, trace_id, rating)"
+            " VALUES (:b, :s, :t, 'down')",
+            {"b": a, "s": mine, "t": trace},
+        ),
+    }
+
+
+@integration
+@pytest.mark.anyio
+async def test_migration_0009_hides_an_expired_hand_off_from_the_app_and_sets_expiry_itself() -> (
+    None
+):
+    a = f"mig-a-{secrets.token_hex(4)}"
+    async with owner_rolled_back() as connection:
+        await connection.execute(text("INSERT INTO businesses (business_id) VALUES (:b)"), {"b": a})
+        sessions = [
+            await connection.scalar(SESSION_FOR, {"b": a, "sha256": fresh_token(a).sha256})
+            for _ in range(2)
+        ]
+        old = await connection.scalar(
+            HANDOFF_AS_OWNER,
+            {"b": a, "s": sessions[0], "t": secrets.token_hex(16), "days": 1, "age": 2},
+        )
+        live = await connection.scalar(
+            HANDOFF_AS_OWNER,
+            {"b": a, "s": sessions[1], "t": secrets.token_hex(16), "days": 30, "age": 0},
+        )
+        span = await connection.scalar(
+            text("SELECT expires_at - created_at FROM handoffs WHERE id = :id"), {"id": live}
+        )
+        await as_app(connection, a)
+        seen = set(await connection.scalars(VISIBLE_HANDOFFS))
+
+    assert span == timedelta(days=30)  # generated from the retention, in UTC
+    assert seen == {live} and old not in seen  # the expired one is hidden by `hidden_at_expiry`

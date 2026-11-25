@@ -12,9 +12,10 @@ H1's full-text search (`text_search`, M3 PR 3), M3 PR 4's hybrid search (both le
 PR 4), the same two routes with `guard_answer = "on"` in both modes (M7 PR 8's guarded pipeline,
 a PR 10 precondition: "M7's guarded routes" below), and M5 PR 2's tools (`check_slots`,
 `order_status` and the `book` and `reschedule` proposal checks, through the executor, over the
-sandbox bait), M7 PR 7's KB scan (`guards scan`), and M8 PR 1's session lookups, login-link use
-and revocation (`auth.store`, over `sessions.py`'s shared bait). Add yours here, with no other
-change.
+sandbox bait), M7 PR 7's KB scan (`guards scan`), M8 PR 1's session lookups, login-link use
+and revocation (`auth.store`, over `sessions.py`'s shared bait), and M8 PR 2's hand-off status
+read (`handoffs.store`, the same shared bait) and `GET /v1/widget/handoffs/{id}` through the real
+app with the business's own widget session. Add yours here, with no other change.
 
 **The business clause itself (M3 PR 3, ADR 0009 amendment).** Every path above runs as the app
 role, under RLS, so it would pass with a search whose SQL forgot `c.business_id = :business_id`:
@@ -93,10 +94,14 @@ from tests.answer.providers import CitingProvider
 from tests.canary.catalog import business_tables
 from tests.canary.checks import Planted
 from tests.canary.sessions import (
+    BAIT_HANDOFF_ID,
     BAIT_SESSION_ID,
+    BAIT_WIDGET_SESSION_ID,
     SHARED_CUSTOMER_SHA256,
     SHARED_LINK_SHA256,
     SHARED_STAFF_SHA256,
+    Purpose,
+    bait_token,
 )
 from tests.conftest import TEST_SETTINGS_FIELDS
 from tests.guards.agent_helpers import FixedCheck, LookupMatcher
@@ -119,6 +124,7 @@ from vectapilot_api.guards.config import load_guard_dir
 from vectapilot_api.guards.output import OutputKind
 from vectapilot_api.guards.scan import DatabaseChunks, scan_business
 from vectapilot_api.guards.types import GUARD_RECORD, Check, Folded, RouteSlug, TermHit, TermSet
+from vectapilot_api.handoffs.store import handoff_state
 from vectapilot_api.intents.policy import BusinessType
 from vectapilot_api.main import create_app
 from vectapilot_api.retrieval.fusion import RRF_K, rrf_fuse
@@ -845,6 +851,41 @@ AUTH_PATHS: Final[Mapping[str, SearchLegPath]] = {
 connection too (`OWNER_CONNECTION_PATHS`)."""
 
 
+async def handoff_status_by_the_shared_id(
+    engine: AsyncEngine, me: Planted, *, k: int = MAX_K
+) -> Mapping[str, str]:
+    """M8 PR 2: `handoffs.store.handoff_state` as `me` for the hand-off id and widget session id
+    both businesses hold (`sessions.BAIT_HANDOFF_ID`, `BAIT_WIDGET_SESSION_ID`): `me`'s bait
+    hand-off, whose reply is `me`'s canary (the positive control). Without its business clause, on
+    the owner's connection, it reads both businesses' rows and raises (`one_or_none`)."""
+    async with business_transaction(engine, me.business_id) as connection:
+        found = await handoff_state(
+            connection, me.business_id, BAIT_WIDGET_SESSION_ID, BAIT_HANDOFF_ID
+        )
+    return {"handoff status": _shown(found)}
+
+
+HANDOFF_PATHS: Final[Mapping[str, SearchLegPath]] = {
+    "handoff status": handoff_status_by_the_shared_id,
+}
+"""M8 PR 2's hand-off read, with its own business clause: it runs on the owner's connection too
+(`OWNER_CONNECTION_PATHS`). The writes (S17's store, the turn row, the button) are checked by
+`test_widget_routes.py`: a write path here sends `X-Business-Id`, which a session route refuses."""
+
+
+async def handoff_through_the_widget_route(engine: AsyncEngine, me: Planted) -> Mapping[str, str]:
+    """M8 PR 2: `GET /v1/widget/handoffs/{BAIT_HANDOFF_ID}` through the real app with `me`'s own
+    widget session (`Purpose.WIDGET`): `me`'s bait hand-off's status and reply, `me`'s canary.
+    The other business holds the same hand-off id on the same session id; the route reads only
+    the token's business, and only that session's."""
+    from tests.canary.widget import bearer, served_widgets  # it imports write_paths, which needs us
+
+    token = bait_token(me.business_id, Purpose.WIDGET)
+    with served_widgets([me.business_id]) as client:
+        response = client.get(f"/v1/widget/handoffs/{BAIT_HANDOFF_ID}", headers=bearer(token))
+    return {"GET /v1/widget/handoffs/{id}": f"{response.status_code} {response.text}"}
+
+
 READ_PATHS: Final[dict[str, ReadPath]] = {
     "sql": sql_on_every_business_table,
     "vector_search": vector_search_as_staff,
@@ -861,6 +902,8 @@ READ_PATHS: Final[dict[str, ReadPath]] = {
     **TOOL_PATHS,
     "guards scan": scan_as_staff,
     **AUTH_PATHS,
+    **HANDOFF_PATHS,
+    "GET /v1/widget/handoffs/{id}": handoff_through_the_widget_route,
 }
 
 OWNER_CONNECTION_PATHS: Final[Mapping[str, SearchLegPath]] = {
@@ -870,6 +913,7 @@ OWNER_CONNECTION_PATHS: Final[Mapping[str, SearchLegPath]] = {
     **TOOL_PATHS,
     "guards scan": scan_as_staff,
     **AUTH_PATHS,
+    **HANDOFF_PATHS,
 }
 """Read paths that also run on the owner's connection, where RLS never applies: each search leg's
 own `WHERE c.business_id = :business_id` is then the only thing between `me` and the other
@@ -886,7 +930,8 @@ such a role). `hybrid_search` (M3 PR 4) runs both legs' clauses through the fusi
 tool paths (`TOOL_PATHS`) run every tool statement's business clause here, through the executor;
 for them `k` caps the rows shown. M8 PR 1's auth paths (`AUTH_PATHS`) run each session lookup's,
 the link use's and the revocation's clauses (the staff lookup's join pairing and the link use's
-member pairing included) here; each touches at most one row, so `k` changes nothing for them."""
+member pairing included) here; each touches at most one row, so `k` changes nothing for them. M8
+PR 2's hand-off status read (`HANDOFF_PATHS`) runs its clause here the same way."""
 
 HYBRID: Final = frozenset({"vector_search", "text_search", "rrf_fuse"})
 """What every hybrid read path runs (M3 PR 4): both legs and the fusion."""

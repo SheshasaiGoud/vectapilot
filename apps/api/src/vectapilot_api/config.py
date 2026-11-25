@@ -112,9 +112,42 @@ PUBLIC_ORIGIN_REFUSED: Final = (
 WIDGET_CLIENT_MARGIN_SECONDS: Final = 5.0
 """P7 (D15 (a)): the widget waits the server's turn bound plus this, so the server's
 `turn_timeout` hand-off arrives before the client gives up [proposal, not a measurement]."""
+HANDOFF_TIMING_RULE: Final = (
+    "session_lookup_timeout_seconds + handoff_store_timeout_seconds must be below the widget's"
+    f" client margin ({WIDGET_CLIENT_MARGIN_SECONDS:g} s, P7, S14): while Postgres answers, a slow"
+    " lookup and a slow store must never push a message's response past the widget's client"
+    " timeout"
+)
+"""M8 PR 2's timing rule [proposal]: a message's worst case is the lookup, the turn's bound
+(`widget_turn_bound_seconds`) and the store, and the client waits the bound plus the margin.
+Bounded while Postgres answers: `asyncio.timeout` ends a wait on a responsive server (a lock,
+a slow statement), but an unresponsive one holds the request until the connection itself fails
+(`db.py`'s known limit; zara's PR 2 review). There the widget's client timeout and S16's cached
+guidance are the customer's control."""
+UI_DIR_NEEDS_ORIGIN: Final = (
+    "public_origin (VECTAPILOT_PUBLIC_ORIGIN) is required with ui_dir: the widget page may connect"
+    " only to the API's own widget routes, which its Content-Security-Policy names (D12 (b))"
+)
+"""M8 PR 2b's startup rule [proposal]: fixed text, settings names only."""
 CONFIRM_WRITE_BACKSTOP_SECONDS: Final = 5.0
 """`tools.spec.WRITE_TIMEOUT_S` (a test compares): the confirm route's write backstop, which the
 widget's confirm timeout must exceed (P7). Not imported, so this module loads no tool code."""
+CONFIRM_AUDIT_BOUND_SECONDS: Final = 2.0
+"""`tools.executor.AUDIT_TIMEOUT_S` (a test compares): the audit row a failed confirm writes after
+its write transaction, before the `outcome_unknown` 503. Not imported, as above."""
+CONFIRM_TIMING_RULE: Final = (
+    "widget_confirm_timeout_seconds must be above session_lookup_timeout_seconds +"
+    " guard_redis_timeout_seconds + the confirm route's write backstop"
+    f" ({CONFIRM_WRITE_BACKSTOP_SECONDS:g} s) + its audit bound"
+    f" ({CONFIRM_AUDIT_BOUND_SECONDS:g} s) (P7): the widget never gives up on a confirm the"
+    " server may still finish"
+)
+"""M8 PR 2b's confirm timing rule (leo's and zara's PR 2 review): widget confirm looks the session
+up, admits the limits (one Redis call, `guard_redis_timeout_seconds`), runs the write within its
+backstop and may write its audit row after it, so a write can still commit, and its answer
+arrive, up to their sum after the request. The client's timeout must exceed that sum (defaults: 2
++ 0.25 + 5 + 2 = 9.25 s < 15 s, arithmetic). A client timeout is still shown as "we are
+checking", never "nothing was done" (PR 4's card, W9)."""
 
 PROCESS_ENV_ONLY: Final = {
     "anthropic_api_key": "VECTAPILOT_ANTHROPIC_API_KEY",
@@ -377,8 +410,12 @@ class Settings(BaseSettings):
     at startup (`widget.config.load_widget_dir`, `create_app`): any problem stops the app. Needs
     `corpus_dir` (each business's type and languages)."""
     ui_dir: Path | None = None
-    """`VECTAPILOT_UI_DIR`: the read-only folder of `apps/web`'s product build that the API serves
-    (D2 (a) with (i)). Served from PR 2; until then it changes nothing."""
+    """`VECTAPILOT_UI_DIR`: the read-only folder of `apps/web`'s product build (`npm run build:ui`,
+    `out-ui/`) that the API serves on its own origin (D2 (a) with (i), PR 2b: `ui.pages`): the
+    widget page at `/widget/{business_id}`, the dashboard under `/staff/`, and the build's static
+    assets. Optional: without it those routes answer 404. Needs `public_origin` (the widget page's
+    `connect-src` names it, D12 (b)); resolved at startup, where a path that is not a folder stops
+    the app (`ui.pages.load_ui`)."""
     customer_session_lifetime_seconds: int = Field(default=43_200, gt=0, le=86_400)
     """`VECTAPILOT_CUSTOMER_SESSION_LIFETIME_SECONDS` [P1: 12 hours]: a customer session's
     absolute lifetime, set by the database's clock. At most migration 0008's 24 hours."""
@@ -416,9 +453,28 @@ class Settings(BaseSettings):
     `WIDGET_CLIENT_MARGIN_SECONDS` (P7: 65 s)."""
     widget_confirm_timeout_seconds: float = Field(default=15.0, gt=0, le=60, allow_inf_nan=False)
     """`VECTAPILOT_WIDGET_CONFIRM_TIMEOUT_SECONDS` [P7: 15 s, proposed, not a measurement]: the
-    widget's client timeout for a confirm, handed over in the session response. Above the confirm
-    route's write backstop (`CONFIRM_WRITE_BACKSTOP_SECONDS`), so the client never gives up on a
-    write the server is still allowed to finish."""
+    widget's client timeout for a confirm, handed over in the session response. Above the session
+    lookup, the limits, the confirm route's write backstop and its audit bound together
+    (`CONFIRM_TIMING_RULE`), so the client never gives up on a write the server is still allowed
+    to finish."""
+    # ── Hand-offs and widget turns (M8 PR 2; D6 (a), S14, S17, P7) ──
+    handoff_store_timeout_seconds: float = Field(default=2.0, gt=0, le=10, allow_inf_nan=False)
+    """`VECTAPILOT_HANDOFF_STORE_TIMEOUT_SECONDS` [P7: 2 s, proposed, a safety bound, not a
+    measurement]: one hand-off statement's limit, its transaction included (S14): storing a
+    turn's hand-off and turn row, "talk to a person", a hand-off's status and a turn's rating
+    (PR 2b). Past it a message still gets its guarded response (`queued: false`). Bounded while
+    Postgres answers: an unresponsive server holds the request until the connection fails
+    (`HANDOFF_TIMING_RULE`'s note). With the session lookup's limit it stays below
+    `WIDGET_CLIENT_MARGIN_SECONDS`, so a slow store never pushes the response past the widget's
+    client timeout (`HANDOFF_TIMING_RULE`)."""
+    handoff_poll_limit_session_per_minute: int = Field(default=20, ge=1, le=100_000)
+    """`VECTAPILOT_HANDOFF_POLL_LIMIT_SESSION_PER_MINUTE` [proposal: 20, a placeholder,
+    unmeasured; P7's 5 s polling is 12 a minute]: status reads per session per minute (S17's
+    per-session window, in Redis, failing closed). Polling is never the emergency path."""
+    handoff_poll_limit_business_per_minute: int = Field(default=1_200, ge=1, le=100_000)
+    """`VECTAPILOT_HANDOFF_POLL_LIMIT_BUSINESS_PER_MINUTE` [proposal: 1,200, a placeholder,
+    unmeasured: 100 sessions polling at P7's 5 s]: status reads per business per minute, the
+    route's own per-business window. At least the per-session window."""
 
     @classmethod
     def settings_customise_sources(
@@ -525,16 +581,29 @@ class Settings(BaseSettings):
                 "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with widget_config_dir: each"
                 " business's type and languages come from its corpus manifest"
             )
+        if self.ui_dir is not None and self.public_origin is None:
+            problems.append(UI_DIR_NEEDS_ORIGIN)
         turn = self.agent_router_timeout_seconds + self.agent_turn_timeout_seconds
         if self.widget_turn_bound_seconds < turn:
             problems.append(
                 "widget_turn_bound_seconds must be >= agent_router_timeout_seconds +"
                 " agent_turn_timeout_seconds (D15: the bound only catches an overrun)"
             )
-        if self.widget_confirm_timeout_seconds <= CONFIRM_WRITE_BACKSTOP_SECONDS:
+        confirm = (
+            self.session_lookup_timeout_seconds
+            + self.guard_redis_timeout_seconds
+            + CONFIRM_WRITE_BACKSTOP_SECONDS
+            + CONFIRM_AUDIT_BOUND_SECONDS
+        )
+        if self.widget_confirm_timeout_seconds <= confirm:
+            problems.append(CONFIRM_TIMING_RULE)
+        store = self.session_lookup_timeout_seconds + self.handoff_store_timeout_seconds
+        if store >= WIDGET_CLIENT_MARGIN_SECONDS:
+            problems.append(HANDOFF_TIMING_RULE)
+        if self.handoff_poll_limit_session_per_minute > self.handoff_poll_limit_business_per_minute:
             problems.append(
-                "widget_confirm_timeout_seconds must be above the confirm route's write backstop"
-                f" ({CONFIRM_WRITE_BACKSTOP_SECONDS:g} s, P7)"
+                "handoff_poll_limit_session_per_minute must be <="
+                " handoff_poll_limit_business_per_minute"
             )
         return problems
 

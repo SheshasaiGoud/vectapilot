@@ -19,8 +19,14 @@ so a route added later is checked the day it is added:
   422 that echoes nothing); every existing route keeps FastAPI's own route class. A body FastAPI
   cannot decode (not UTF-8, or not JSON) is refused before any check, typed and `no-store`, on
   every session route that takes a body.
-- **ADR 0016 W2, ADR 0019 decision 2:** no staff route reaches the confirm service or can
-  serialize the confirm token.
+- **ADR 0016 W2, ADR 0019 decision 2:** no staff route reaches the confirm service, and exactly
+  two routes can serialize the confirm token: `/v1/agent` and `/v1/widget/messages` (leo's (6)).
+- **S6 (M8 PR 2):** the widget's message route takes the guard and both services from the same
+  dependency functions as `/v1/agent`, and widget confirm (PR 2b) the confirm service and limits
+  from the confirm route's, so a test override wires both identically.
+- **The product pages (PR 2b, D2 (a)):** the five page and asset routes are the only routes the
+  schema leaves out; each is a GET of FastAPI's own route class that needs no session, no header
+  and no Origin (a page view writes nothing and opens no session, S14).
 - **One 401 for every route:** without credentials, or with the other surface's credential (a
   bearer token on a staff route, the staff cookie on a widget route), every session route answers
   the same 401 bytes before any lookup.
@@ -41,6 +47,11 @@ from tests.auth.fakes import TOKEN, ScriptedDatabase
 from tests.conftest import make_settings
 from tests.guards.test_settings import PRODUCTION
 from vectapilot_api.actions.router import get_confirm_limits, get_confirm_service
+from vectapilot_api.agent.router import (
+    get_agent_guard,
+    get_agent_service,
+    get_read_only_agent_service,
+)
 from vectapilot_api.auth.cookies import STAFF_COOKIE
 from vectapilot_api.auth.dependencies import (
     UNAUTHORIZED,
@@ -53,6 +64,7 @@ from vectapilot_api.auth.http import UNREADABLE_REQUEST, SessionRoute
 from vectapilot_api.business import REFUSED_ENVIRONMENT, get_business_id
 from vectapilot_api.main import create_app
 from vectapilot_api.staff.router import ROUTE_ROLES
+from vectapilot_api.widget.messages import request_started
 
 Key = tuple[str, str]
 
@@ -76,8 +88,19 @@ SESSION_PREFIXES: Final = ("/v1/widget/", "/v1/staff/")
 PATH_VALUES: Final = {
     "{business_id}": "paws-and-co",
     "{action_id}": "0f0e0d0c-0b0a-4908-8706-050403020100",
+    "{handoff_id}": "1f0e0d0c-0b0a-4908-8706-050403020100",
 }
 UNAUTHORIZED_BODY: Final = {"detail": UNAUTHORIZED, "error": "unauthorized"}
+PAGE_ROUTES: Final[frozenset[Key]] = frozenset(
+    {
+        ("GET", "/widget/{business_id}"),
+        ("GET", "/staff/"),
+        ("GET", "/staff/{page}"),
+        ("GET", "/_next/static/{asset:path}"),
+        ("GET", "/icon.svg"),
+    }
+)
+"""PR 2b's product pages and assets (`ui.pages`): HTML and files, not API operations."""
 
 
 def served_routes(app: FastAPI) -> list[APIRoute]:
@@ -153,8 +176,22 @@ def test_the_inventory_is_every_route_the_app_documents(
         (method.upper(), path) for path, item in app.openapi()["paths"].items() for method in item
     }
 
-    assert set(routes) == schema
-    assert len(session_keys(routes)) == 6  # PR 1's: three widget and three staff routes
+    assert set(routes) - PAGE_ROUTES == schema
+    assert set(routes) >= PAGE_ROUTES and not PAGE_ROUTES & schema
+    # PR 1's three widget and three staff routes, PR 2a's three widget routes and PR 2b's two.
+    assert len(session_keys(routes)) == 11
+
+
+def test_the_pages_need_no_session_no_header_and_no_origin(routes: dict[Key, APIRoute]) -> None:
+    # S14: a page view opens no session and spends no window; the API routes it calls do the rest.
+    session_checks = {get_customer_session, refuse_business_header, require_same_origin}
+    for key in PAGE_ROUTES:
+        route = routes[key]
+        assert not isinstance(route, SessionRoute), key
+        assert not session_checks & set(calls(route.dependant)), key
+        assert not any(isinstance(call, StaffAccess) for call in calls(route.dependant)), key
+        assert get_business_id not in calls(route.dependant), key
+        assert route.body_field is None and not route.include_in_schema, key
 
 
 # ── S2: the header seam, never reachable in production ───────────────────────────────────────
@@ -246,23 +283,37 @@ def test_every_widget_route_but_the_two_before_a_session_needs_one(
     assert widget > BEFORE_A_SESSION  # at least one route needs a session (the positive control)
 
 
-@pytest.mark.parametrize(
-    "key",
-    [
+EVERY_SESSION_ROUTE: Final[frozenset[Key]] = frozenset(
+    {
         ("GET", "/v1/widget/{business_id}/config"),
         ("POST", "/v1/widget/sessions"),
         ("DELETE", "/v1/widget/session"),
+        ("POST", "/v1/widget/messages"),
+        ("POST", "/v1/widget/handoffs"),
+        ("GET", "/v1/widget/handoffs/{handoff_id}"),
+        ("POST", "/v1/widget/actions/{action_id}/confirm"),
+        ("POST", "/v1/widget/feedback"),
         ("POST", "/v1/staff/login"),
         ("POST", "/v1/staff/logout"),
         ("GET", "/v1/staff/me"),
-    ],
-    ids=" ".join,
+    }
 )
+"""PR 1's six routes, PR 2a's three widget routes and PR 2b's two (confirm, feedback)."""
+
+
+@pytest.mark.parametrize("key", sorted(EVERY_SESSION_ROUTE), ids=" ".join)
 def test_every_session_route_refuses_the_business_header_first(
     client: TestClient, routes: dict[Key, APIRoute], key: Key
 ) -> None:
     # No Origin, no credential and no body: the header is the first thing each route refuses.
-    first = calls(routes[key].dependant)[0]
+    # The message route's clock (`request_started`, noah's PR 2 review) comes first and refuses
+    # nothing: it reads `time.perf_counter()` only.
+    found = calls(routes[key].dependant)
+    if key == ("POST", "/v1/widget/messages"):
+        assert found[0] is request_started
+        found = found[1:]
+    assert request_started not in found
+    first = found[0]
     assert first in (refuse_business_header, get_customer_session) or isinstance(first, StaffAccess)
 
     response = client.request(key[0], concrete(key[1]), headers={"X-Business-Id": "paws-and-co"})
@@ -273,16 +324,7 @@ def test_every_session_route_refuses_the_business_header_first(
 
 
 def test_the_parametrized_list_is_every_session_route(routes: dict[Key, APIRoute]) -> None:
-    listed = {
-        ("GET", "/v1/widget/{business_id}/config"),
-        ("POST", "/v1/widget/sessions"),
-        ("DELETE", "/v1/widget/session"),
-        ("POST", "/v1/staff/login"),
-        ("POST", "/v1/staff/logout"),
-        ("GET", "/v1/staff/me"),
-    }
-
-    assert set(session_keys(routes)) == listed
+    assert set(session_keys(routes)) == EVERY_SESSION_ROUTE
 
 
 # ── S5: roles and the Origin check ───────────────────────────────────────────────────────────
@@ -316,17 +358,96 @@ def test_every_non_get_staff_route_and_session_creation_check_the_origin(
     assert ("POST", "/v1/staff/login") in routes  # login is one of them (login CSRF)
 
 
+def response_schemas(schema: dict[str, Any], operation: dict[str, Any]) -> set[str]:
+    """Every component schema an operation's responses can serialize, each `$ref` resolved."""
+    components = schema.get("components", {}).get("schemas", {})
+    seen: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        ref = node.get("$ref")
+        if isinstance(ref, str):
+            name = ref.rsplit("/", 1)[-1]
+            if name not in seen:
+                seen.add(name)
+                walk(components[name])
+        for value in node.values():
+            walk(value)
+
+    walk(operation.get("responses", {}))
+    return seen
+
+
+CARRY_THE_CONFIRM_TOKEN: Final[frozenset[Key]] = frozenset(
+    {("POST", "/v1/agent"), ("POST", "/v1/widget/messages")}
+)
+"""ADR 0016 W2's "one response that carries the token", named twice by ADR 0019 (leo's (6))."""
+
+
 def test_no_staff_route_reaches_the_confirm_service_or_its_token(
     app: FastAPI, routes: dict[Key, APIRoute]
 ) -> None:
     schema = app.openapi()
     for key in session_keys(routes):
+        if not key[1].startswith("/v1/staff/"):
+            continue
         assert not {get_confirm_service, get_confirm_limits} & set(calls(routes[key].dependant))
         operation = schema["paths"][key[1]][key[0].lower()]
-        text = json.dumps(operation)
-        assert "ConfirmationResponse" not in text and "confirm_token" not in text, key
-    # The positive control: the agent route can carry it (ADR 0016 W2).
-    assert "ConfirmationResponse" in json.dumps(schema["paths"]["/v1/agent"])
+        assert "ConfirmationResponse" not in response_schemas(schema, operation), key
+        assert "confirm_token" not in json.dumps(operation), key
+
+
+def test_exactly_the_agent_and_the_widget_message_routes_can_serialize_the_confirm_token(
+    app: FastAPI, routes: dict[Key, APIRoute]
+) -> None:
+    schema = app.openapi()
+    carrying = {
+        key
+        for key in set(routes) - PAGE_ROUTES
+        if "ConfirmationResponse"
+        in response_schemas(schema, schema["paths"][key[1]][key[0].lower()])
+    }
+
+    assert carrying == CARRY_THE_CONFIRM_TOKEN
+
+
+def test_the_widget_message_route_takes_agents_guard_and_services_from_its_functions(
+    routes: dict[Key, APIRoute],
+) -> None:
+    # S6: the same dependency functions (`agent/router.py`), so one override wires both routes,
+    # and the guard is called by the route, never run as a screening dependency (M7 G13).
+    same = {get_agent_guard, get_agent_service, get_read_only_agent_service}
+    for key in CARRY_THE_CONFIRM_TOKEN:
+        assert same <= set(calls(routes[key].dependant)), key
+
+
+CONFIRMING: Final[frozenset[Key]] = frozenset(
+    {
+        ("POST", "/v1/agent/actions/{action_id}/confirm"),
+        ("POST", "/v1/widget/actions/{action_id}/confirm"),
+    }
+)
+"""The two routes that may reach the confirm service (ADR 0019 decision 2)."""
+
+
+def test_exactly_the_two_confirm_routes_reach_the_confirm_service_through_its_functions(
+    routes: dict[Key, APIRoute],
+) -> None:
+    # S6 (PR 2b): widget confirm takes the confirm service and the limiter pre-check from the
+    # confirm route's own dependency functions; no other route reaches either.
+    same = {get_confirm_service, get_confirm_limits}
+    reaching = {key for key, route in routes.items() if same & set(calls(route.dependant))}
+
+    assert reaching == CONFIRMING
+    for key in CONFIRMING:
+        assert same <= set(calls(routes[key].dependant)), key
+    widget = calls(routes[("POST", "/v1/widget/actions/{action_id}/confirm")].dependant)
+    assert get_customer_session in widget and get_business_id not in widget
 
 
 # ── S9, S13: `no-store` on the new routes only ───────────────────────────────────────────────
@@ -337,7 +458,13 @@ def test_the_session_routes_and_only_they_are_session_routes(routes: dict[Key, A
         assert isinstance(route, SessionRoute) == session_route(route), key
 
 
-BODY_ROUTES: Final = [("POST", "/v1/widget/sessions"), ("POST", "/v1/staff/login")]
+BODY_ROUTES: Final = [
+    ("POST", "/v1/widget/sessions"),
+    ("POST", "/v1/widget/messages"),
+    ("POST", "/v1/widget/actions/{action_id}/confirm"),
+    ("POST", "/v1/widget/feedback"),
+    ("POST", "/v1/staff/login"),
+]
 """The session routes that take a body (FastAPI decodes it before any dependency runs)."""
 UNDECODABLE: Final = [
     pytest.param(b'{"token": "\xff\xfe zqxmarker"}', 400, id="not UTF-8"),
@@ -364,7 +491,7 @@ def test_a_body_that_cannot_be_decoded_is_refused_first_typed_and_no_store(
         "X-Business-Id": "sunrise-clinic",
     }
 
-    response = client.request(key[0], key[1], content=content, headers=headers)
+    response = client.request(key[0], concrete(key[1]), content=content, headers=headers)
 
     assert response.status_code == status
     assert response.json()["error"] == "invalid_request"
@@ -379,6 +506,11 @@ def test_a_body_that_cannot_be_decoded_is_refused_first_typed_and_no_store(
 
 NEEDS_A_SESSION: Final = [
     ("DELETE", "/v1/widget/session", "bearer"),
+    ("POST", "/v1/widget/messages", "bearer"),
+    ("POST", "/v1/widget/handoffs", "bearer"),
+    ("GET", "/v1/widget/handoffs/{handoff_id}", "bearer"),
+    ("POST", "/v1/widget/actions/{action_id}/confirm", "bearer"),
+    ("POST", "/v1/widget/feedback", "bearer"),
     ("POST", "/v1/staff/logout", "cookie"),
     ("GET", "/v1/staff/me", "cookie"),
 ]
@@ -407,7 +539,7 @@ def test_every_session_route_gives_the_same_401_before_any_lookup(
     answers: list[httpx2.Response] = []
     for method, path, kind in NEEDS_A_SESSION:
         for headers in ({}, credentials(kind)):
-            response = client.request(method, path, headers={**origin, **headers})
+            response = client.request(method, concrete(path), headers={**origin, **headers})
             assert response.json() == UNAUTHORIZED_BODY, (method, path, headers)
             assert response.headers["cache-control"] == "no-store"
             assert response.headers.get("www-authenticate") == (

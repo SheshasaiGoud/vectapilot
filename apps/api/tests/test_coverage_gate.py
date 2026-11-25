@@ -161,9 +161,10 @@ def test_no_other_file_configures_coverage() -> None:
     assert "COVERAGE_RCFILE" not in os.environ
 
 
-def test_the_gate_checks_the_gateway_and_the_guards_each_on_its_own() -> None:
-    # M7 PR 1: guards/ at the gateway's thresholds, excluding nothing (H1-H3 included).
-    assert [target.name for target in TARGETS] == ["gateway", "guards"]
+def test_the_gate_checks_the_gateway_the_guards_and_auth_each_on_its_own() -> None:
+    # M7 PR 1: guards/ at the gateway's thresholds, excluding nothing (H1-H3 included). M8: auth/
+    # too (PR 1's decision, added in PR 2).
+    assert [target.name for target in TARGETS] == ["gateway", "guards", "auth"]
     for target in TARGETS:
         assert target.folder.is_dir()
         assert target.folder == API_ROOT / "src" / "vectapilot_api" / target.name

@@ -1,8 +1,9 @@
-"""The widget routes' bodies (M8 PR 1; S1, S3, S8, S16, P7). Requests are closed
+"""The widget routes' bodies (M8 PR 1 and 2; S1, S3, S6, S8, S16, S17, P7). Requests are closed
 (`extra="forbid"`): a body naming `customer_ref` or any other field is a 422 that echoes nothing
 (`auth.http.SessionRoute`). PR 4's fixtures are validated against the response models."""
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
+from uuid import UUID
 
 from pydantic import (
     AwareDatetime,
@@ -12,11 +13,16 @@ from pydantic import (
     Secret,
     SerializationInfo,
     field_serializer,
+    model_validator,
 )
 
+from vectapilot_api.actions.tokens import ConfirmToken
+from vectapilot_api.agent.responses import AgentResponse
 from vectapilot_api.auth.store import UiLanguage
 from vectapilot_api.auth.tokens import TOKEN_MAX
-from vectapilot_api.gateway.types import BusinessId
+from vectapilot_api.gateway.types import BusinessId, TraceId
+from vectapilot_api.handoffs.store import HandoffStatus, Rating
+from vectapilot_api.retrieval.types import Question
 from vectapilot_api.widget.config import GUIDANCE_LANGUAGE, WidgetBusiness, WidgetTexts
 
 SessionToken = Secret[Annotated[str, Field(min_length=1, max_length=TOKEN_MAX)]]
@@ -90,3 +96,86 @@ class WidgetConfigResponse(_Response):
             guidance=widget.guidance,
             accent_color=file.accent_color,
         )
+
+
+# ── PR 2: messages and hand-offs ───────────────────────────────────────────────────────────────
+
+
+class MessageRequest(_Request):
+    """`POST /v1/widget/messages`' body: the message and nothing else. The business and the
+    customer come from the session (S1, S4): the route builds `AgentRequest` itself, so no client
+    can name a `customer_ref` (ADR 0016's IDOR stays closed)."""
+
+    message: Question = Field(repr=False)
+    """At most `MAX_QUESTION_CHARS` code points (S16: the widget counts the same unit)."""
+
+
+class HandoffQueued(_Response):
+    """Whether a hand-off is in the business's queue (S8, S17): `queued` is true exactly when its
+    row exists, with its id. That row is the session's open one, which may be an earlier urgent or
+    `safety` hand-off (S17), so the server decides D11 once, from the row as stored (zara's PR 2
+    review): `follow_up` is true only for a queued row that is neither urgent nor `safety`. The
+    widget shows "a person will reply" and polls only when `follow_up` is true; for any other it
+    shows D11 (b)'s `urgent_follow_up` (when queued) or nothing, and a missing field counts as
+    false."""
+
+    id: UUID | None
+    queued: bool
+    follow_up: bool
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Self:
+        if self.queued != (self.id is not None):
+            raise ValueError("a queued hand-off has its id, and only a queued one")
+        if self.follow_up and not self.queued:
+            raise ValueError("only a queued hand-off can invite a follow-up")
+        return self
+
+
+class MessageResponse(_Response):
+    """200 of `POST /v1/widget/messages`: `/v1/agent`'s response, unchanged and whole (a
+    `confirmation_required` turn carries its token: ADR 0016 W2's second route, ADR 0019), and
+    for a hand-off whether it was queued. None for every other kind."""
+
+    turn: AgentResponse
+    handoff: HandoffQueued | None
+
+
+class HandoffStateResponse(_Response):
+    """200 of `GET /v1/widget/handoffs/{handoff_id}`: the session's own hand-off's status and the
+    staff reply (D7 (a)), shown as text. Never the masked message, the guidance or who works it.
+    `follow_up` as `HandoffQueued`'s, from the row as it is now (a raise to urgent or `safety`
+    turns it false): the widget stops polling when it is false (D11)."""
+
+    id: UUID
+    status: HandoffStatus
+    reply: str | None
+    replied_at: AwareDatetime | None
+    follow_up: bool
+
+
+# ── PR 2b: confirm and feedback ──────────────────────────────────────────────────────────────
+
+
+class WidgetConfirmRequest(_Request):
+    """`POST /v1/widget/actions/{action_id}/confirm`'s body: the one-time token and nothing else.
+    The customer comes from the session (S4): the route builds `actions.types.ConfirmRequest`
+    itself with the session's `customer_ref`, so no client can confirm as anyone else (ADR 0016's
+    IDOR stays closed). The token is a `Secret`, masked in every dump, and never echoed by a 422."""
+
+    confirm_token: ConfirmToken
+
+
+class FeedbackRequest(_Request):
+    """`POST /v1/widget/feedback`'s body (D6 (a)): one of this session's own turns, named by the
+    trace id its body carried, and the rating. No text."""
+
+    trace_id: TraceId
+    rating: Rating
+
+
+class FeedbackRecorded(_Response):
+    """201 of `POST /v1/widget/feedback`: the rating stored, as sent [proposal]."""
+
+    trace_id: str
+    rating: Rating

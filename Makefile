@@ -48,7 +48,7 @@ typecheck: ## Strict type check of the API
 test: ## API tests that need no services
 	$(API) uv run pytest
 
-coverage: ## API tests under coverage, then the gate on gateway/ and guards/ (>= 95 %, ADR 0006)
+coverage: ## API tests under coverage, then the gate on gateway/, guards/ and auth/ (>= 95 %, ADR 0006)
 	$(API) uv run coverage run -m pytest && uv run python scripts/coverage_gate.py
 
 test-integration: up ## API tests including real Postgres + Redis (starts the stack)
