@@ -235,6 +235,36 @@ for (const language of LANGUAGES) {
       await expectStateChecks(page, { label: "confirm 401 after unknown", guidance: w.guidance });
     });
 
+    // zara's PR 2 review: any other 404 (`widget_not_found`, the widget disabled) is a 401.
+    test("404 widget_not_found: as a 401, no claim, the session ended, guidance shows", async ({ page, stack }) => {
+      const { w, box, confirm } = await card(page, stack, [fixture("confirm", "widget-not-found")]);
+      await press(page, confirm);
+      await expect(box.getByText(SAFETY.cardSessionEnded, { exact: true })).toBeVisible();
+      for (const claim of [SAFETY.cardExpired, SAFETY.cardNotDone, SAFETY.cardUnknownHelp]) {
+        await expect(box.getByText(claim, { exact: true })).toHaveCount(0);
+      }
+      await expect(box.getByRole("button")).toHaveCount(0);
+      await expect(w.status).toContainText(w.strings.sessionExpired);
+      expect(await w.storageKeys()).toEqual([]);
+      await page.clock.runFor(10_000);
+      expect(stack.count(CONFIRM), "no retry: the session ended").toBe(1);
+      await expectStateChecks(page, { label: "confirm widget_not_found", guidance: w.guidance });
+    });
+
+    test("404 widget_not_found after an unknown outcome: never claims nothing was done", async ({ page, stack }) => {
+      const { w, box, confirm } = await card(page, stack, [
+        fixture("confirm", "outcome-unknown"),
+        fixture("confirm", "widget-not-found"),
+      ]);
+      await press(page, confirm);
+      await expect(box.getByText(SAFETY.cardChecking, { exact: true })).toBeVisible();
+      await page.clock.runFor(2_500);
+      await expect(box.getByText(SAFETY.cardSessionEnded, { exact: true })).toBeVisible();
+      await expect(box.getByText(SAFETY.cardUnknownHelp, { exact: true })).toBeVisible();
+      await expect(box.getByText(SAFETY.cardNotDone, { exact: true })).toHaveCount(0);
+      await expectStateChecks(page, { label: "confirm widget_not_found after unknown", guidance: w.guidance });
+    });
+
     test("Not now: nothing was done, nothing sent", async ({ page, stack }) => {
       const { box, notNow } = await card(page, stack, []);
       await press(page, notNow);

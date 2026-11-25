@@ -260,11 +260,25 @@ export function parseTurn(value: unknown): Turn {
   }
 }
 
-/** PR 2's `HandoffQueued`; a body it cannot read is `null`, which counts as "not stored". */
+/** D11's `follow_up` as the server sent it: missing counts as false (zara's PR 2 review); any
+ * value that is not a boolean is unreadable (`undefined`). */
+function readFollowUp(value: unknown): boolean | undefined {
+  if (value === undefined) return false;
+  return typeof value === "boolean" ? value : undefined;
+}
+
+/** PR 2's `HandoffQueued`; a body it cannot read is `null`, which counts as "not stored". A
+ * `follow_up` without a stored row is a body it cannot read (the model refuses it too). */
 export function parseHandoffRef(value: unknown): HandoffRef | null {
   if (!isObject(value)) return null;
-  if (value.queued === true && isUuid(value.id)) return { id: value.id, queued: true };
-  if (value.queued === false && value.id === null) return { id: null, queued: false };
+  const followUp = readFollowUp(value.follow_up);
+  if (followUp === undefined) return null;
+  if (value.queued === true && isUuid(value.id)) {
+    return { id: value.id, queued: true, follow_up: followUp };
+  }
+  if (value.queued === false && value.id === null && !followUp) {
+    return { id: null, queued: false, follow_up: false };
+  }
   return null;
 }
 
@@ -289,8 +303,9 @@ export function parseHandoffStatus(body: unknown): HandoffStatusBody | null {
   if (status !== "open" && status !== "claimed" && status !== "resolved") return null;
   const reply = optionalText(body.reply);
   const repliedAt = optionalText(body.replied_at);
-  if (reply === undefined || repliedAt === undefined) return null;
-  return { id: body.id, status, reply, replied_at: repliedAt };
+  const followUp = readFollowUp(body.follow_up);
+  if (reply === undefined || repliedAt === undefined || followUp === undefined) return null;
+  return { id: body.id, status, reply, replied_at: repliedAt, follow_up: followUp };
 }
 
 export function parseConfirm(body: unknown, actionId: string): ConfirmBody | null {

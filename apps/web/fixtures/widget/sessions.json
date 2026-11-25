@@ -1,6 +1,6 @@
 {
   "synthetic": true,
-  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (pending PR 2's merge) validates every case.",
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (apps/api/tests/widget/test_web_fixtures.py) validates every case.",
   "route": "POST /v1/widget/sessions",
   "api": "PR 1 (merged): vectapilot_api.widget.models.SessionCreated",
   "cases": {

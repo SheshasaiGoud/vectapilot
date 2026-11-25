@@ -8,18 +8,22 @@
  * | 409 `failed`                               | the server's fixed sentence  | done                   |
  * | 404 `action_not_found`                     | "Expired. Nothing was done." | done                   |
  * | 503 `confirm_failed` / `limits_unavailable`| "Not done yet"               | retry, same token      |
- * |   or another 404 (`widget_not_found`)      |                              |                        |
  * | 503 `outcome_unknown`, timeout, network    | "We are checking"            | one automatic retry,   |
  * |   (and any other answer it cannot read)    |   never "nothing happened"   | then manual, same token|
  * | 429                                        | a countdown                  | same token             |
- * | 401                                        | session ended; after an      | guidance (S16)         |
- * |                                            |   unknown outcome, no claim  |                        |
+ * | 401, or any other 404 (`widget_not_found`: | session ended; after an      | guidance (S16)         |
+ * |   the widget was disabled)                 |   unknown outcome, no claim  |                        |
  *
  * **Once an attempt's outcome was unknown, no later answer may say "not done"** (leo's review):
- * a `confirm_failed` or `limits_unavailable` only says *this* attempt changed nothing, and a 404
- * other than `action_not_found` (a widget disabled since, PR 2b) ran nothing at all; neither tells
- * what the earlier attempt did. They keep "We could not check yet" (`check_manual`), the same
- * token and a manual retry.
+ * a `confirm_failed` or `limits_unavailable` only says *this* attempt changed nothing; it tells
+ * nothing about the earlier attempt. They keep "We could not check yet" (`check_manual`), the
+ * same token and a manual retry.
+ *
+ * **A 404 other than `action_not_found` is a 401** (zara's PR 2 review): `widget_not_found` means
+ * the session's widget was disabled, and every later request on that session gets it too, so the
+ * session has ended for this page. The card says so and makes no claim that nothing was done
+ * (after an unknown outcome it adds "We could not check whether this was done"); the guidance
+ * shows (S16) and the next send starts a new session.
  *
  * Only `action_not_found` is "expired": this session holds this token, and the confirm service
  * returns an executed action's stored result whatever its expiry (`actions/confirm.py`: lock,
@@ -73,12 +77,11 @@ export function applyConfirmResult(
       effect: "none",
     };
   }
-  if (status === 404) {
-    return parseError(body).error === "action_not_found"
-      ? { card: { ...card, status: "expired" }, effect: "none" }
-      : notDone(card); // `widget_not_found` or a body it cannot read: the service did not run
+  if (status === 404 && parseError(body).error === "action_not_found") {
+    return { card: { ...card, status: "expired" }, effect: "none" };
   }
-  if (status === 401) {
+  if (status === 401 || status === 404) {
+    // Any other 404 (`widget_not_found`, or a body it cannot read) as a 401 (zara's PR 2 review).
     return { card: { ...card, status: "session_ended" }, effect: "session_expired" };
   }
   if (status === 429) {

@@ -1,6 +1,6 @@
 /**
  * Every state of the customer widget in a real browser (M8 PR 4, step 4b; D8 (a)): each test runs
- * in en, hi and te, and in both projects (360×800 and 1280×800, reduced motion). Keyboard only;
+ * in en, hi and te (the last row, a rule without text of its own, in en only), and in both projects (360×800 and 1280×800, reduced motion). Keyboard only;
  * each state ends with `expectStateChecks` (guidance, reflow, axe, visible focus at every Tab
  * stop). The API is stubbed in the browser (`support/stack.ts`): $0, nothing leaves the machine.
  */
@@ -288,6 +288,73 @@ for (const language of LANGUAGES) {
       await expectStateChecks(page, { label: "talk to a person", guidance: w.guidance });
     });
 
+    // D11 decided by the server (zara's PR 2 review): a queued row with `follow_up` false is
+    // urgent or `safety` as stored. No poll is stubbed: one would reach the catch-all.
+    test("Talk to a person, the row urgent (follow_up false): D11's text, no generic follow-up, no polling", async ({ page, stack }) => {
+      const w = new Widget(page, stack, language, followUpConfig(language.business));
+      stack.on(HANDOFFS, fixture("handoffs", "created-urgent-row"));
+      await w.open();
+      await w.ready();
+      await press(page, w.talkButton);
+      await expect(w.contact).toBeVisible();
+      await expect(page.locator("#vp-guidance h2")).toHaveText(SAFETY.guidanceHeadingUrgent);
+      if (w.texts.urgent_follow_up) await expect(w.text(w.texts.urgent_follow_up)).toBeVisible();
+      if (w.texts.handoff_follow_up) await expect(w.text(w.texts.handoff_follow_up)).toHaveCount(0);
+      await page.clock.runFor(30_000);
+      expect(stack.count(/^GET \/v1\/widget\/handoffs\//), "S8: no polling").toBe(0);
+      await expectStateChecks(page, { label: "talk to a person, urgent row", guidance: w.guidance, urgent: true });
+    });
+
+    test("normal hand-off stored, then raised (status follow_up false): polling stops, the follow-up goes", async ({ page, stack }) => {
+      const w = new Widget(page, stack, language, followUpConfig(language.business));
+      const followUp = w.texts.handoff_follow_up ?? "";
+      expect(followUp, "a follow-up to withdraw: the check is never vacuous").not.toBe("");
+      stack.on(MESSAGES, messageReply("handoff-normal-queued"));
+      stack.on(POLL, fixture("handoff-status", "open"), fixture("handoff-status", "raised"));
+      await w.open();
+      await w.send();
+      await expect(w.text(followUp)).toBeVisible();
+      await expect(async () => {
+        await page.clock.runFor(5_000);
+        await expect(w.text(followUp)).toHaveCount(0, { timeout: 500 });
+      }).toPass({ timeout: 15_000 });
+      expect(stack.count(POLL)).toBe(2);
+      await expect(w.contact).toBeVisible();
+      // zara's PR 4 review: the message's and the press's whole rule, the urgent heading and
+      // D11 (b)'s text included.
+      await expect(page.locator("#vp-guidance h2")).toHaveText(SAFETY.guidanceHeadingUrgent);
+      if (w.texts.urgent_follow_up) await expect(w.text(w.texts.urgent_follow_up)).toBeVisible();
+      await page.clock.runFor(30_000);
+      expect(stack.count(POLL), "polling stopped").toBe(2);
+      await expectStateChecks(page, { label: "hand-off raised", guidance: w.guidance, urgent: true });
+    });
+
+    // zara's PR 4 review: a 404 at the status read means no reply can reach this view.
+    for (const [name, ended] of [
+      ["not-found", false],
+      ["widget-not-found", true],
+    ] as const) {
+      test(`normal hand-off stored, then the status read answers 404 ${name}: polling stops, the follow-up goes`, async ({ page, stack }) => {
+        const w = new Widget(page, stack, language, followUpConfig(language.business));
+        const followUp = w.texts.handoff_follow_up ?? "";
+        expect(followUp, "a follow-up to withdraw: the check is never vacuous").not.toBe("");
+        stack.on(MESSAGES, messageReply("handoff-normal-queued"));
+        stack.on(POLL, fixture("handoff-status", name));
+        await w.open();
+        await w.send();
+        await expect(w.text(followUp)).toBeVisible();
+        await expect(async () => {
+          await page.clock.runFor(5_000);
+          await expect(w.text(followUp)).toHaveCount(0, { timeout: 500 });
+        }).toPass({ timeout: 15_000 });
+        expect(stack.count(POLL)).toBe(1);
+        await expect(w.text(w.strings.sessionExpired)).toHaveCount(ended ? 1 : 0);
+        await page.clock.runFor(30_000);
+        expect(stack.count(POLL), "polling stopped").toBe(1);
+        await expectStateChecks(page, { label: `status read 404 ${name}`, guidance: w.guidance });
+      });
+    }
+
     test("Talk to a person, not stored: the contact fallback, no follow-up", async ({ page, stack }) => {
       const w = new Widget(page, stack, language, followUpConfig(language.business));
       stack.on(HANDOFFS, fixture("handoffs", "not-stored"));
@@ -505,3 +572,34 @@ for (const language of LANGUAGES) {
     });
   });
 }
+
+// "Talk to a person" answered 404 is a 401 (decided 2026-11-25, shesha), as confirm and the status
+// read: one language is enough (the rule has no text of its own), both projects. No poll is
+// stubbed: one would reach the closed catch-all and fail the test.
+test.describe("widget, en: Talk to a person answered 404", () => {
+  const english = LANGUAGES.find((language) => language.lang === "en")!;
+
+  test("404 widget_not_found: as a 401, guidance and contact, no follow-up, a new session on the next send", async ({ page, stack }) => {
+    const w = new Widget(page, stack, english, followUpConfig(english.business));
+    stack.on(HANDOFFS, fixture("handoffs", "widget-not-found"));
+    stack.on(MESSAGES, messageReply("reply"));
+    await w.open();
+    await w.ready();
+    await press(page, w.talkButton);
+    await expect(w.status).toContainText(w.strings.sessionExpired);
+    await expect(w.contact).toBeVisible();
+    await expect(page.locator("#vp-guidance h2")).toHaveText(SAFETY.guidanceHeading);
+    for (const text of [w.texts.handoff_follow_up, w.texts.urgent_follow_up]) {
+      expect(text, "a follow-up to rule out: the check is never vacuous").toBeTruthy();
+      await expect(w.text(text!)).toHaveCount(0);
+    }
+    expect(await w.storageKeys()).toEqual([]);
+    await page.clock.runFor(30_000);
+    expect(stack.count(/^GET \/v1\/widget\/handoffs\//), "no polling").toBe(0);
+    await expectStateChecks(page, { label: "talk to a person, widget_not_found", guidance: w.guidance });
+    await w.send();
+    await expect(w.text(REPLY_TEXT)).toBeVisible();
+    expect(stack.count(SESSIONS), "the next send opens a new session").toBe(2);
+    expect(stack.count(HANDOFFS)).toBe(1);
+  });
+});

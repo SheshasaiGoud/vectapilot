@@ -1,8 +1,8 @@
 {
   "synthetic": true,
-  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (pending PR 2's merge) validates every case.",
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (apps/api/tests/widget/test_web_fixtures.py) validates every case.",
   "route": "POST /v1/widget/messages",
-  "api": "PR 2 (m8/widget-api, not merged): vectapilot_api.widget.models.MessageResponse ({turn: AgentResponse, handoff: HandoffQueued | null})",
+  "api": "PR 2 (merged, #89): vectapilot_api.widget.models.MessageResponse ({turn: AgentResponse, handoff: HandoffQueued | null}; HandoffQueued is {id, queued, follow_up})",
   "cases": {
     "answer": {
       "status": 200,
@@ -173,7 +173,8 @@
         },
         "handoff": {
           "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
-          "queued": true
+          "queued": true,
+          "follow_up": false
         }
       },
       "note": "Today's real stack for a health business: H1 is a stub, so every message is an urgent guard_error."
@@ -198,7 +199,8 @@
         },
         "handoff": {
           "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
-          "queued": true
+          "queued": true,
+          "follow_up": false
         }
       }
     },
@@ -222,7 +224,8 @@
         },
         "handoff": {
           "id": null,
-          "queued": false
+          "queued": false,
+          "follow_up": false
         }
       },
       "note": "S8: a failed store keeps the guidance and gives queued false."
@@ -242,9 +245,31 @@
         },
         "handoff": {
           "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
-          "queued": true
+          "queued": true,
+          "follow_up": true
         }
       }
+    },
+    "handoff-normal-queued-urgent-row": {
+      "status": 200,
+      "model": "MessageResponse",
+      "body": {
+        "turn": {
+          "kind": "handoff",
+          "trace_id": "000000000000000000000000000000d4",
+          "reason": "customer_asked",
+          "priority": "normal",
+          "intent": null,
+          "guidance": [],
+          "prompt_version": "agent-step.1"
+        },
+        "handoff": {
+          "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+          "queued": true,
+          "follow_up": false
+        }
+      },
+      "note": "a normal hand-off whose session already has an urgent or safety row (S17): the server's follow_up is false (D11, zara's PR 2 review)"
     },
     "handoff-normal-not-queued": {
       "status": 200,
@@ -261,7 +286,8 @@
         },
         "handoff": {
           "id": null,
-          "queued": false
+          "queued": false,
+          "follow_up": false
         }
       }
     },
@@ -285,7 +311,8 @@
         },
         "handoff": {
           "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
-          "queued": true
+          "queued": true,
+          "follow_up": true
         }
       },
       "note": "guards/agent.py: a health business's uncovered script is a high hand-off with guidance."
@@ -310,7 +337,8 @@
         },
         "handoff": {
           "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
-          "queued": true
+          "queued": true,
+          "follow_up": true
         }
       },
       "note": "agent/service.py W11: a health business while agent_router is off is a normal hand-off with its guidance; no safety step cleared the message (Z4 (b))."
@@ -335,7 +363,8 @@
         },
         "handoff": {
           "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
-          "queued": true
+          "queued": true,
+          "follow_up": false
         }
       },
       "note": "D15 (a): the route's outer bound ended the turn; urgent with the guidance for a health business (widget/messages.py turn_timeout)"
@@ -360,7 +389,8 @@
         },
         "handoff": {
           "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
-          "queued": true
+          "queued": true,
+          "follow_up": false
         }
       },
       "note": "S6: guard_routes = off (local, test, ci) answers this hand-off, never the service"
@@ -477,7 +507,8 @@
         },
         "handoff": {
           "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
-          "queued": true
+          "queued": true,
+          "follow_up": false
         }
       }
     },

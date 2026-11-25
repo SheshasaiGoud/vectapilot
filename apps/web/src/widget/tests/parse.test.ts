@@ -8,6 +8,7 @@ import {
   parseConfig,
   parseGuidance,
   parseHandoffRef,
+  parseHandoffStatus,
   parseMessage,
   parseSession,
   parseTurn,
@@ -70,6 +71,40 @@ describe("turns", () => {
     assert.equal(parseHandoffRef({ id: "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61", queued: "yes" }), null);
     const body = { turn: { kind: "handoff", trace_id: TRACE, reason: "safety", priority: "urgent", guidance: [] }, handoff: { id: 1 } };
     assert.equal(parseMessage(body).handoff, null);
+  });
+});
+
+describe("D11's follow_up, decided by the server (PR 2, zara's review)", () => {
+  const ID = "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61";
+
+  test("PR 2's hand-off refs keep the server's follow_up", () => {
+    assert.deepEqual(parseHandoffRef(fixture("handoffs", "created").body), { id: ID, queued: true, follow_up: true });
+    assert.deepEqual(parseHandoffRef(fixture("handoffs", "created-urgent-row").body), { id: ID, queued: true, follow_up: false });
+    assert.deepEqual(parseHandoffRef(fixture("handoffs", "not-stored").body), { id: null, queued: false, follow_up: false });
+    assert.deepEqual(parseMessage(fixture("messages", "handoff-normal-queued").body).handoff?.follow_up, true);
+    assert.deepEqual(parseMessage(fixture("messages", "handoff-safety").body).handoff?.follow_up, false);
+  });
+
+  test("a missing follow_up counts as false", () => {
+    assert.deepEqual(parseHandoffRef({ id: ID, queued: true }), { id: ID, queued: true, follow_up: false });
+    assert.deepEqual(parseHandoffRef({ id: null, queued: false }), { id: null, queued: false, follow_up: false });
+  });
+
+  test("a follow_up that is not a boolean, or one without a stored row, cannot be read", () => {
+    for (const value of ["yes", "true", 1, null, {}, []]) {
+      assert.equal(parseHandoffRef({ id: ID, queued: true, follow_up: value }), null, JSON.stringify(value));
+    }
+    assert.equal(parseHandoffRef({ id: null, queued: false, follow_up: true }), null);
+  });
+
+  test("the status read keeps follow_up; missing counts as false; anything else cannot be read", () => {
+    assert.equal(parseHandoffStatus(fixture("handoff-status", "open").body)?.follow_up, true);
+    assert.equal(parseHandoffStatus(fixture("handoff-status", "raised").body)?.follow_up, false);
+    const body = structuredClone(fixture("handoff-status", "open").body) as Record<string, unknown>;
+    delete body.follow_up;
+    assert.equal(parseHandoffStatus(body)?.follow_up, false);
+    body.follow_up = "yes";
+    assert.equal(parseHandoffStatus(body), null);
   });
 });
 

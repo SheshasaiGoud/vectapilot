@@ -96,8 +96,9 @@ export type Notice =
       urgent: boolean;
       /** The row exists (S8). */
       queued: boolean;
-      /** Queued, not urgent, the row is known not to be urgent, and no turn hand-off on this
-       * session carried guidance (Z4 (b)): a follow-up may show. */
+      /** The server's `follow_up` (D11, from the row as stored), not urgent, every turn's
+       * outcome seen, and no turn hand-off on this session carried guidance (Z4 (b)): a
+       * follow-up may show. */
       followUpAllowed: boolean;
       guidance: string[];
     }

@@ -13,10 +13,11 @@
  *   guidance is "Safety information"; anywhere else it is conditional, "If this is an
  *   emergency:", so a network blip never reads as an instruction to call emergency services.
  *   When the configuration cannot be read, its guidance alone is still shown.
- * - **Follow-up texts** (S8, D11): `handoff_follow_up` only when queued, not urgent, the row is
- *   known not to be urgent and no turn hand-off on the session carried guidance (Z4 (b): the
- *   controller's `followUpAllowed`); `urgent_follow_up` only when queued and urgent; otherwise
- *   nothing.
+ * - **Follow-up texts** (S8, D11): `handoff_follow_up` only when the server's `follow_up` is
+ *   true and nothing this view knows tightens it (not urgent, every turn's outcome seen, no turn
+ *   hand-off on the session carried guidance, Z4 (b): the controller's `followUpAllowed`);
+ *   `urgent_follow_up` only when queued and urgent (a queued row with `follow_up` false is
+ *   urgent or `safety` as stored); otherwise nothing.
  *   The contact fallback in every state that is not a success, an urgent hand-off included
  *   (S8 as decided; zara's review: D11 forbids a reply prompt or an ETA, and the contact list is
  *   neither).

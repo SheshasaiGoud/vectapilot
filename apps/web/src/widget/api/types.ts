@@ -6,12 +6,15 @@
  * - PR 1, merged: `widget/models.py` (`WidgetConfigResponse`, `SessionCreated`), the typed error
  *   body `{detail, error}` (`kb/errors.py`) and the 429 body (`guards/limits.py`,
  *   `limited_response`).
- * - PR 2, not merged (`m8/widget-api`, read 2026-11-24): `MessageResponse` (`{turn: AgentResponse,
- *   handoff: HandoffQueued | null}`; `AgentResponse` is `agent/responses.py`, unchanged),
- *   `HandoffQueued` and `HandoffStateResponse` (`widget/models.py`). Widget confirm (PR 2b, not
- *   built yet) answers as the harness route's confirm (`actions/router.py`; `actions/types.py`'s
- *   `ConfirmResponse`). Fields marked [proposal] are asked of PR 2 and optional here: without
- *   them the widget takes the safer path.
+ * - PR 2, merged (#89): `MessageResponse` (`{turn: AgentResponse, handoff: HandoffQueued | null}`;
+ *   `AgentResponse` is `agent/responses.py`, unchanged), `HandoffQueued` and
+ *   `HandoffStateResponse` (`widget/models.py`, both with D11's `follow_up`, decided by the server
+ *   from the row as stored: zara's PR 2 review). Widget confirm (`widget/confirm.py`) answers as
+ *   the harness route's confirm (`actions/router.py`; `actions/types.py`'s `ConfirmResponse`),
+ *   plus `widget_not_found` (404) and `session_store_unavailable` (503). Fields marked
+ *   [proposal] are not in PR 2's models and optional here: without them the widget takes the
+ *   safer path. The pytest guard `apps/api/tests/widget/test_web_fixtures.py` validates every
+ *   fixture against these models in the `api` job.
  *
  * Every string in these bodies is untrusted text: rendered as React text, never as HTML (S9).
  */
@@ -123,10 +126,14 @@ export type Turn = ReplyTurn | ConfirmationTurn | HandoffTurn | AnswerTurn | Unk
 
 /**
  * PR 2's `HandoffQueued`: whether the session's open hand-off row exists (S8, S17). `id` is set
- * exactly when `queued`. The row's priority is not sent: it is the highest of every hand-off on
- * the session (S17), so the widget knows it only when it has seen every one of them.
+ * exactly when `queued`. The row holds the highest priority of every hand-off on the session
+ * (S17); its priority is not sent, but the server's `follow_up` says whether that row, as
+ * stored, may invite "a person will reply" (D11: queued, neither urgent nor `safety`). Only
+ * ever true when queued; a missing field counts as false (zara's PR 2 review).
  */
-export type HandoffRef = { id: string; queued: true } | { id: null; queued: false };
+export type HandoffRef =
+  | { id: string; queued: true; follow_up: boolean }
+  | { id: null; queued: false; follow_up: false };
 
 /** 200 of `POST /v1/widget/messages` (PR 2). */
 export interface MessageBody {
@@ -141,6 +148,9 @@ export interface HandoffStatusBody {
   /** The one staff reply, shown as text (S9). */
   reply: string | null;
   replied_at: string | null;
+  /** D11 from the row as it is now: false once it was raised to urgent or `safety`, and then the
+   * widget stops polling and shows no reply (C28 (a)). A missing field counts as false. */
+  follow_up: boolean;
 }
 
 /** 200 or 409 of widget confirm: `actions/types.py`'s `ConfirmResponse`. */

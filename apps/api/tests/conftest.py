@@ -95,6 +95,11 @@ TEST_SETTINGS_FIELDS: Final[dict[str, Any]] = {
     "cors_dev_origins": (),
     "widget_turn_bound_seconds": 60.0,
     "widget_confirm_timeout_seconds": 15.0,
+    # M8 PR 2. Far above test volume, as the limits above; `test_session_settings.py` pins the
+    # defaults.
+    "handoff_store_timeout_seconds": 2.0,
+    "handoff_poll_limit_session_per_minute": 100_000,
+    "handoff_poll_limit_business_per_minute": 100_000,
 }
 """Every Settings field, explicitly (a test checks none is missing): none comes from the shell."""
 

@@ -242,7 +242,6 @@ describe("after an unknown outcome, never 'not done' (leo's review)", () => {
   for (const [label, first, second] of [
     ["outcome_unknown, then confirm_failed", fixture("confirm", "outcome-unknown"), fixture("confirm", "confirm-failed")],
     ["a network error, then limits_unavailable", "network", fixture("confirm", "limits-unavailable")],
-    ["outcome_unknown, then 404 widget_not_found", fixture("confirm", "outcome-unknown"), fixture("confirm", "widget-not-found")],
   ] as const) {
     test(`${label}: 'We could not check yet', the same token, a manual retry`, async () => {
       const h = await withCard(first, second, fixture("confirm", "executed"));
@@ -293,24 +292,62 @@ describe("after an unknown outcome, never 'not done' (leo's review)", () => {
   });
 });
 
-describe("404s: only action_not_found is 'expired' (leo's review, PR 2b)", () => {
-  test("404 widget_not_found first: not 'Expired', Try again offered, the same token later", async () => {
+/** A 404 other than `action_not_found` behaves as a 401 (zara's PR 2 review): the session ended
+ * for this page, the card claims nothing either way, the guidance shows (S16). */
+function assertAsUnauthorized(h: Harness): void {
+  assert.equal(h.state().cards[ACTION].status, "session_ended");
+  assert.equal(card(h).status?.text, SAFETY.cardSessionEnded);
+  assert.notEqual(card(h).status?.text, SAFETY.cardExpired);
+  assert.equal(card(h).confirm, null, "no Try again: the token went with the session");
+  const view = h.view();
+  assert.equal(view.notice?.kind, "session_expired");
+  assert.deepEqual(view.guidance?.lines.map((line) => line.text), GUIDANCE);
+  for (const line of CONTACT) assert.ok(shownTexts(view).includes(line), line);
+  assert.equal(h.state().hasSession, false);
+}
+
+describe("404s: only action_not_found is 'expired'; any other 404 is a 401 (zara's PR 2 review)", () => {
+  test("404 widget_not_found first: as a 401, never 'Expired' or 'Not done', no retry", async () => {
     const h = await withCard(fixture("confirm", "widget-not-found"), fixture("confirm", "executed"));
     await press(h);
-    assert.notEqual(card(h).status?.text, SAFETY.cardExpired);
-    assert.equal(card(h).status?.text, SAFETY.cardNotDone);
-    assert.deepEqual(card(h).confirm, { label: { text: "Try again", lang: "en" }, enabled: true });
+    assertAsUnauthorized(h);
+    assert.equal(card(h).extra, null, "no unknown outcome before it");
+    assert.ok(!shownTexts(h.view()).some((text) => NOTHING.test(text)));
     await h.timers.advance(60_000);
-    assert.equal(confirmCalls(h).length, 1, "no automatic retry: it ran nothing");
     await press(h);
-    assert.equal(card(h).status?.text, EXECUTED);
-    assertSameToken(h);
+    assert.equal(confirmCalls(h).length, 1, "no automatic or manual retry: the session ended");
   });
 
-  test("a 404 whose body it cannot read ran nothing either: not 'Expired'", async () => {
+  test("outcome_unknown, then 404 widget_not_found: as a 401, and it never claims nothing was done", async () => {
+    const h = await withCard(fixture("confirm", "outcome-unknown"), fixture("confirm", "widget-not-found"));
+    await press(h);
+    await h.timers.advance(CONFIRM_AUTO_RETRY_MS);
+    assert.equal(confirmCalls(h).length, 2);
+    assertAsUnauthorized(h);
+    assert.equal(card(h).extra?.text, SAFETY.cardUnknownHelp);
+    assertNeverNothing(h);
+    await h.timers.advance(10 * 60_000);
+    assert.equal(confirmCalls(h).length, 2, "no further retry");
+  });
+
+  test("a 404 whose body it cannot read: as a 401, not 'Expired'", async () => {
     const h = await withCard({ status: 404, model: "none", body: null, text: "Not Found" });
     await press(h);
-    assert.equal(card(h).status?.text, SAFETY.cardNotDone);
+    assertAsUnauthorized(h);
+  });
+
+  test("after 404 widget_not_found the next send starts a new session", async () => {
+    const api = new FakeApi()
+      .on(ROUTE.session, fixture("sessions", "created"), fixture("sessions", "created"))
+      .on(ROUTE.message, fixture("messages", "confirmation-book"), fixture("messages", "reply"))
+      .on(CONFIRM, fixture("confirm", "widget-not-found"));
+    const h = await openWidget({ api });
+    await h.say("Book me in on Tuesday");
+    await press(h);
+    assertAsUnauthorized(h);
+    await h.say("Hello again");
+    const sessions = h.api.calls.filter((call) => `${call.method} ${call.path}` === ROUTE.session);
+    assert.equal(sessions.length, 2);
   });
 
   test("503 session_store_unavailable spends the one automatic retry ('We are checking': conservative)", async () => {
@@ -435,7 +472,6 @@ describe("S16: a confirm that is not definite shows the guidance and the contact
     ["503 outcome_unknown", fixture("confirm", "outcome-unknown")],
     ["503 confirm_failed", fixture("confirm", "confirm-failed")],
     ["503 limits_unavailable", fixture("confirm", "limits-unavailable")],
-    ["404 widget_not_found", fixture("confirm", "widget-not-found")],
     ["429", fixture("confirm", "rate-limited")],
   ] as const) {
     test(`${label}: the guidance first, the contact`, async () => {

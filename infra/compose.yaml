@@ -41,6 +41,10 @@ x-api-environment: &api-environment
   # below. The API validates the whole folder at startup: strict origins, each UI language one its
   # corpus manifest supports, and an enabled health business needs its guard guidance (S8).
   VECTAPILOT_WIDGET_CONFIG_DIR: /app/data/widget
+  # M8 PR 2 (S5, D2 (a), D12 (b)): the API's own origin as the browser names it. Session creation
+  # and every non-GET staff route compare the request's Origin with it (without it they answer
+  # 403). http is accepted for localhost and 127.0.0.1 outside production only.
+  VECTAPILOT_PUBLIC_ORIGIN: http://localhost:8000
 
 services:
   postgres:

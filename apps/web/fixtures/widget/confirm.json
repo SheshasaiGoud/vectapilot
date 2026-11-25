@@ -1,8 +1,8 @@
 {
   "synthetic": true,
-  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (pending PR 2's merge) validates every case.",
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (apps/api/tests/widget/test_web_fixtures.py) validates every case.",
   "route": "POST /v1/widget/actions/{id}/confirm",
-  "api": "PR 2b (widget/confirm.py in PR 2's working tree, read 2026-11-24): bodies as /v1/agent/actions/{id}/confirm (vectapilot_api.actions.types.ConfirmResponse) plus widget_not_found (404) and session_store_unavailable (503)",
+  "api": "PR 2 (merged, #89): vectapilot_api.widget.confirm, bodies as /v1/agent/actions/{id}/confirm (vectapilot_api.actions.types.ConfirmResponse) plus widget_not_found (404, as a 401 in the widget: zara's PR 2 review) and session_store_unavailable (503)",
   "cases": {
     "executed": {
       "status": 200,

@@ -12,18 +12,19 @@
  *   the next send says "your last message may still be processed". The one automatic retry is a
  *   *confirm* retry with the same token after an unknown outcome (leo's table), never a message.
  * - **Guidance first in every state that is not a success** (S16): the view reads `notice`.
- * - **Honest hand-offs** (S8, D11): a follow-up text only when the row was stored, the hand-off is
- *   not urgent and the row is known not to be urgent. The API does not send the row's priority
- *   (PR 2's `HandoffQueued` is `{id, queued}`); the row holds the highest priority of every
- *   hand-off on the session (S17), so it is known only when this view created the session and has
- *   seen every turn's outcome since. A message whose outcome is unknown (timeout, network error,
- *   a 5xx, a turn it cannot read) may have raised it, so from then on no follow-up and no polling
- *   on that session. "Talk to a person" answered while a message was in flight shows no follow-up
- *   either: that message may still raise the row (zara's review). An urgent hand-off drops the
- *   open cards, stops polling and pins its guidance; a card offered after it arrives dropped
- *   (L5 decided (a)). A turn hand-off that carries guidance was not cleared by a safety step
- *   (Z4 (b), decided 2026-11-24, shesha): no follow-up and no polling on that session from then
- *   on, until a new session; the guidance and the contact fallback show instead.
+ * - **Honest hand-offs** (S8, D11): the server decides D11 once, from the session's open row as
+ *   stored (PR 2's `follow_up`, zara's PR 2 review): a follow-up text only when that is true,
+ *   and only when this view also knows nothing that tightens it. It must be stored and not urgent,
+ *   this view created the session and has seen every turn's outcome since (a message whose
+ *   outcome is unknown, a timeout, a network error, a 5xx or a turn it cannot read, may still
+ *   raise the row: from then on no follow-up and no polling on that session), no message was in
+ *   flight around a "Talk to a person" (zara's review), and no turn hand-off on the session
+ *   carried guidance (Z4 (b), decided 2026-11-24, shesha: not cleared by a safety step, until a
+ *   new session). A queued row with `follow_up` false (or missing) is urgent or `safety` as
+ *   stored, so the widget treats it as an urgent hand-off [proposal]: D11 (b)'s
+ *   `urgent_follow_up`, never the generic text. An urgent hand-off drops the open cards, stops
+ *   polling and pins its guidance; a card offered after it arrives dropped (L5 decided (a)).
+ *   Polling runs only while the status read's `follow_up` is true.
  * - **Confirm** (leo's table, `confirm.ts`): one request at a time; "End chat" waits while a
  *   confirm may be running, and a confirm cut off by a 401 counts as an unknown outcome.
  */
@@ -493,7 +494,11 @@ export class WidgetController {
       this.#patch({ notice: { kind, during: "handoff" } });
       return;
     }
-    if (result.status === 401) {
+    // A 404 is a 401 (decided 2026-11-25, shesha), the rule confirm and the status read follow:
+    // `widget_not_found` (the widget was disabled) and any other 404, a body it cannot read
+    // included, end the session. Nothing was queued: guidance and contact, never a follow-up,
+    // and the next send opens a new session.
+    if (result.status === 401 || result.status === 404) {
       this.#sessionExpired();
       return;
     }
@@ -522,17 +527,26 @@ export class WidgetController {
   ): void {
     const state = this.#state;
     const guidance = turnGuidance.length > 0 ? turnGuidance : (state.config?.guidance ?? []);
-    // `urgentSeen`: an urgent hand-off earlier on this session; the row's priority only rises.
-    const urgent = priority === "urgent" || reason === "safety" || state.urgentSeen;
     const queued = ref?.queued === true;
+    // D11 decided by the server (zara's PR 2 review): a queued row whose `follow_up` is false is
+    // urgent or `safety` as stored (S17: maybe an earlier hand-off this view did not see).
+    const rowUrgent = queued && ref?.follow_up !== true;
+    // `urgentSeen`: an urgent hand-off earlier on this session; the row's priority only rises.
+    const urgent = priority === "urgent" || reason === "safety" || state.urgentSeen || rowUrgent;
     // Z4 (b): the turn's own guidance, never the cached copy (a button hand-off carries none).
     // An earlier row's polling stops, and a staff reply already in flight is dropped (C28 (a)).
     if (turnGuidance.length > 0) {
       this.#notCleared = true;
       this.#stopPolling(true);
     }
+    // The server's `follow_up` first; this view's own knowledge can only tighten it.
     const followUpAllowed =
-      queued && !urgent && !this.#notCleared && this.#seenEveryHandoff && settled;
+      queued &&
+      ref?.follow_up === true &&
+      !urgent &&
+      !this.#notCleared &&
+      this.#seenEveryHandoff &&
+      settled;
     if (urgent) this.#enterUrgent(guidance);
     this.#patch({
       notice: { kind: "handoff", origin, reason, urgent, queued, followUpAllowed, guidance },
@@ -597,12 +611,38 @@ export class WidgetController {
       return;
     }
     if (result.status === 404) {
+      // No reply can reach this view any more (S8, D11; zara's PR 4 review): `handoff_not_found`
+      // (the row expired) withdraws the follow-up; any other 404 (`widget_not_found`: the widget
+      // was disabled, or a body it cannot read) also ends the session, as confirm does.
       this.#stopPolling(true);
+      this.#withdrawFollowUp();
+      if (parseError(result.body).error !== "handoff_not_found") this.#sessionExpired();
       return;
     }
     if (result.status !== 200) return; // 429, 5xx: try again at the next tick
     const status = parseHandoffStatus(result.body);
-    if (status === null || status.id !== handoffId) return;
+    if (status === null) {
+      // A 200 it cannot read is not the server's `true` (zara's PR 4 review): the follow-up
+      // shows only on a readable `follow_up: true`, so polling stops and the follow-up goes.
+      this.#stopPolling(true);
+      this.#withdrawFollowUp();
+      return;
+    }
+    if (status.id !== handoffId) return;
+    if (!status.follow_up) {
+      // D11 from the row as it is now: raised to urgent or `safety` since (from another tab or
+      // by staff). The same rule as the message and the press (zara's PR 4 review): polling
+      // stops, open cards are dropped (L5 (a)), the guidance is pinned under the urgent heading
+      // and the follow-up becomes `urgent_follow_up` (D11 (b)). A reply that came with it stays
+      // in the dashboard (C28 (a)).
+      this.#enterUrgent(this.#state.config?.guidance ?? []);
+      this.#update((state) =>
+        state.notice?.kind === "handoff"
+          ? { ...state, notice: { ...state.notice, urgent: true, followUpAllowed: false } }
+          : state,
+      );
+      return;
+    }
     if (status.reply !== null) {
       this.#append({ id: this.#id(), kind: "staff_reply", text: status.reply });
       this.#stopPolling(true);
@@ -612,12 +652,16 @@ export class WidgetController {
       // Resolved without a reply: no reply is coming, so the follow-up gives way to the contact
       // fallback (S8).
       this.#stopPolling(true);
-      this.#update((state) =>
-        state.notice?.kind === "handoff"
-          ? { ...state, notice: { ...state.notice, followUpAllowed: false } }
-          : state,
-      );
+      this.#withdrawFollowUp();
     }
+  }
+
+  #withdrawFollowUp(): void {
+    this.#update((state) =>
+      state.notice?.kind === "handoff"
+        ? { ...state, notice: { ...state.notice, followUpAllowed: false } }
+        : state,
+    );
   }
 
   // ── Confirmation cards ──────────────────────────────────────────────────────────────────────

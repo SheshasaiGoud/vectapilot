@@ -124,6 +124,6 @@ port. Any other request fails the test, so a run costs $0 and nothing leaves the
 framed in `demo/host.html`, the one-line embed. The origin exists only inside that browser, so
 `frame-ancestors` lets it in without changing any configuration. By default it runs on fixtures
 (closed, $0; every message gets today's real-stack answer, an urgent hand-off). With `--stack`
-it passes the widget's requests to the local stack (`make up`, once PR 2 serves `ui_dir`).
+it passes the widget's requests to the local stack (`make up`; PR 2 serves `ui_dir`).
 `--check` loads it headless and exits.
 

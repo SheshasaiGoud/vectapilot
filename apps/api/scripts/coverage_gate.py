@@ -1,5 +1,6 @@
-"""Coverage gate for the LLM gateway (ADR 0006) and the guards (M7 PR 1, ADR 0018). Run it after
-the tests ran under coverage:
+"""Coverage gate for the LLM gateway (ADR 0006), the guards (M7 PR 1, ADR 0018) and the session and
+staff-access core (`auth/`, M8 PR 1's decision, ADR 0019). Run it after the tests ran under
+coverage:
 
     uv run coverage run -m pytest            # 1. run the tests, recording coverage in `.coverage`
     uv run python scripts/coverage_gate.py   # 2. this script: check each package's numbers
@@ -60,8 +61,10 @@ class Target(NamedTuple):
 TARGETS: Final = (
     Target("gateway", "*/vectapilot_api/gateway/*", PACKAGE_ROOT / "gateway"),
     Target("guards", "*/vectapilot_api/guards/*", PACKAGE_ROOT / "guards"),
+    Target("auth", "*/vectapilot_api/auth/*", PACKAGE_ROOT / "auth"),
 )
-"""The gateway (ADR 0006) and the guards (M7 PR 1), each at `MIN_PERCENT`."""
+"""The gateway (ADR 0006), the guards (M7 PR 1) and sessions and staff access (M8 PR 1's
+`auth/`, decided 2026-11-24, added in PR 2), each at `MIN_PERCENT`."""
 INCLUDE: Final = TARGETS[0].include
 GATEWAY_DIR: Final = TARGETS[0].folder
 # coverage.py's two built-in exclusion comments, joined (coverage/config.py: the first entries of

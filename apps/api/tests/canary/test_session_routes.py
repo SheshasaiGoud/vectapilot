@@ -71,8 +71,10 @@ UNAUTHORIZED_BODY: Final = {"detail": UNAUTHORIZED, "error": "unauthorized"}
 WAIT_S: Final = 0.3
 """How long both racing logins are given to block on the held row lock (a floor, not a
 measurement: a slower database only makes the wait longer, never the outcome different)."""
-LOOKUP_TIMEOUT_S: Final = 5.0
-"""Above `WAIT_S` plus the work, so the held lock never turns a racing login into S14's 503."""
+LOOKUP_TIMEOUT_S: Final = 2.5
+"""Above `WAIT_S` plus the work, so the held lock never turns a racing login into S14's 503; with
+the hand-off store's default 2 s, below the widget's 5 s client margin (M8 PR 2's timing rule,
+`config.HANDOFF_TIMING_RULE`)."""
 TABLES: Final = ("sessions", "staff_login_links", "staff_users")
 
 

@@ -561,14 +561,88 @@ describe("S8, D11: honest hand-offs", () => {
     });
   }
 
-  test("a poll answered 404 stops polling", async () => {
+  // zara's PR 4 review: a 404 at the status read means no reply can reach this view any more.
+  test("a poll answered 404 handoff_not_found: polling stops, the follow-up goes, the guidance shows", async () => {
     const api = withSession()
       .on(ROUTE.message, fixture("messages", "handoff-normal-queued"))
       .always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "not-found"));
     const h = await openWidget({ api, config: fixture("config", "sunrise-clinic-follow-ups") });
     await h.say("I want to talk to someone");
-    await h.timers.advance(30_000);
+    assert.deepEqual(h.view().notice?.followUp, { text: HANDOFF_FOLLOW_UP, lang: "en" });
+    await h.timers.advance(60_000);
     assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 1);
+    assert.equal(h.state().polling, null);
+    assertNoPersonWillReply(h);
+    assertGuidanceFirst(h);
+    assertContact(h);
+    assert.equal(h.state().hasSession, true, "the row expired, not the session");
+  });
+
+  for (const [label, reply] of [
+    ["widget_not_found", fixture("handoff-status", "widget-not-found")],
+    ["with a body it cannot read", { status: 404, model: "none", body: null, text: "Not Found" }],
+  ] as const) {
+    test(`a poll answered 404 ${label}: the session has ended, no follow-up, no polling, the guidance shows`, async () => {
+      const api = withSession()
+        .on(ROUTE.message, fixture("messages", "handoff-normal-queued"))
+        .always(ROUTE.status(HANDOFF_ID), reply);
+      const h = await openWidget({ api, config: fixture("config", "sunrise-clinic-follow-ups") });
+      await h.say("I want to talk to someone");
+      await h.timers.advance(60_000);
+      assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 1);
+      assert.equal(h.state().polling, null);
+      assertNoPersonWillReply(h);
+      assert.equal(h.view().notice?.kind, "session_expired");
+      assertGuidanceFirst(h);
+      assert.equal(h.state().hasSession, false, "as confirm: this 404 means the session ended");
+    });
+  }
+
+  // A 404 on the press is a 401 (decided 2026-11-25, shesha), as confirm and the status read.
+  for (const [label, reply] of [
+    ["widget_not_found", fixture("handoffs", "widget-not-found")],
+    ["with the router's own body", { status: 404, model: "none", body: { detail: "Not Found" } }],
+    ["with a body it cannot read", { status: 404, model: "none", body: null, text: "Not Found" }],
+  ] as const) {
+    test(`'Talk to a person' answered 404 ${label}: as a 401, guidance and contact, no follow-up, a new session next`, async () => {
+      const api = withSession(withSession())
+        .on(ROUTE.handoff, reply, fixture("handoffs", "created"))
+        .on(ROUTE.message, fixture("messages", "reply"))
+        .always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "open"));
+      const h = await openWidget({ api, config: fixture("config", "sunrise-clinic-follow-ups") });
+      await h.widget.talkToPerson();
+      assert.equal(h.view().notice?.kind, "session_expired");
+      assertGuidanceFirst(h);
+      assertHeading(h, false);
+      assertContact(h);
+      assertNoPersonWillReply(h);
+      assert.ok(!shownTexts(h.view()).includes(URGENT_FOLLOW_UP), "no follow-up of either kind");
+      assert.equal(h.state().hasSession, false, "the session ended for this page");
+      assert.deepEqual(h.storage.keys(), [], "the token is forgotten");
+      assert.equal(h.view().talkToPerson.enabled, true);
+      await h.timers.advance(60_000);
+      assert.equal(h.api.calls.filter((call) => call.path.startsWith("/v1/widget/handoffs/")).length, 0);
+      await h.say("Hello again");
+      assert.equal(h.api.count(ROUTE.session), 2, "the next send opens a new session");
+      assert.equal(h.api.count(ROUTE.message), 1);
+      // The 404 was not an urgent hand-off: the new session's normal row still invites a reply.
+      await h.widget.talkToPerson();
+      assertHeading(h, false);
+      assert.deepEqual(h.view().notice?.followUp, { text: HANDOFF_FOLLOW_UP, lang: "en" });
+      await h.timers.advance(5_000);
+      assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 1, "polling on the new session");
+    });
+  }
+
+  test("'Talk to a person' answered 404 with a card open: the card ends with the session, never 'dropped'", async () => {
+    const api = withSession().on(ROUTE.message, fixture("messages", "confirmation-book"))
+      .on(ROUTE.handoff, fixture("handoffs", "widget-not-found"));
+    const h = await openWidget({ api });
+    await h.say("Book me in");
+    await h.widget.talkToPerson();
+    assert.equal(h.state().cards[ACTION].status, "session_ended", "as a 401, not an urgent hand-off");
+    await h.widget.confirm(ACTION);
+    assert.equal(h.api.calls.filter((call) => call.path.includes("/actions/")).length, 0, "its token went with the session");
   });
 
   test("not_covered_language: the guidance and the reason, in the UI's language", async () => {
@@ -614,18 +688,23 @@ describe("S8, D11: honest hand-offs", () => {
     assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 1);
   });
 
-  test("'Talk to a person' after an urgent turn: S17 returns that urgent row; D11's text", async () => {
-    const api = withSession()
-      .on(ROUTE.message, fixture("messages", "handoff-urgent-guard-error"))
-      .on(ROUTE.handoff, fixture("handoffs", "created"));
-    const h = await openWidget({ api, config: fixture("config", "sunrise-clinic-follow-ups") });
-    await h.say("Hello");
-    await h.widget.talkToPerson();
-    assertNoPersonWillReply(h);
-    assert.deepEqual(h.view().notice?.followUp, { text: URGENT_FOLLOW_UP, lang: "en" });
-    await h.timers.advance(60_000);
-    assert.equal(h.api.calls.filter((call) => call.path.startsWith("/v1/widget/handoffs/")).length, 0, "no polling");
-  });
+  for (const [label, press] of [
+    ["follow_up false, as PR 2 sends it", "created-urgent-row"],
+    ["even a follow_up true (the view's own knowledge only tightens)", "created"],
+  ] as const) {
+    test(`'Talk to a person' after an urgent turn (${label}): S17's urgent row; D11's text`, async () => {
+      const api = withSession()
+        .on(ROUTE.message, fixture("messages", "handoff-urgent-guard-error"))
+        .on(ROUTE.handoff, fixture("handoffs", press));
+      const h = await openWidget({ api, config: fixture("config", "sunrise-clinic-follow-ups") });
+      await h.say("Hello");
+      await h.widget.talkToPerson();
+      assertNoPersonWillReply(h);
+      assert.deepEqual(h.view().notice?.followUp, { text: URGENT_FOLLOW_UP, lang: "en" });
+      await h.timers.advance(60_000);
+      assert.equal(h.api.calls.filter((call) => call.path.startsWith("/v1/widget/handoffs/")).length, 0, "no polling");
+    });
+  }
 
   for (const [label, reply] of [
     ["not stored (id null)", fixture("handoffs", "not-stored")],
@@ -1491,4 +1570,217 @@ describe("S9: an answer needs outcome answered, text and sources (mutation revie
       assertContact(h);
     });
   }
+});
+
+describe("D11 decided by the server: PR 2's follow_up (zara's PR 2 review)", () => {
+  const FOLLOW_UP_CONFIG = () => fixture("config", "sunrise-clinic-follow-ups");
+
+  function polls(h: Harness): number {
+    return h.api.calls.filter((call) => call.path.startsWith("/v1/widget/handoffs/")).length;
+  }
+
+  function withoutFollowUp(file: "messages" | "handoffs", name: string) {
+    const reply = fixture(file, name);
+    const body = reply.body as { follow_up?: boolean; handoff?: { follow_up?: boolean } };
+    if (file === "messages") delete body.handoff?.follow_up;
+    else delete body.follow_up;
+    return reply;
+  }
+
+  test("a normal turn whose session row is urgent (follow_up false): no generic follow-up, D11's text, no polling", async () => {
+    const api = withSession()
+      .on(ROUTE.message, fixture("messages", "handoff-normal-queued-urgent-row"))
+      .always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "open"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.say("I want to talk to someone");
+    assertNoPersonWillReply(h);
+    assert.deepEqual(h.view().notice?.followUp, { text: URGENT_FOLLOW_UP, lang: "en" });
+    assertHeading(h, true);
+    assertContact(h);
+    await h.timers.advance(60_000);
+    assert.equal(polls(h), 0, "no polling");
+  });
+
+  test("an open card is dropped when the server says the row is urgent (L5 (a))", async () => {
+    const api = withSession()
+      .on(ROUTE.message, fixture("messages", "confirmation-book"), fixture("messages", "handoff-normal-queued-urgent-row"));
+    const h = await openWidget({ api });
+    await h.say("Book me in");
+    await h.say("I want to talk to someone");
+    assert.equal(h.state().cards[ACTION].status, "dropped");
+    await h.widget.confirm(ACTION);
+    assert.equal(h.api.calls.filter((call) => call.path.includes("/actions/")).length, 0);
+  });
+
+  test("follow_up false means an urgent row only when queued: not stored keeps the conditional heading and the card", async () => {
+    const api = withSession()
+      .on(ROUTE.message, fixture("messages", "confirmation-book"), fixture("messages", "handoff-normal-not-queued"))
+      .on(ROUTE.handoff, fixture("handoffs", "not-stored"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.say("Book me in");
+    await h.say("I want to talk to someone");
+    assertHeading(h, false);
+    assert.equal(h.state().urgentSeen, false);
+    assert.equal(h.state().cards[ACTION].status, "ready", "not dropped: nothing says the row is urgent");
+    await h.widget.talkToPerson();
+    assertHeading(h, false);
+    assert.equal(h.view().notice?.followUp, null);
+    assert.equal(h.state().cards[ACTION].status, "ready");
+  });
+
+  test("'Talk to a person' first, the row urgent (follow_up false): D11's text, no polling", async () => {
+    const api = withSession()
+      .on(ROUTE.handoff, fixture("handoffs", "created-urgent-row"))
+      .always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "open"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.widget.talkToPerson();
+    assertGuidanceFirst(h);
+    assertNoPersonWillReply(h);
+    assert.deepEqual(h.view().notice?.followUp, { text: URGENT_FOLLOW_UP, lang: "en" });
+    await h.timers.advance(60_000);
+    assert.equal(polls(h), 0, "no polling");
+  });
+
+  for (const [label, route, reply, say] of [
+    ["a message whose hand-off has no follow_up", ROUTE.message, () => withoutFollowUp("messages", "handoff-normal-queued"), true],
+    ["a press whose answer has no follow_up", ROUTE.handoff, () => withoutFollowUp("handoffs", "created"), false],
+  ] as const) {
+    test(`${label}: counts as false, so no generic follow-up and no polling`, async () => {
+      const api = withSession().on(route, reply()).always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "open"));
+      const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+      if (say) await h.say("I want to talk to someone");
+      else await h.widget.talkToPerson();
+      assertNoPersonWillReply(h);
+      assert.notDeepEqual(h.view().notice?.followUp, { text: HANDOFF_FOLLOW_UP, lang: "en" });
+      assertContact(h);
+      await h.timers.advance(60_000);
+      assert.equal(polls(h), 0, "no polling");
+    });
+  }
+
+  test("a follow_up it cannot read: 'not stored', no follow-up of either kind, no polling", async () => {
+    const reply = fixture("handoffs", "created");
+    (reply.body as { follow_up: unknown }).follow_up = "yes";
+    const api = withSession().on(ROUTE.handoff, reply).always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "open"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.widget.talkToPerson();
+    assert.equal(h.view().notice?.followUp, null);
+    assertContact(h);
+    await h.timers.advance(60_000);
+    assert.equal(polls(h), 0);
+  });
+
+  test("Z4 (b) holds over the server's follow_up true: guidance on a turn, then a press, no follow-up", async () => {
+    const floor = fixture("messages", "handoff-safety-floor-off");
+    assert.equal((floor.body as { handoff: { follow_up: boolean } }).handoff.follow_up, true, "the server says true");
+    const api = withSession()
+      .on(ROUTE.message, floor)
+      .on(ROUTE.handoff, fixture("handoffs", "created"))
+      .always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "open"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.say("I have a question");
+    assertNoPersonWillReply(h);
+    assert.equal(h.view().notice?.followUp, null, "not urgent: no urgent_follow_up either");
+    await h.widget.talkToPerson();
+    assertNoPersonWillReply(h);
+    assert.equal(h.view().notice?.followUp, null);
+    await h.timers.advance(60_000);
+    assert.equal(polls(h), 0, "no polling");
+  });
+
+  test("the status read's follow_up false stops polling and withdraws the follow-up", async () => {
+    const api = withSession()
+      .on(ROUTE.message, fixture("messages", "handoff-normal-queued"))
+      .on(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "open"), fixture("handoff-status", "raised"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.say("I want to talk to someone");
+    assert.deepEqual(h.view().notice?.followUp, { text: HANDOFF_FOLLOW_UP, lang: "en" });
+    await h.timers.advance(10_000);
+    assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 2);
+    assertNoPersonWillReply(h);
+    assert.equal(h.state().polling, null);
+    assertContact(h);
+    await h.timers.advance(60_000);
+    assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 2, "polling stopped");
+  });
+
+  test("a reply that comes with follow_up false is not shown (C28 (a): it stays in the dashboard)", async () => {
+    const api = withSession()
+      .on(ROUTE.message, fixture("messages", "handoff-normal-queued"))
+      .always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "raised-replied"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.say("I want to talk to someone");
+    await h.timers.advance(5_000);
+    assert.ok(h.view().transcript.every((entry) => entry.kind !== "staff_reply"));
+    assertNoPersonWillReply(h);
+    await h.timers.advance(60_000);
+    assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 1);
+  });
+
+  test("a status read without follow_up counts as false: polling stops", async () => {
+    const open = fixture("handoff-status", "open");
+    delete (open.body as { follow_up?: boolean }).follow_up;
+    const api = withSession()
+      .on(ROUTE.message, fixture("messages", "handoff-normal-queued"))
+      .always(ROUTE.status(HANDOFF_ID), open);
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.say("I want to talk to someone");
+    await h.timers.advance(60_000);
+    assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 1);
+    assertNoPersonWillReply(h);
+  });
+
+  // zara's PR 4 review: only a readable `true` keeps the follow-up up.
+  for (const value of [null, "false", 0, "true"] as const) {
+    test(`a status read with follow_up ${JSON.stringify(value)} cannot be read: polling stops, the follow-up goes`, async () => {
+      const open = fixture("handoff-status", "open");
+      (open.body as { follow_up: unknown }).follow_up = value;
+      const api = withSession()
+        .on(ROUTE.message, fixture("messages", "handoff-normal-queued"))
+        .always(ROUTE.status(HANDOFF_ID), open);
+      const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+      await h.say("I want to talk to someone");
+      assert.deepEqual(h.view().notice?.followUp, { text: HANDOFF_FOLLOW_UP, lang: "en" });
+      await h.timers.advance(60_000);
+      assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 1);
+      assert.equal(h.state().polling, null);
+      assertNoPersonWillReply(h);
+      assertGuidanceFirst(h);
+    });
+  }
+
+  // zara's PR 4 review: the status read applies the message's and the press's whole rule. The
+  // row can be raised outside this view (a duplicated tab shares the token; staff).
+  test("a status read's follow_up false is urgent: the open card is dropped, the urgent heading, D11's text", async () => {
+    const api = withSession()
+      .on(ROUTE.message, fixture("messages", "confirmation-book"), fixture("messages", "handoff-normal-queued"))
+      .on(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "raised"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.say("Book me in");
+    await h.say("I want to talk to someone");
+    assert.equal(h.state().cards[ACTION].status, "ready");
+    assertHeading(h, false);
+    await h.timers.advance(5_000);
+    assert.equal(h.state().cards[ACTION].status, "dropped");
+    assert.equal(h.state().urgentSeen, true);
+    assertHeading(h, true);
+    assertGuidanceFirst(h);
+    assertNoPersonWillReply(h);
+    assert.deepEqual(h.view().notice?.followUp, { text: URGENT_FOLLOW_UP, lang: "en" });
+    await h.widget.confirm(ACTION);
+    assert.equal(h.api.calls.filter((call) => call.path.includes("/actions/")).length, 0, "L5 (a): no confirm");
+    await h.timers.advance(60_000);
+    assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 1, "polling stopped");
+  });
+
+  test("a status read 503 handoff_store_unavailable is tried again at the next tick", async () => {
+    const api = withSession()
+      .on(ROUTE.message, fixture("messages", "handoff-normal-queued"))
+      .always(ROUTE.status(HANDOFF_ID), fixture("handoff-status", "store-unavailable"));
+    const h = await openWidget({ api, config: FOLLOW_UP_CONFIG() });
+    await h.say("I want to talk to someone");
+    await h.timers.advance(15_000);
+    assert.equal(h.api.count(ROUTE.status(HANDOFF_ID)), 3);
+    assert.deepEqual(h.view().notice?.followUp, { text: HANDOFF_FOLLOW_UP, lang: "en" });
+  });
 });

@@ -29,6 +29,7 @@ from scripts.canary_gate import (
     suite_counts,
     summary,
 )
+from tests.auth.fakes import ScriptedResult
 from tests.canary.checks import (
     ForeignKey,
     KeyIndex,
@@ -49,6 +50,7 @@ from tests.canary.read_paths import (
     BAIT_SLOT_IDS,
     BAIT_WORD,
     GUARDED_LIMITS,
+    HANDOFF_PATHS,
     NEEDED_OUTSIDE_READ_PATHS,
     NEEDS_HAND_WRITE,
     OWNER_CONNECTION_PATHS,
@@ -60,6 +62,7 @@ from tests.canary.read_paths import (
     answer_through_the_guarded_api,
     answer_through_the_guarded_api_hybrid,
     bait_slots,
+    handoff_through_the_widget_route,
     hybrid_search_as_staff,
     pending_hand_write,
     pending_hand_writes,
@@ -69,13 +72,16 @@ from tests.canary.read_paths import (
     search_through_the_guarded_api,
     search_through_the_guarded_api_hybrid,
 )
+from tests.canary.sessions import BAIT_HANDOFF_ID, BAIT_WIDGET_SESSION_ID
 from tests.canary.write_paths import WRITE_NEEDS_HAND_WRITE, WRITE_PATHS
 from tests.conftest import make_settings
 from tests.retrieval.standins import FakeDatabase, StandInFuse, hit
+from vectapilot_api.auth.store import CUSTOMER_SESSION
 from vectapilot_api.config import Settings
 from vectapilot_api.db import Database
 from vectapilot_api.embeddings.fake import fake_vector
 from vectapilot_api.guards.fake_limiter import FakeLimiter
+from vectapilot_api.handoffs.store import HANDOFF_STATE
 from vectapilot_api.kb.service import KbService
 from vectapilot_api.kb.types import ReindexResult
 from vectapilot_api.main import create_app
@@ -385,6 +391,7 @@ def test_every_search_leg_also_runs_on_the_owners_connection() -> None:
     # M5 PR 2 added the tool paths: every tool statement's own business clause, the same way.
     # M7 PR 7 added the KB scan (`guards scan`): its statement's own business clause.
     # M8 PR 1 added the session lookups, the login-link use and the revocation (`auth.store`).
+    # M8 PR 2 added the hand-off status read (`handoffs.store`).
     legs = {name for name in READ_PATHS if name != "sql" and not API_ROUTE.match(name)}
     assert (
         legs
@@ -396,6 +403,7 @@ def test_every_search_leg_also_runs_on_the_owners_connection() -> None:
             *TOOL_PATHS,
             "guards scan",
             *AUTH_PATHS,
+            *HANDOFF_PATHS,
         }
     )
     assert set(TOOL_PATHS) == {
@@ -410,6 +418,7 @@ def test_every_search_leg_also_runs_on_the_owners_connection() -> None:
         "auth login link use",
         "auth revoke session",
     }
+    assert set(HANDOFF_PATHS) == {"handoff status"}
     # The very read path the app role runs, not a copy that could drift from it.
     assert all(OWNER_CONNECTION_PATHS[name] is READ_PATHS[name] for name in legs)
 
@@ -904,18 +913,113 @@ def test_the_bait_word_is_rare_and_part_of_the_bait() -> None:
 
 def test_every_api_read_path_has_the_leaking_search_red_proof() -> None:
     # M3 PR 4's hybrid routes are in API_READ_PATHS, so the red proof above runs on them, with
-    # each leg they run leaking in turn (LEAKS).
+    # each leg they run leaking in turn (LEAKS). M8 PR 2's widget route runs no search: its red
+    # proof is a leaking hand-off read (`test_red_proof_the_widget_route_shows_a_leaking_read`).
     routes = {READ_PATHS[name] for name in READ_PATHS if API_ROUTE.match(name)}
-    assert routes == set(API_READ_PATHS)
+    assert routes == set(API_READ_PATHS) | set(WIDGET_API_READ_PATHS)
+    assert not set(API_READ_PATHS) & set(WIDGET_API_READ_PATHS)
     legs = {"vector_search": "vector", "text_search": "text"}
     expected = {
         (READ_PATHS[name], legs[stub])
         for name in READ_PATHS
         if API_ROUTE.match(name)
-        for stub in NEEDS_HAND_WRITE[name]
+        for stub in NEEDS_HAND_WRITE.get(name, frozenset())
         if stub in legs
     }
     assert {(param.values[0], param.values[1]) for param in LEAKS} == expected
+
+
+WIDGET_API_READ_PATHS: Final[list[ApiReadPath]] = [handoff_through_the_widget_route]
+"""M8 PR 2: `GET /v1/widget/handoffs/{id}` through the real app with the business's own widget
+session (`read_paths.handoff_through_the_widget_route`). It runs no search, so its red proof is a
+leaking hand-off read, not a leaking leg."""
+
+
+class WidgetReads:
+    """The session lookup and the hand-off status read without Postgres: a business's own bait
+    session (`BAIT_WIDGET_SESSION_ID`) for any token it is asked about, and its bait hand-off
+    (`BAIT_HANDOFF_ID`) whose reply is `replies[business]`'s canary. A correct store reads the
+    asking business's; a leaking one is told to answer with the other business's."""
+
+    def __init__(self, replies: Mapping[str, Planted]) -> None:
+        self.replies = replies
+        self.read: list[tuple[str, Mapping[str, Any]]] = []
+
+    @asynccontextmanager
+    async def business_transaction(self, business_id: str) -> AsyncIterator[AsyncConnection]:
+        reads = self
+
+        class Connection:
+            async def execute(self, statement: Any, params: Mapping[str, Any]) -> ScriptedResult:
+                reads.read.append((statement.text, dict(params)))
+                if statement.text == CUSTOMER_SESSION.text:
+                    session = SimpleNamespace(
+                        business_id=business_id,
+                        id=BAIT_WIDGET_SESSION_ID,
+                        ui_language="en",
+                        token_sha256=params["token_sha256"],
+                    )
+                    return ScriptedResult([session])
+                assert statement.text == HANDOFF_STATE.text, statement.text
+                planted = reads.replies[business_id]
+                state = SimpleNamespace(  # as the planted bait (`sessions.py`): urgent `safety`
+                    id=BAIT_HANDOFF_ID,
+                    status="open",
+                    reply=planted.canary,
+                    replied_at=None,
+                    priority="urgent",
+                    reason="safety",
+                )
+                return ScriptedResult([state])
+
+        yield cast(AsyncConnection, Connection())
+
+
+@pytest.fixture
+def widget_without_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The widget route's read path (`tests/canary/widget.py`) with no Postgres and no Redis:
+    hermetic settings, the in-memory limiter; each test installs its `WidgetReads`."""
+    monkeypatch.setattr("tests.canary.widget.Settings", make_settings)  # hermetic: no .env
+    without_redis = functools.partial(create_app, limiter=FakeLimiter())
+    monkeypatch.setattr("tests.canary.widget.create_app", without_redis)
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("widget_without_postgres")
+async def test_the_widget_route_over_a_correct_read_passes_the_leak_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reads = WidgetReads({A.business_id: A, B.business_id: B})
+    monkeypatch.setattr(Database, "business_transaction", reads.business_transaction)
+
+    outputs = await handoff_through_the_widget_route(cast(AsyncEngine, None), A)
+
+    assert canary_leaks(outputs, A, B) == []
+    [shown] = outputs.values()
+    assert shown.startswith("200 ") and A.canary in shown  # the positive control
+    # The token's business and the session's own ids, nothing from the request beyond them.
+    assert [params.get("business_id") for _, params in reads.read] == [A.business_id] * 2
+    assert reads.read[1][1] == {
+        "business_id": A.business_id,
+        "session_id": BAIT_WIDGET_SESSION_ID,
+        "handoff_id": BAIT_HANDOFF_ID,
+    }
+
+
+@pytest.mark.anyio
+@pytest.mark.usefixtures("widget_without_postgres")
+async def test_red_proof_the_widget_route_shows_a_leaking_read(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A read that lost its business clause where RLS cannot help would answer with the other
+    # business's bait (one hand-off id, one session id in both): the check sees it in the route's
+    # output.
+    reads = WidgetReads({A.business_id: B, B.business_id: A})
+    monkeypatch.setattr(Database, "business_transaction", reads.business_transaction)
+
+    outputs = await handoff_through_the_widget_route(cast(AsyncEngine, None), A)
+
+    assert canary_leaks(outputs, A, B) != []
 
 
 def test_a_written_stub_has_no_marks_and_a_pending_one_exactly_one() -> None:

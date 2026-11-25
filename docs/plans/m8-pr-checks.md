@@ -64,13 +64,21 @@ today no business route can be served in production (`business.py:24,38`).
   while H1 is a stub) and with the registered seams. Reported as "k of K identical, j excluded
   (ids and reasons)", with the outcome distribution (how many are not `guard_error`) and the
   suite's fingerprint. `scripts/parity_gate.py` reads pytest's JUnit report and fails on a
-  missing, doubled or skipped id. That is how §6's 100 % safety-escalation recall gate reaches
-  the widget.
+  missing, doubled or skipped id. The stand-in run must also reach each case's frozen `expect`
+  through `/v1/agent`, except a closed, reviewed list (`j-007`, `j-008`: a 422 before any guard;
+  `l-012`, `l-014`: soft over-escalations), reported as "reached the frozen expectation k of K;
+  missed: ids (reason)", and it allows no xfail at all (noah's and zara's PR 2 review: identical
+  on both routes is no proof when neither route fires). That is how §6's 100 %
+  safety-escalation recall gate reaches the widget.
 - **PII at rest:** M7's 18 category E cases and F's echoed-PII case, replayed through the widget
-  route, leave no `redteam.pii.leak_forms` value in `handoffs.message_masked` or in the export:
-  reported as "18 of 18" inside the parity gate (S11).
+  route, leave no `redteam.pii.leak_forms` value in the rows the route hands to the store (in
+  memory: $0 stand-in counts; the store's SQL is checked by the integration tests) or in the
+  export: reported as "18 of 18" inside the parity gate (S11). F's log cases `f-001` and `f-005`
+  are replayed by id through the message and the confirm route's log path.
 - **Honest hand-offs:** "a person will reply" appears only when the hand-off row exists and the
-  hand-off is not urgent (tested both ways, D11); guidance is first and verbatim, and also shown
+  hand-off is not urgent and not `safety` (tested both ways, D11). The server decides it once, as
+  `follow_up` on the message, press and status responses, from the row as stored (zara's PR 2
+  review), so a press or a reload after an emergency never invites waiting; guidance is first and verbatim, and also shown
   in every non-success state of the widget (S16); a failed store is never a 5xx and never drops
   the guidance; with Redis down, an emergency on an existing session still gets an urgent
   hand-off; a flood on one session gives one queue row (S17).
@@ -95,18 +103,22 @@ today no business route can be served in production (`business.py:24,38`).
   |---|---|---|---|---|
   | Cross-business leaks (gate) | yes, canary suite ($0) | none new | — | M2, extended |
   | Safety-escalation recall (gate) | on the frozen suite through parity, not on traffic | none new | real traffic | M7 suite; M11 traffic |
-  | Escalation precision | no | `handoffs.staff_label`, `origin`, `reason` | synthetic labels measure nothing (D10) | M11 |
-  | Escalation recall in production | no | none: labels on hand-offs show only false positives; a missed escalation inside an answered turn is never stored | answered turns reviewed | M11 |
+  | Escalation precision | no | `handoffs.staff_label`, `origin`, `reason` (the row's final reason after S17's raise); hand-off turns by reason in `widget_turns` | synthetic labels measure nothing (D10) | M11 |
+  | Escalation recall in production | no | `handoffs.pressed_at` (the customer asked for a person, kept through a raise); otherwise none: labels on hand-offs show only false positives, and a missed escalation inside an answered turn is never stored | answered turns reviewed | M11 |
   | Wrong-answer rate | no | none (D14 (a)) | no answered turn on the real stack (router off, H1s) | M11 (D14) |
-  | Auto-resolution | no | hand-offs, 👎, `widget_turns` (D6) | "repeat within 24 h" with anonymous sessions (D13) | M11 |
-  | Thumbs-up rate | no | `turn_feedback` bound to `widget_turns` (D6) | the real stack shows only hand-offs, so no rating control appears | M11 |
-  | Web-chat latency p95 < 6 s | no | `widget_turns.route_latency_ms` (D6) | no real answers; per-conversation traces | M9 |
+  | Auto-resolution | no | hand-offs, 👎, `widget_turns` (D6) with `answer_outcome` (answered, `dont_know`, `handoff`) | "repeat within 24 h" with anonymous sessions (D13) | M11 |
+  | Thumbs-up rate | no | `turn_feedback` bound to `widget_turns` (D6): one rating per turn, any kind; the conversation-level rating §6 names is undefined (Deviations; open question 9 decided (c): M11 decides) | the real stack shows only hand-offs, so no rating control appears | M11 |
+  | Web-chat latency p95 < 6 s | no | `widget_turns.server_latency_ms` (D6): route start, before the session lookup, to the response built; not the store write (≤ `handoff_store_timeout_seconds`), not serialization, no row for a turn whose store failed; not §6's "message received → reply sent" | no real answers; per-conversation traces | M9 |
   | Cost per conversation | no | `trace_id` per turn and session (D6) | tracing | M9 |
   | Correctness, faithfulness, hit@5 | no | none | shesha's live runs | M2–M3 |
 
   Every session, hand-off and turn row carries `business_id`, `channel` and `ui_language` (the
   UI language at session start, never the detected message language), so §6's breakdown by
-  business type, language and channel can be done later; it cannot be backfilled.
+  business type, language and channel can be done later; it cannot be backfilled. Turn rows are
+  a lower bound of the turns served (noah's PR 2 review): a failed or timed-out store writes no
+  row (`widget_store_failed` warnings are counted beside them), a 429 writes none, and a manual
+  retry after a client timeout (D15) is a new turn with no link to the first; M9's traces can
+  reconcile rows with turns served by trace id.
 - shesha's explain-backs (S3, S5, S14, S16, S17, D2's same-origin argument and D12) and the M8
   study PDF.
 
@@ -256,12 +268,16 @@ today no business route can be served in production (`business.py:24,38`).
 - **S17 · One open hand-off per session.** A red-flag hit skips the limiter (M7 G1) and
   `POST /v1/widget/handoffs` has none, so a partial unique index on `(business_id, session_id)
   WHERE status <> 'resolved'` bounds the queue by sessions, and sessions by the creation window.
-  A later hand-off on that session increments `count`; when its priority is higher, it replaces
-  the row's reason, origin, `trace_id`, message and guidance (priority only ever rises; a
-  claimed row stays claimed and shows the raise). The customer's response, guidance included, is
-  unchanged. "Talk to a person" returns the open row's `{id, queued: true}` (idempotent per
-  session). Polling and feedback get per-session Redis windows that fail closed (neither is the
-  emergency path).
+  A later hand-off on that session increments `count`; when it ranks higher, it replaces the
+  row's priority, reason, origin, intent, `trace_id`, message and guidance and sets `raised_at`
+  (a claimed row stays claimed and shows the raise). The rank is the priority, then the reason's
+  class: `safety` > a decision (`customer_asked`, `other`, `routed`) > a system reason
+  (`INFRASTRUCTURE_HANDOFF_REASONS`), so at equal priority a more serious class raises the row,
+  and the rank only ever rises: a lower priority never raises it, and a lower class never lowers
+  it (amended 2026-11-25, shesha, Z3 (a); was "when its priority is higher"). The customer's
+  response, guidance included, is unchanged. "Talk to a person" returns the open row's
+  `{id, queued: true}` (idempotent per session). Polling and feedback get per-session Redis
+  windows that fail closed (neither is the emergency path).
 - **S18 · What the browser keeps.** `sessionStorage` holds the session token and nothing else.
   The transcript lives in component memory only; a reload starts a fresh view. A confirm token
   lives only in memory, bound to its `action_id`: never in Web Storage, IndexedDB, the URL, the
@@ -308,6 +324,20 @@ today no business route can be served in production (`business.py:24,38`).
     decided by shesha 2026-11-24, it moves to M11: a recorded deviation from a signed-off row.
   - The real stack shows only hand-offs in M8 (Facts, "Fail closed today"). Every other widget
     state is proven on fixtures, and the note says so.
+  - §6's thumbs-up rate is "👍/👎 after a conversation"; D6 (a) stores one rating per turn, of
+    any kind, so the conversation-level rating is undefined in M8 (noah's PR 2 review). Deferred
+    to M11 with this deviation recorded (open question 9, decided (c), shesha, 2026-11-25): M11
+    decides the unit (a §6 change per rated answer turn, or a rating per session) before its
+    baseline. The feedback route is **not** limited to rated kinds in M8: PR 4 names none (its
+    plan: "Feedback controls are not in PR 4's state list and are not built"), so there is no
+    one-line limit to apply. The PR that builds the rating control names the kinds it shows it
+    on and limits the route to them (any other kind the one 404) in the same PR, so the stored
+    ratings are the metric's population; until then a stored rating may name any kind of the
+    session's own turns.
+  - [proposal, noah's PR 2 review, option (b); reversible] A weak-evidence answer labelled
+    `handoff` (`rag_weak_evidence_outcome = handoff`) stores no hand-off, so no person would see
+    it: `create_app` refuses that setting while any widget is enabled. It stays a label, counted
+    through `widget_turns.answer_outcome`, until the router is on or M11 decides.
 
 ## Facts this plan relies on (checked 2026-11-24 on `m8/plan` at bbdf5c6)
 - **Business identity.** `business.py:24` (`HEADER_ENVIRONMENTS = {local, test, ci}`), `:32`
@@ -616,7 +646,8 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
     ui_language, guidance_shown (the lines sent, not re-read later), message_masked (≤ 2,000
     characters, NULL when masking failed or over the cap), status ∈ {open, claimed, resolved},
     claimed_by/at, resolved_by/at, staff_label ∈ {needed, not_needed, unsure}, reply/replied_at
-    (D7 (a)), retention_days 1–90, created_at, expires_at generated as in 0007)`. CHECKs:
+    (D7 (a)), raised_at, pressed_at (the session's first press while the row is open, kept
+    through a raise), retention_days 1–90, created_at, expires_at generated as in 0007)`. CHECKs:
     `origin = 'button'` implies `reason = 'customer_asked'`; `staff_label` is NULL when the reason
     is a system reason (`INFRASTRUCTURE_HANDOFF_REASONS`) or `origin = 'button'`. Partial unique
     index `(business_id, session_id) WHERE status <> 'resolved'` (S17). Index `(business_id,
@@ -624,12 +655,14 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
     on the status, label, reply, raise (S17) columns, and the purge's text columns for the owner.
     Tests pin the reason CHECK equal to `HandoffReason` and the system set equal to tooleval's.
   - Under D6 (a): `widget_turns(business_id, id, session_id, trace_id, kind, reason, priority,
-    channel, ui_language, route_latency_ms, created_at)`, `UNIQUE (business_id, trace_id)`, no
+    intent, answer_outcome ∈ {answered, dont_know, handoff} (exactly on an `answer` turn),
+    channel, ui_language, server_latency_ms, created_at)`, `UNIQUE (business_id, trace_id)`, no
     text, written at the route outside the measured service; a failed write is never a 5xx.
     `turn_feedback(business_id, id, session_id, trace_id, rating ∈ {up, down})` with an FK to the
     turn (paired with the business) and `UNIQUE (business_id, trace_id)` (unless cut 4).
 - **Routes** (session required, S1; bodies `extra="forbid"`; `Cache-Control: no-store`):
-  - `POST /v1/widget/messages {message}` → `{turn: AgentResponse, handoff: {id, queued} | null}`
+  - `POST /v1/widget/messages {message}` → `{turn: AgentResponse, handoff: {id, queued,
+    follow_up} | null}` (`follow_up`: D11 from the row as stored, zara's PR 2 review)
     through the same guard and dependency functions (S6) and the same 429 mapping, with no
     unguarded branch. Under D15 (a), one outer bound at the route; past it, a `turn_timeout`
     hand-off (urgent with guidance for a health business). On a hand-off the route stores or
@@ -637,9 +670,9 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
     service, masking through S11's helper and with S14's store timeout. A failed store gives
     `queued: false`, never a 5xx. The turn row is written the same way.
   - `POST /v1/widget/handoffs`: "talk to a person", `customer_asked`, `origin = button`, normal,
-    no model call; idempotent per session (S17).
-  - `GET /v1/widget/handoffs/{id}`: status (and the reply under D7 (a)), this session's only; a
-    per-session Redis window (fails closed).
+    no model call; idempotent per session (S17); `{id, queued, follow_up}` from the open row.
+  - `GET /v1/widget/handoffs/{id}`: status (and the reply under D7 (a)) and `follow_up` from the
+    row as it is now, this session's only; a per-session Redis window (fails closed).
   - `POST /v1/widget/actions/{id}/confirm {confirm_token}`: `ConfirmRequest` built server-side
     with the session's `customer_ref`; the same `get_confirm_limits`; outcomes and errors as the
     confirm route; no `limits is None` branch (S6).
@@ -674,6 +707,11 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
     off → no service call.
   - S17: a flood of red-flag messages on one session → 1 row with the right `count`; normal then
     urgent → one urgent row; two concurrent "talk to a person" posts → one row, the same id.
+    The rank (Z3 (a), 2026-11-25): every (priority, class) pair against every other, unit
+    (`rises`, every reason of each class; the in-memory store) and against Postgres (the store's
+    statement in savepoints; `reason_class_sql` for every reason); Z3's two sequences (high
+    `not_covered_language` then high `safety`; urgent `turn_timeout` then urgent `safety`) raise
+    every raised column, and a lower class at equal priority never lowers the row.
   - Canary, under `tests/canary/`: each new route in `READ_PATHS`/`WRITE_PATHS`, with a red
     proof; session X cannot read, poll, rate or confirm session Y's hand-offs, turns and actions
     (extends `test_tool_customers.py`); framing headers per business.
@@ -686,6 +724,183 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
     refused.
 - **Acceptance also shows:** the S13 diff-stat; `make check`; `make mcp-check`; `make
   test-integration`, then 0005.
+- **Step 2a (built 2026-11-24, diego; the named split point): messages, hand-off store, parity
+  and PII.** Migration 0009 `handoffs_and_turns`; `handoffs/` (`at_rest`: S11's helper,
+  `mask_pii(prepare(raw).clean, locales())`, None on any failure, over `MAX_QUESTION_CHARS` before
+  or after masking; `store`: S17's one statement, the press, the turn row, the status read);
+  `widget/messages.py` (`POST /v1/widget/messages`, `POST /v1/widget/handoffs`, `GET
+  /v1/widget/handoffs/{handoff_id}`); `scripts/parity_gate.py` with its tests and a step in the
+  `api` job after the red-team gate; `tests/parity/` (both runs, the exclusion list, PII at rest);
+  `tests/canary/test_widget_routes.py` and the canary entries; `VECTAPILOT_PUBLIC_ORIGIN:
+  http://localhost:8000` in compose; `auth/` in the coverage gate. Confirm, feedback and UI serving
+  are step 2b. The integration tests (0009's migration tests, `tests/canary/test_widget_routes.py`,
+  the canary bait and read paths in `test_leakage.py`) are collected, not yet run.
+  - **Grants and policies of 0009:** `SELECT` on all three tables; `handoffs` `INSERT` on the
+    columns a new hand-off names (never `id`, `created_at`, `expires_at`, `status`, `count` or a
+    staff column), `UPDATE` on S17's raise columns (`count`, `priority`, `reason`, `origin`,
+    `intent`, `trace_id`, `guidance_shown`, `message_masked`, `raised_at`) and PR 3's staff
+    columns (`status`, claim, resolve, `staff_label`, `reply`, `replied_at`), never
+    `business_id`, `session_id`, `channel`, `ui_language` or `retention_days`; `widget_turns` and
+    `turn_feedback` `INSERT` on named columns only; no `DELETE` or `TRUNCATE` anywhere. ENABLE and
+    FORCE RLS with the one `business_isolation` policy on each; a restrictive `SELECT` policy
+    `hidden_at_expiry` on `handoffs` (as 0007; `expires_at` generated from `retention_days`, in
+    UTC). Partial unique index `(business_id, session_id) WHERE status <> 'resolved'` (S17); index
+    `(business_id, status, priority, created_at)` for PR 3's queue.
+  - [proposal] `resolved_is_final`: a restrictive `UPDATE` policy (`USING (status <>
+    'resolved') WITH CHECK (true)`), so no statement of the app role can rewrite a resolved row's
+    label or reply (which outlive retention) or reopen it; the resolve itself passes.
+  - [proposal] A rating's foreign key pairs the session too, `(business_id, session_id,
+    trace_id)` into `widget_turns`: a session can rate only its own turn by the database's rule.
+  - [proposal] A label only at resolve (`status = 'resolved'`), on a `turn` hand-off with a
+    decision reason; `raised_at` records S17's raise; one staff reply ≤ 2,000 characters;
+    `server_latency_ms` ≤ 600,000 (a bug bound, not a slow turn); an index `(business_id,
+    expires_at)` for the purge; turns and ratings hold no text and do not expire in M8.
+  - [proposal] Settings: `handoff_store_timeout_seconds` 2 s (P7), one bound for the turn's
+    transaction (its turn row and hand-off commit together, so `queued` is true only after the
+    commit), the press and the status read; `handoff_poll_limit_session_per_minute` 20 and
+    `..._business_per_minute` 1,200 (placeholders), a new `RouteSlug.HANDOFF_STATUS` with its own
+    per-business and per-session windows (`LimitPolicy.customers`; keys and the script
+    unchanged). Startup refuses `session_lookup_timeout_seconds + handoff_store_timeout_seconds`
+    at or above the widget's 5 s client margin, so, while Postgres answers, a slow lookup and a
+    slow store never push a response past the client's timeout (PR 1's integration test's lookup
+    timeout moved from 5 s to 2.5 s for it). An unresponsive server is not bounded: it holds the
+    request until the connection fails (`db.py`'s known limit), and there the widget's client
+    timeout and S16's cached guidance are the customer's control; the unit "hung" tests use a
+    cancellable fake (zara's PR 2 review; a statement or socket timeout is M9/M10's).
+  - [proposal] A session whose business's widget was disabled gets the config route's one 404
+    (`widget_not_found`) on every PR 2 route. A guard 429 writes no turn row. A `turn_timeout`
+    hand-off is urgent with guidance for a health business and normal for any other;
+    `guards_not_configured` is urgent or high, guidance as `AgentGuard` shows it. The turn row
+    carries the trace id of the body's turn (the one a rating names).
+  - [proposal] "Talk to a person" does not count as another hand-off (`count` unchanged on an open
+    row, whatever made it) and returns that row's id; a failed or hung press is `{id: null,
+    queued: false}` with a 200, never a 5xx. The status read: a full window 429 (guidance for a
+    health business), Redis down 503 `limits_unavailable`, another session's, an unknown or an
+    expired hand-off one 404 `handoff_not_found`, a read that cannot run 503
+    `handoff_store_unavailable`.
+  - [proposal, for zara's and noah's review] Parity's closed exclusion list: `f-001` and `f-005`
+    (`log_vehicle`: their widget path is S11's log test), `k-003` (`redis_vehicle`), `c-007` and
+    `c-008` (`ticket_text`: the control is confirm's 404, so they join with widget confirm in step
+    2b). `c-008` and `f-005` are the two confirm-route cases. Compared per case: the status, the
+    turn's kind, reason, priority, intent, guidance, reply text and answer outcome, a 429's body,
+    and the `guard` record's `decided_by`, action, priority, guidance, error type and findings; a
+    422 by status only (the session route's closed body differs by design, S1).
+  - [proposal] The session routes' writes are checked in `tests/canary/test_widget_routes.py`,
+    not `WRITE_PATHS` (a write path sends `X-Business-Id`, which a session route refuses with a
+    400); the status read joins `READ_PATHS` and `OWNER_CONNECTION_PATHS`, and the route itself
+    `READ_PATHS`, its red proof a leaking hand-off read (`tests/test_canary_checks.py`).
+- **Step 2b (built 2026-11-24, diego): confirm, feedback, turns, UI serving.**
+  `widget/confirm.py` (`POST /v1/widget/actions/{action_id}/confirm`), `widget/feedback.py`
+  (`POST /v1/widget/feedback`), the rating statements in `handoffs/store.py`, `ui/pages.py` (the
+  product pages and assets from `ui_dir`), `RouteSlug.FEEDBACK`, the `ui_dir` startup rules; leo's
+  seven tests (`tests/widget/test_confirm.py`, `tests/canary/test_widget_confirm.py`, the route
+  inventory), the feedback and turn-row tests (`tests/widget/test_feedback.py`, the canary's),
+  the page tests (`tests/ui/`, `tests/canary/test_widget_pages.py`), both log canaries, and C's two
+  ticket-text cases brought into parity. No migration (0009 already holds `turn_feedback`). The
+  integration tests (`tests/canary/test_widget_confirm.py`, the new tests in
+  `tests/canary/test_widget_routes.py` and `tests/canary/test_tool_customers.py`) are collected,
+  not yet run.
+  - **Widget confirm** (S6, leo): the session's `customer_ref` builds `ConfirmRequest`; the body is
+    `{confirm_token}` (closed); the service and limits come from `get_confirm_service` and
+    `get_confirm_limits`; outcomes map through the confirm route's own `CONFIRM_ERRORS`. Order: the
+    session, the body, the session's widget (the one 404 while disabled, as step 2a's routes), the
+    limits, the service.
+  - [proposal] With the guards off, widget confirm answers the limiter's own typed 503
+    (`guards.routes.unavailable_response`, the body a Redis outage gives) and never calls the
+    service; no `guard` record is written (there is no guard).
+  - [proposal] leo's (4) compares status, body and every header but `X-Trace-Id`'s value and
+    `Cache-Control: no-store`: S9 puts `no-store` on every widget response and S13 keeps it off
+    the confirm route.
+  - [proposal] Feedback answers 201 with the body as sent (`{trace_id, rating}`); another
+    session's turn (same business or not) and a made-up trace id are one 404 `turn_not_found`; a
+    second rating is 409 `already_rated`, never an update; a store that cannot run is 503
+    `feedback_store_unavailable` (warning `widget_store_failed`, the class name only), bounded by
+    `handoff_store_timeout_seconds`. Two statements in one transaction: the session's own turn by
+    business, session and trace id, then `INSERT ... ON CONFLICT (business_id, trace_id) DO
+    NOTHING RETURNING id`.
+  - [proposal] Feedback's window is `RouteSlug.FEEDBACK` with M7's default per-business and
+    per-customer placeholders (no new setting): attempts are bounded as a session's turns are,
+    and the database allows one rating per turn. Fails closed: 429 with a health business's
+    guidance, 503 `limits_unavailable` with Redis down.
+  - [proposal] UI serving follows Next.js's static export names: `/widget/{business_id}` →
+    `widget.html` (enabled widgets only), `/staff/` → `staff.html`, `/staff/{page}` →
+    `staff/{page}.html` for a page name of lowercase letters, digits and single hyphens (the
+    login link's `/staff/login`; sofia names PR 5's pages so), `/_next/static/{path}` and
+    `/icon.svg`. Nothing else in `ui_dir` is served (no `.txt` payloads, no other top-level
+    file). The page routes are left out of the OpenAPI schema; the route inventory lists them.
+  - [proposal] Every miss is one 404 with the router's own body (`{"detail": "Not Found"}`):
+    `ui_dir` unset, an unknown business or a disabled widget, a page the build lacks, any path
+    that is not plainly a file under the resolved `ui_dir` (segments from a fixed pattern, never
+    starting with a dot, at most 8; the resolved file, links followed, must still be under
+    `ui_dir`).
+  - [proposal] Headers: the widget page's CSP is S9's with `frame-ancestors` its business's
+    `allowed_origins` and `connect-src <public_origin>/v1/widget/` (D12 (b)); the dashboard's has
+    `connect-src 'self'` and `frame-ancestors 'none'`, plus `X-Frame-Options: DENY` and
+    `Cross-Origin-Opener-Policy: same-origin` (its effect checked by hand, rule 7); every page and
+    asset gets `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. Pages send
+    `Cache-Control: no-cache`, so a framing origin a business removes is refused at the next load
+    (zara's PR 2 review); the hashed assets keep the default caching.
+  - [proposal] Startup: `ui_dir` needs `public_origin` (Settings, `UI_DIR_NEEDS_ORIGIN`), and a
+    `ui_dir` that is not a folder stops the app (`UiDirError`); a missing page is a 404 at request
+    time, so the API starts before PR 4 is built. The page handlers are synchronous (FastAPI's
+    thread pool), so a slow disk never blocks the event loop.
+  - [proposal, for zara's and noah's review] Parity's exclusion list shrinks to `f-001`, `f-005`
+    (`log_vehicle`) and `k-003` (`redis_vehicle`): `c-007` and `c-008` now run. The stand-in run's
+    lookup also hits the ticket's scripted summary as an injection (as M7's own served c-008 test
+    does), so the ticket is withheld; its real token is confirmed through each route's confirm
+    route, answered by the real `ConfirmService` over a scripted row of that withheld action,
+    expired (G7). Both routes: `injection:ticket_text`, a hand-off with no token, then the one 404.
+    The comparison adds whether the turn carried a token and the confirm's status and body.
+  - Canary: a red proof that the confirm's customer clause, not RLS, separates two sessions of one
+    business: without `LOCK_ACTION`'s customer clause, session Y's confirm with X's token reaches
+    X's action (a `rolled_back` audit row and a server error instead of the one 404);
+    `MARK_CONFIRMED`'s clause and execute's customer check still stop the write (leo's PR 2
+    review); the rating's composite key refuses another session's turn as the app role (23503);
+    framing per business under `tests/canary/` (unit).
+- **Step 2c (2026-11-25, diego): leo's, zara's and noah's review findings and the mutation
+  probes.** Applied as found (each tightens a proposal or fixes a test; none changes a decided
+  item, D1–D15, P1–P7 or S1–S19's decided wording); the three that would are open questions 7–9.
+  0009 is not merged, so it is edited in place.
+  - **D11 decided by the server** [zara]: `follow_up` on the message's and the press's
+    `{id, queued, follow_up}` and on the status read, true only for a queued row that is neither
+    urgent nor `safety` as stored (`handoffs.store.invites_follow_up`); the store's statements
+    return the row's priority and reason. A raise to urgent or `safety` stops the polling. PR 4
+    shows the generic follow-up and polls only when it is true.
+  - **Turn rows** [noah]: `widget_turns.answer_outcome` (answered, `dont_know`, `handoff`,
+    exactly on an `answer` turn; pinned to `answer.types.AnswerOutcome`), the hand-off's intent,
+    and `server_latency_ms`, timed from a dependency resolved before the session lookup to the
+    response built (a unit test with a slow lookup, turn and store bounds it both ways).
+  - **The press is recorded** [noah]: `handoffs.pressed_at`, set by a button row and by the first
+    press on an open row (`coalesce`), kept through a raise; UPDATE granted, outside S17's raise
+    columns; a button row has it (CHECK).
+  - **Confirm timing** [leo, zara; proposal]: startup requires `widget_confirm_timeout_seconds >
+    session_lookup_timeout_seconds + guard_redis_timeout_seconds +` the write backstop (5 s) `+`
+    the audit bound (2 s) (`CONFIRM_TIMING_RULE`; both constants compared with the tool code by a
+    test): defaults 2 + 0.25 + 5 + 2 = 9.25 s < 15 s (arithmetic, not a measurement).
+  - **Parity gate** [zara, noah]: no xfail in the stand-in run; in the seams run only with
+    `/v1/agent`'s own xfail and reason; every stand-in test records `expected` (`met` or `missed`
+    against the frozen `expect`), recomputed by the gate, with a closed miss list
+    (`STANDIN_MISSES`, `MISS_REASONS`: j-007 and j-008 `rejected_before_guard`, l-012 and l-014
+    `soft_over_escalation`) that must shrink when a case starts to reach its expectation; category
+    I's scripted replies map to their output finding's term category, so H3's phrase step fires on
+    both routes. The report prints the dataset version and `GITHUB_SHA`. `f-005` is replayed by id
+    through widget confirm's log path; the PII line says "in the rows the route hands to the
+    store (in memory)".
+  - **Pages** [zara]: `Cache-Control: no-cache` on the widget and staff pages.
+  - **Wording** [zara, leo]: the store timeout is bounded while Postgres answers (above); the
+    confirm route's OpenAPI text says which 404 and 503 carry `X-Trace-Id`.
+  - **Tests** [leo]: the LOCK_ACTION red proof runs through the shared client and expects
+    `MARK_CONFIRMED`'s own `RuntimeError` (a second, un-entered `TestClient` runs on a new event
+    loop and would fail in the session lookup instead); the parallel confirms and the concurrent
+    presses wait for two lock waiters (`until_waiting`), never a sleep, and the confirms assert the
+    audit's `executed` and `replayed`; the token test drives the turn through `POST
+    /v1/widget/messages` with a stand-in guard that stores the proposal with the real store, and
+    presses "talk to a person", so 0009's tables hold rows before the token is searched for.
+  - **For PR 3 and PR 4** (their sections): the label's population and a resolve rule [noah]; the
+    card's 404 rule and the follow-up rule [zara].
+  - **Mutation probes**: 22 surviving non-equivalent mutants (of 110; 1 more equivalent), each
+    killed by a probe test (19 tests), plus one mutant each for this step's latency and
+    weak-evidence tests: all 24 applied alone, killed, restored byte-identical.
 
 ## PR 3 — `m8/staff-api` (diego; ananya reviews extraction review, noah the labels and export, leo the actions view, zara the queue filters) · M · after PR 2, D14
 - **Migration M8-c `extraction_reviews`:** `(business_id, id, extraction_id, field, decision ∈
@@ -718,7 +933,14 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
   metric, written now and computed in M11 (D10): "x needed of n labelled decision hand-offs with
   `origin = turn` (Wilson, `evalrun.intervals.wilson_interval`); unsure, unlabelled and
   expired-unresolved reported as counts beside it." With S17, n counts sessions' hand-offs, not
-  messages, and the note says so.
+  messages, and the note says so. [proposal, noah's PR 2 review, option (b)] The label applies to
+  the row's final reason after S17's raise (a raise can turn a decision row into a system row, or
+  the reverse), so the metric names that population, and the hand-off turns by reason from
+  `widget_turns` are reported beside it; `customer_asked` through a turn (a typed "I want a
+  person") is reported apart from the other decision reasons. PR 3's migration may add `CHECK
+  (status <> 'resolved' OR origin <> 'turn' OR reason IN (<system reasons>) OR staff_label IS NOT
+  NULL)`, so unlabelled resolved decision rows are provably 0; the resolve then checks the rule
+  against the row in the same `UPDATE`, because a claimed row can still be raised.
 - **The actions view** [leo]: per pending action, only `tool`, a derived state (`pending`,
   `expired`, `executed` or `failed`; expired is `expires_at <= now()` by the database clock, in
   the query), `created_at`, `expires_at`, `confirmed_at`, `finished_at`, `failure_reason`, the
@@ -759,9 +981,12 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
   during IME composition; one honest "working" status, no invented stage labels; `answer` with
   citation chips only under S9; `reply` with a provenance label; confirmation card (below);
   `handoff` (guidance first as `role="alert"` with `lang="en"`, then the follow-up text only when
-  `queued`, not urgent and no turn hand-off on the session carried guidance (S8 as amended,
-  Z4 (b)); for urgent, D11's text or nothing, no polling, open cards dropped,
-  S8); 429 with a `Retry-After` countdown; network error; client timeout; session expired; 422
+  the response's `follow_up` is true (PR 2's server rule, D11: queued and neither urgent nor
+  `safety` as stored; a missing field counts as false; zara's PR 2 review) and no turn hand-off on
+  the session carried guidance (S8 as amended, Z4 (b)); otherwise D11 (b)'s `urgent_follow_up`
+  when queued, or nothing; polling only while the status read's `follow_up` is true and the
+  session is cleared (Z4 (b)); open cards dropped for urgent and `safety`, S8); 429 with a
+  `Retry-After` countdown; network error; client timeout; session expired; 422
   over length; "End chat" (revokes, clears, S18). Every non-success state shows the guidance
   first and keeps the typed message (S16). The widget never re-sends a message by itself; a
   manual retry after a timeout says "your last message may still be processed" (D15). Client
@@ -775,7 +1000,8 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
   | 200 | the fixed executed message | done |
   | 409 | the fixed failure sentence | done |
   | 404 `action_not_found` (this session, this token) | "Expired, nothing was done" (provable: an executed action returns its stored result whatever its expiry, `actions/confirm.py:15-17`) | done |
-  | 503 `confirm_failed` or `limits_unavailable`, or another 404 (`widget_not_found`, PR 2b) | "Not done yet"; after an unknown outcome "We could not check yet" (step 4c) | retry with the same token |
+  | any other 404 (`widget_not_found`: the widget was disabled) | as 401: it does not claim nothing was done (zara's PR 2 review) | guidance (S16) |
+  | 503 `confirm_failed` or `limits_unavailable` | "Not done yet"; after an unknown outcome "We could not check yet" (step 4c) | retry with the same token |
   | 503 `outcome_unknown`, client timeout, network error | "We are checking"; never "nothing happened" | one automatic retry with the same token, then a manual retry with the same token until expiry, plus "Talk to a person" |
   | 429 | a countdown | the same token |
   | 401 | session expired; after an unknown outcome, it does not claim nothing was done | guidance (S16) |
@@ -786,7 +1012,9 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
   completeness check (every key, same placeholders) run in the web job.
 - **Tests:** `node --test` (Node 24's type stripping; verify on build day) for the state logic
   (one test per non-success state showing the guidance; one per confirm-card row; urgent
-  hand-offs never render `handoff_follow_up`; Redis down at the first message shows guidance and
+  hand-offs never render `handoff_follow_up`; a `follow_up: false` press after an emergency, and
+  a response without `follow_up`, render no generic follow-up and do not poll (PR 2's fixtures
+  carry the field); Redis down at the first message shows guidance and
   contact fallback and no "a person will reply"), S9's invariant and its XSS fixtures, unknown
   kinds, the retry rule, a Telugu string near the 2,000-code-point bound, a storage spy (only the
   session-token key is ever written), and the i18n check, as a new step in `web (lint, build)`
@@ -1133,6 +1361,105 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
     card 102; embed 12; motion 4; harness 12; XSS 2. The 12 new rows passed 36 of 36 in three
     repeats. `npm run lint`, `npx tsc --noEmit`, `test:unit` (232 of 232), `check:i18n`, `npm run
     build`, `npm run build:ui` and `check:out` pass.
+- **Step 4e (2026-11-25, sofia): integrated with PR 2 as merged (#89).** `origin/main` merged
+  into `m8/widget-ui` (this plan's two conflicts resolved to the server's D11 and Z4 (b) together,
+  and to zara's `widget_not_found` row). No package; under `apps/api` one new test file only.
+  - **D11 from the server** (`api/types.ts`, `api/parse.ts`, `core/controller.ts`): the
+    message's and the press's `handoff.follow_up` and the status read's `follow_up` are read; a
+    missing field is false, any other non-boolean (or a `follow_up` without a stored row) makes
+    the body unreadable ("not stored"). The generic follow-up shows only when the server says
+    true and nothing the widget knows tightens it (urgent, an unknown outcome, a message in
+    flight around a press, Z4 (b)); polling starts only then and stops at a status read whose
+    `follow_up` is false, which also withdraws the follow-up and drops a reply that came with it
+    (C28 (a)).
+  - **Decided 2026-11-25 (shesha, "Accept"): a queued row with `follow_up` false is treated as
+    urgent**: by the server's rule it is urgent or `safety` as stored (S17: perhaps an earlier
+    hand-off the view did not see), so D11 (b)'s `urgent_follow_up`, the "Safety information"
+    heading, and open cards dropped (L5 (a)), from the message, the press and the status read
+    alike. Not stored is never treated as urgent (tested).
+  - **The confirm card** (`core/confirm.ts`): any 404 other than `action_not_found`
+    (`widget_not_found`, or a body it cannot read) is a 401: "session ended", no claim either
+    way, "We could not check whether this was done" after an unknown outcome, the session
+    forgotten, the guidance (S16); the next send starts a new session.
+  - **Fixtures:** `follow_up` on every `HandoffQueued` and `HandoffStateResponse` body (as the
+    server computes it); new cases `handoffs` `created-urgent-row`, `messages`
+    `handoff-normal-queued-urgent-row`, `handoff-status` `raised`, `raised-replied` and
+    `store-unavailable` (503 `handoff_store_unavailable`). 69 cases.
+  - **The fixture guard** (`apps/api/tests/widget/test_web_fixtures.py`, in the `api` job's
+    normal pytest run): every case validated strictly in JSON mode against the class it names
+    (`widget.models`, `ConfirmResponse`; `TypedError`, `RateLimited` and `ClosedValidation`
+    mirrored from their handlers, a typed error's code named in the API's source), at a status
+    its route declares, on a registered widget route; `none` bodies must not validate. Red proof:
+    run on HEAD's fixtures (before the update, 64 cases) it fails 17, all on the missing
+    `follow_up` (5 `handoff-status`, 2 `handoffs`, 10 `messages`; measured by zara, and again
+    with the final guard); 17 broken copies of real cases (a missing or textual `follow_up`, a
+    `follow_up` without a row, an extra field, an unknown code, a mismatched `Retry-After`, an
+    executed confirm at 409, a valid body labelled `none`, an undeclared status, an unknown
+    route) all fail.
+  - **zara's PR 4 review (applied, 2026-11-25):**
+    - **The status read** (`core/controller.ts` `#poll`): a 404 stops polling and withdraws the
+      follow-up (no reply can reach the view); any 404 other than `handoff_not_found`
+      (`widget_not_found`, or a body it cannot read) also ends the session, as confirm does. A
+      200 it cannot read (a `follow_up` that is not a boolean, among others) stops polling and
+      withdraws the follow-up. A readable `follow_up` false now applies the message's and the
+      press's whole rule: the row is urgent or `safety` (raised from a duplicated tab or by
+      staff), so open cards are dropped (L5 (a)), the guidance is pinned under the urgent
+      heading and the follow-up becomes `urgent_follow_up` (D11 (b)); a reply with it still
+      stays in the dashboard (C28 (a)). The card drop from a poll is part of the rule decided
+      above (2026-11-25, shesha).
+    - **Fixtures:** new `handoff-status` and `handoffs` `widget-not-found` (404). 71 cases.
+    - **The fixture guard:** the rules that link `turn` and `handoff` (a hand-off turn always
+      carries `HandoffQueued`, every other kind none; a queued row never invites a follow-up
+      the turn's priority and reason forbid, `invites_follow_up`), and typed-error codes per
+      route and status (`ROUTE_CODES`), each code tied to the module that raises it (imported
+      from `CONFIRM_ERRORS` and `DecidedBy`, or quoted in its module's source, tested). Seven
+      new red-proof rows (a code from another route, a word that is not a code, the three link
+      rules) fail; disabling either new check turns its rows red. 98 tests.
+    - **Mutation check** (the new `#poll` branches, restored after): 6 mutants, 6 killed.
+  - **Tests:** 249 unit tests (232 before). Browser: 4 new rows × 3 languages × 2 projects = 24
+    (a press whose row is urgent; a status read that turns `follow_up` false; confirm
+    `widget_not_found` first and after an unknown outcome).
+  - **Mutation check** (scratch copy, `node_modules` linked, nothing written to the repo): 20
+    mutants of the change, 18 killed by the unit suite. The first run left 3; one was a missing
+    test (a not-stored hand-off treated as urgent), added and killed. Two are equivalent:
+    dropping `ref.follow_up === true` from `followUpAllowed` (a queued row with `follow_up` false
+    is already urgent, and `followUpAllowed` needs `!urgent`; the term stays so a later change
+    to that rule cannot open the follow-up) and dropping `!urgent` from it (the view reads
+    `followUpAllowed` only when not urgent, and polling refuses after `urgentSeen`).
+  - **Run (local, 2026-11-25, after zara's PR 4 review; Node 24.21.0, `@playwright/test`
+    1.65.0, Chromium headless shell, macOS):** 354 tests (342 + 2 new rows × 3 languages × 2
+    projects), 354 passed, 0 flaky, 0 retried. `npm run lint`, `npx tsc --noEmit`, `test:unit`
+    (257 of 257), `check:i18n`, `npm run build`, `npm run build:ui` and `check:out` pass; in
+    `apps/api`, `ruff format --check`, `ruff check`, `mypy` and `pytest tests/widget` (408
+    passed, the fixture guard's 98 included) pass.
+- **Step 4f (2026-11-25, sofia): shesha's answers (chat, 2026-11-25).** No package; nothing under
+  `apps/api` changes.
+  - **The row whose `follow_up` is false** ("Accept"): recorded as decided in step 4e above; the
+    code was already built.
+  - **"Talk to a person" answered 404 is a 401** ("Treat as 401"; `core/controller.ts`
+    `talkToPerson`): `widget_not_found` (the widget was disabled) and any other 404, a body it
+    cannot read included, end the session exactly as a 401 does: "session expired", the guidance
+    under its normal heading and the contact first, no follow-up of either kind, no polling, the
+    token forgotten, an open card "session ended" (never "dropped": a 404 is not an urgent
+    hand-off), and the next send opens a new session. The rule confirm and the status read
+    already follow. The `handoffs` `widget-not-found` fixture's note says so (body unchanged).
+  - **Tests:** the press-404 unit test is now one per case (`widget_not_found`, the router's own
+    `{"detail": "Not Found"}`, an empty body), each also checking the new session on the next
+    send and that a normal hand-off on it still invites a reply and polls; one new test for the
+    open card. 260 unit tests (257 before). Browser: one new row, en only (the rule has no text of
+    its own), both projects = 2; no poll is stubbed, so the catch-all stays closed.
+  - **Mutation check** (scratch copy, `node_modules` linked, nothing written to the repo): 9
+    mutants of the press's 404 branch (only 401; only a typed `widget_not_found`; every 404 but
+    it; no `return`; the notice without ending the session; the session ended without the
+    notice; as "not stored"; as urgent with no guidance, then ended; as urgent with the
+    configured guidance, then ended). The first run left one (as urgent with no guidance: the
+    heading stays normal, but `urgentSeen` would turn the next session's normal hand-off urgent
+    and drop the card instead of ending it); two checks added (the second press, the card), and
+    the re-run killed 9 of 9.
+  - **Run (local, 2026-11-25; Node 24.21.0, `@playwright/test` 1.65.0, Chromium headless shell,
+    macOS):** 356 tests (354 + 1 new row × 2 projects), 356 passed, 0 flaky, 0 retried. `npm run
+    lint`, `npx tsc --noEmit`, `test:unit` (260 of 260) and `npm run build:ui` pass; in
+    `apps/api`, the fixture guard (`pytest tests/widget/test_web_fixtures.py`) 98 passed.
 
 ## PR 5 — `m8/staff-ui` (sofia; ananya reviews extraction review, noah the labels) · M · starts after PR 2, merges after PR 3
 - **Login** [D4 (a)]: the page reads the fragment, POSTs JSON, then clears the fragment from the
@@ -1462,11 +1789,42 @@ changed a fix's form, the reason is given.
 6. **Localised guidance** (business-context Q8, professional sign-off): until a reviewed hi or
    te safety file exists, guidance stays English with `lang="en"` in every UI language (D9).
    Agreed?
+7. **Decided 2026-11-25 (shesha, Z3 "Rank ties by reason", (a)); S17 amended and built in PR 2.**
+   **S17's tie at equal priority** (zara's PR 2 review; changes S17's decided "when its priority
+   is higher", so shesha's call). Before it, a `safety` hand-off at the same priority as an open
+   system-reason row only increments `count`: the row keeps the system reason and the earlier
+   message, cannot be labelled, and a PR 5 "system" filter can hide a non-urgent one. Example: on
+   paws-and-co a Telugu message (`not_covered_language`, high) then "how many mg of paracetamol
+   can I give my dog" (`safety`, high); or an urgent `guard_error` or `turn_timeout` then a red
+   flag (urgent `safety`). Options: (a) rank on (priority, then safety > decision > system): at
+   equal priority a `safety` or decision reason replaces a system one, priority still never
+   falls, tighten-only; (b) keep S17 as decided and write in PR 3 that the label applies to the
+   row's final reason (already applied as noah's option (b)). **Recommendation: (a)**, with unit
+   and integration tests for both sequences and the same rule in the in-memory store.
+8. **Decided 2026-11-25 (shesha, Z4 "Accept for M8", (c)); recorded in Risks.**
+   **Write amplification by one session** (zara's PR 2 review). A red-flag message skips the
+   limiter (G1) and the press has no window, so one session can write one `widget_turns` row and
+   one tuple version on its open hand-off per request, without bound and at $0 of model money.
+   Options: (a) count red-flag requests in Redis after the response, observe-only, and stop
+   writing turn rows past a per-session ceiling (the hand-off's count still rises); (b) a
+   per-session turn-row cap in the store; (c) accept it for M8, record it in Risks beside the
+   creation-window lockout, and handle it in M10's abuse work (edge and IP limits), giving the
+   press a per-session window that fails open to the existing row's id then. **Recommendation:
+   (c)**: M8 is local and synthetic, and (a) or (b) would make the emergency path's metadata
+   depend on a counter.
+9. **Decided 2026-11-25 (shesha, N5 "Defer to M11", (c)); recorded in Deviations, with why the
+   route is not limited yet.** **The thumbs-up rate's unit** (noah's PR 2 review; §6 was signed
+   off 2026-10-13, and a §6 change is shesha's, as D14). §6 says "after a conversation"; D6 (a) stores one rating per turn,
+   of any kind. Options: (a) redefine §6's rate per rated answer turn (a §6 change); (b) keep §6
+   and add an end-of-chat rating per session in PR 4; (c) defer to M11 with the deviation
+   recorded (Deviations, now). **Recommendation: (c)**, and under any option limit the feedback
+   route to the turn kinds PR 4 shows the control on (any other kind the one 404), once PR 4
+   names them, so the stored ratings are the metric's population.
 
 ## Decided 2026-11-24 (shesha)
 Every decision as recommended ("Accept all"); D8 and D14 were asked and answered separately.
 "Decisions for shesha" above keeps the options and reasons. P1–P7 apply (no objection). The six
-open questions stay open.
+open questions stayed open (7–9, added from the PR 2 reviews, were decided 2026-11-25, below).
 - **D1 (a):** sessions are rows in Postgres under RLS; only a token's SHA-256 is stored (S3).
 - **D2 (a) with (i):** the API serves both static builds from a read-only `ui_dir` on its own
   origin, one Next app (`apps/web`); nothing is publicly hosted in M8; hosting is M10's.
@@ -1497,6 +1855,18 @@ open questions stay open.
 - **D15 (a):** one outer bound on `/v1/widget/messages` (a setting, router + turn + margin), a
   `turn_timeout` hand-off past it, the client timeout from the session response.
 
+## Decided 2026-11-25 (shesha)
+Open questions 7–9 (the PR 2 reviews), answered in chat; 1–6 stay open.
+- **Z3 (a), question 7:** S17 ranks on (priority, then reason class: `safety` > decision >
+  system). At equal priority a more serious class raises the open row (its reason, origin,
+  intent, trace id, guidance and masked message, as a raise does); a lower class never lowers
+  it. Built in PR 2 (`handoffs.store`: `ReasonClass`, `rises`, `RISES`), the in-memory store
+  likewise; no migration change.
+- **Z4 (c), question 8:** accepted for M8; recorded in Risks (turn rows per session bounded only by
+  the rate windows until M10).
+- **N5 (c), question 9:** deferred to M11 with the deviation recorded (Deviations); the feedback
+  route is not limited yet, because PR 4 names no rated kinds.
+
 ## Risks
 - **The real stack shows only hand-offs** (urgent `guard_error` for health businesses while M7's
   H1 is a stub; `safety_floor_off` after it; `agent_error` for other types until M5's H1). Other
@@ -1514,6 +1884,13 @@ open questions stay open.
   runbook rule, not closed; separate origins are an M10 requirement.
 - **Red-flag spam:** red-flag hits skip the limiter (M7 G1). One open hand-off per session (S17)
   bounds the queue by sessions; sessions are limited per business only until M10's edge limits.
+- **Write amplification by one session** (accepted for M8, shesha, 2026-11-25, Z4 (c)): a
+  red-flag message skips the limiter (G1) and the press has no window, so one session can write
+  one `widget_turns` row and one tuple version of its open hand-off per request, at $0 of model
+  money. Turn rows per session are bounded only by the rate windows (none on the red-flag path)
+  until M10's abuse work (edge and IP limits), which also gives the press a per-session window
+  that fails open to the existing row's id. Not capped in the store: the emergency path's
+  metadata never depends on a counter. M8 is local and synthetic.
 - **Lockout by the per-business creation window:** one script can spend it and keep every new
   customer out until M10's IP limits. Lazy creation (S14) means page views do not spend it;
   locked-out customers still see the guidance and contact fallback. In the note.

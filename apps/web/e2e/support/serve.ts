@@ -129,7 +129,7 @@ export class UiFiles {
 // ── Fixtures ────────────────────────────────────────────────────────────────────────────────────
 
 /** One case of `fixtures/widget/<file>.json`: what the API answers, and the model it validates
- * against (the pytest fixture guard, pending PR 2's merge). */
+ * against (`apps/api/tests/widget/test_web_fixtures.py`, in the api job). */
 export interface FixtureCase {
   status: number;
   model: string;

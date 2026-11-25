@@ -26,6 +26,13 @@ is expired from the start (created 13 hours ago with a 12-hour lifetime).
 The owner plants what only the owner may write (staff members, links, rows with a chosen id or a
 past `created_at`); the app role plants the rest through `auth.store`, which also proves its
 column grants under RLS (`insert_session`, `revoke_session`).
+
+**Migration 0009's bait (M8 PR 2)**, shared the same way: both businesses hold the same widget
+session id (`BAIT_WIDGET_SESSION_ID`, each under its own real token, `Purpose.WIDGET`), the same
+hand-off id on it (`BAIT_HANDOFF_ID`, its masked message, guidance line and reply the business's
+canary), and the same turn trace id (`BAIT_TRACE_ID`) with a rating. A hand-off read that lost its
+business clause reads both businesses' rows on the owner's connection (and raises), and a route
+that read across would show the other canary.
 """
 
 import base64
@@ -47,6 +54,10 @@ BAIT_DISABLED_STAFF_ID: Final = uuid5(NAMESPACE_URL, "vectapilot-canary-disabled
 SHARED_CUSTOMER_SHA256: Final = token_sha256("vectapilot-canary-shared-customer-session")
 SHARED_STAFF_SHA256: Final = token_sha256("vectapilot-canary-shared-staff-session")
 SHARED_LINK_SHA256: Final = token_sha256("vectapilot-canary-shared-login-link")
+BAIT_WIDGET_SESSION_ID: Final = uuid5(NAMESPACE_URL, "vectapilot-canary-widget-session")
+BAIT_HANDOFF_ID: Final = uuid5(NAMESPACE_URL, "vectapilot-canary-handoff")
+BAIT_TRACE_ID: Final = "ca7a0000ca7a0000ca7a0000ca7a0000"
+"""Migration 0009's shared bait (module docstring): a W3C trace id's form (32 lowercase hex)."""
 LIVE_HOURS: Final = 2
 """The app-planted sessions' lifetime: far beyond any test, inside the 24-hour CHECK."""
 
@@ -60,6 +71,8 @@ class Purpose(StrEnum):
     REVOKED = "revoked"
     DISABLED_STAFF = "disabled-staff"
     LINK = "link"
+    WIDGET = "widget"
+    """M8 PR 2: the live customer session that holds the shared hand-off bait."""
 
 
 def bait_token(business_id: str, purpose: Purpose) -> str:
@@ -106,15 +119,43 @@ OWNER_SESSION_PLANT: Final = (
         " expires_at) VALUES (:b, 'customer', :expired_sha256, 'web', 'en',"
         " now() - interval '13 hours', now() - interval '1 hour')"
     ),
+    # M8 PR 2 (migration 0009): the widget session, its hand-off, its turn and the turn's rating,
+    # each with an id shared by both businesses; the texts are the business's canary.
+    text(
+        "INSERT INTO sessions (business_id, id, kind, token_sha256, channel, ui_language,"
+        " expires_at) VALUES (:b, :widget_session_id, 'customer', :widget_sha256, 'web', 'en',"
+        " now() + interval '12 hours')"
+    ),
+    text(
+        "INSERT INTO handoffs (business_id, id, session_id, trace_id, origin, reason, priority,"
+        " channel, ui_language, guidance_shown, message_masked, reply, replied_at,"
+        " retention_days) VALUES (:b, :handoff_id, :widget_session_id, :trace_id, 'turn',"
+        " 'safety', 'urgent', 'web', 'en', ARRAY[CAST(:canary AS text)], :canary, :canary, now(),"
+        " 30)"
+    ),
+    text(
+        "INSERT INTO widget_turns (business_id, session_id, trace_id, kind, reason, priority,"
+        " channel, ui_language, server_latency_ms) VALUES (:b, :widget_session_id, :trace_id,"
+        " 'handoff', 'safety', 'urgent', 'web', 'en', 1)"
+    ),
+    text(
+        "INSERT INTO turn_feedback (business_id, session_id, trace_id, rating)"
+        " VALUES (:b, :widget_session_id, :trace_id, 'down')"
+    ),
 )
 """What only the owner may plant (staff members, links, chosen ids, a past `created_at`)."""
 
 SESSION_UPROOT: Final = (
+    # M8 PR 2 (migration 0009): ratings, turns and hand-offs before the sessions they name.
+    text("DELETE FROM turn_feedback WHERE business_id = :b"),
+    text("DELETE FROM widget_turns WHERE business_id = :b"),
+    text("DELETE FROM handoffs WHERE business_id = :b"),
     text("DELETE FROM sessions WHERE business_id = :b"),
     text("DELETE FROM staff_login_links WHERE business_id = :b"),
     text("DELETE FROM staff_users WHERE business_id = :b"),
 )
-"""Children first (both reference `staff_users`), before the business itself."""
+"""Children first (0009's tables reference `sessions` and `staff_users`; both of 0008's children
+reference `staff_users`), before the business itself."""
 
 
 def owner_session_params(business_id: str) -> dict[str, Any]:
@@ -129,6 +170,10 @@ def owner_session_params(business_id: str) -> dict[str, Any]:
         "shared_link_sha256": SHARED_LINK_SHA256,
         "link_sha256": bait_sha256(business_id, Purpose.LINK),
         "expired_sha256": bait_sha256(business_id, Purpose.EXPIRED),
+        "widget_session_id": BAIT_WIDGET_SESSION_ID,
+        "widget_sha256": bait_sha256(business_id, Purpose.WIDGET),
+        "handoff_id": BAIT_HANDOFF_ID,
+        "trace_id": BAIT_TRACE_ID,
     }
 
 
