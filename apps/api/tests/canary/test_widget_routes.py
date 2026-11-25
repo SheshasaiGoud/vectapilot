@@ -50,13 +50,14 @@ from uuid import UUID
 
 import httpx2
 import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
-from tests.actions.db import until_waiting
+from tests.actions.db import RACE_BUDGET_S, until_waiting
 from tests.canary.checks import Planted
 from tests.canary.sessions import BAIT_TRACE_ID, SESSION_UPROOT, Purpose, bait_token
 from tests.canary.test_sessions import app_url, owner_url, plant
@@ -433,10 +434,15 @@ async def test_every_priority_and_class_pair_ranks_in_postgres_as_the_store_says
 
 
 async def test_two_concurrent_presses_are_one_row_with_one_id(
-    planted: tuple[Planted, Planted], owner_engine: AsyncEngine
+    planted: tuple[Planted, Planted], owner_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     a, _ = planted
     with served_widgets([a.business_id]) as client:
+        # Test-only (tests/actions/db.py's RACE_BUDGET_S): both presses stay at the lock until
+        # the poll sees them; Settings' own rule keeps the real bound below the client margin.
+        app = client.app
+        assert isinstance(app, FastAPI)
+        monkeypatch.setattr(app.state.settings, "handoff_store_timeout_seconds", RACE_BUDGET_S)
         token = new_session(client, a.business_id)
         session = await session_id(owner_engine, a.business_id, token)
         before = await rows(owner_engine, a.business_id)

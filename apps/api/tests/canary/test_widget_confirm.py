@@ -39,12 +39,20 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from tests.actions.db import active_on, audit_text, audits, until_waiting, written_by
+from tests.actions.db import (
+    RACE_BUDGET_S,
+    active_on,
+    audit_text,
+    audits,
+    until_waiting,
+    written_by,
+)
 from tests.canary.sessions import SESSION_UPROOT
 from tests.canary.widget import bearer, new_session, served_tool_widgets, session_id_of
 from tests.conftest import integration
 from tests.tools.core import PAWS, config_for, context_for
 from tests.tools.sandbox_db import app_url, fresh_engine, owner_url, seeded
+from vectapilot_api.actions import confirm as confirm_module
 from vectapilot_api.actions.pending import PendingActionStore
 from vectapilot_api.actions.types import PendingAction
 from vectapilot_api.agent.responses import AgentRequest, ConfirmationResponse
@@ -165,8 +173,11 @@ async def test_widget_confirm_executes_once_and_every_repeat_returns_its_body(
 
 
 async def test_two_parallel_widget_confirms_write_once_and_answer_the_same_body(
-    served: Served, owner: AsyncEngine
+    served: Served, owner: AsyncEngine, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Test-only (tests/actions/db.py's RACE_BUDGET_S): the confirm write budget (its asyncio
+    # backstop and Postgres's lock_timeout both come from it) stays above the poll's window.
+    monkeypatch.setattr(confirm_module, "WRITE_TIMEOUT_S", RACE_BUDGET_S)
     session, customer = await served.session()
     action = await served.book(customer)
 
