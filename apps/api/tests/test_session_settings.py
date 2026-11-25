@@ -12,12 +12,16 @@ from tests.conftest import make_settings
 from tests.guards.test_settings import PRODUCTION
 from vectapilot_api.auth.store import MAX_LINK_LIFETIME_S, MAX_SESSION_LIFETIME_S
 from vectapilot_api.config import (
+    CONFIRM_AUDIT_BOUND_SECONDS,
+    CONFIRM_TIMING_RULE,
     CONFIRM_WRITE_BACKSTOP_SECONDS,
+    HANDOFF_TIMING_RULE,
     PUBLIC_ORIGIN_REFUSED,
     WIDGET_CLIENT_MARGIN_SECONDS,
     Settings,
 )
 from vectapilot_api.main import create_app
+from vectapilot_api.tools.executor import AUDIT_TIMEOUT_S
 from vectapilot_api.tools.spec import WRITE_TIMEOUT_S
 
 DEFAULTS: Final[dict[str, Any]] = {
@@ -33,6 +37,9 @@ DEFAULTS: Final[dict[str, Any]] = {
     "cors_dev_origins": (),
     "widget_turn_bound_seconds": 60.0,  # P7, D15 (a): router 15 + turn 35 + margin 10
     "widget_confirm_timeout_seconds": 15.0,  # P7
+    "handoff_store_timeout_seconds": 2.0,  # P7, S14 (M8 PR 2)
+    "handoff_poll_limit_session_per_minute": 20,  # placeholders (M8 PR 2)
+    "handoff_poll_limit_business_per_minute": 1_200,
 }
 CANARY: Final = "https://canary-origin.example/path"
 """An invalid value that must never come back in an error's text."""
@@ -84,6 +91,11 @@ def test_the_lifetime_bounds_are_the_migrations_checks() -> None:
         ("widget_turn_bound_seconds", float("inf")),
         ("widget_confirm_timeout_seconds", 0),
         ("widget_confirm_timeout_seconds", 61),
+        ("handoff_store_timeout_seconds", 0),
+        ("handoff_store_timeout_seconds", 10.5),
+        ("handoff_store_timeout_seconds", float("nan")),
+        ("handoff_poll_limit_session_per_minute", 0),
+        ("handoff_poll_limit_business_per_minute", 0),
     ],
 )
 def test_out_of_range_values_are_refused(field: str, value: object) -> None:
@@ -187,11 +199,46 @@ def test_the_client_waits_the_bound_plus_a_margin() -> None:
     assert WIDGET_CLIENT_MARGIN_SECONDS == 5.0  # P7: 60 + 5 = 65 s (arithmetic)
 
 
-def test_the_confirm_timeout_is_above_the_confirm_routes_write_backstop() -> None:
-    assert CONFIRM_WRITE_BACKSTOP_SECONDS == WRITE_TIMEOUT_S  # written out, not imported
-    message = problems(widget_confirm_timeout_seconds=CONFIRM_WRITE_BACKSTOP_SECONDS)
-
-    assert "widget_confirm_timeout_seconds must be above the confirm route's write backstop" in (
-        message
+def test_the_confirm_timeout_is_above_everything_the_confirm_route_may_still_do() -> None:
+    # P7, leo's and zara's PR 2 review: the session lookup, the limits, the write's backstop and
+    # the audit after it (defaults: 2 + 0.25 + 5 + 2 = 9.25 s, arithmetic), never the backstop
+    # alone. Both constants are written out, not imported (a test compares).
+    assert CONFIRM_WRITE_BACKSTOP_SECONDS == WRITE_TIMEOUT_S
+    assert CONFIRM_AUDIT_BOUND_SECONDS == AUDIT_TIMEOUT_S
+    at_the_sum = problems(widget_confirm_timeout_seconds=9.25)
+    # leo's input: the PR 1 rule (above the backstop alone) accepted it, though a write may still
+    # commit at 4.5 + 0.25 + 5 = 9.75 s and its 503 arrive at 11.75 s.
+    leos = problems(
+        widget_confirm_timeout_seconds=6,
+        session_lookup_timeout_seconds=4.5,
+        handoff_store_timeout_seconds=0.4,
     )
-    assert make_settings(widget_confirm_timeout_seconds=5.5).widget_confirm_timeout_seconds == 5.5
+
+    assert CONFIRM_TIMING_RULE in at_the_sum and CONFIRM_TIMING_RULE in leos
+    assert "9.25" not in at_the_sum and "4.5" not in leos  # names fields, never a value
+    assert make_settings(widget_confirm_timeout_seconds=9.3).widget_confirm_timeout_seconds == 9.3
+    # Each term counts: a slower Redis bound moves the floor.
+    assert CONFIRM_TIMING_RULE in problems(
+        widget_confirm_timeout_seconds=9.3, guard_redis_timeout_seconds=0.5
+    )
+
+
+def test_a_hung_store_never_pushes_a_message_past_the_widgets_client_timeout() -> None:
+    # M8 PR 2 (S14, P7): lookup 2 + store 2 = 4 s < the 5 s margin over the turn's bound
+    # (arithmetic over the defaults); at the margin, startup stops, naming fields only.
+    assert make_settings(session_lookup_timeout_seconds=2.0, handoff_store_timeout_seconds=2.9)
+    message = problems(session_lookup_timeout_seconds=2.0, handoff_store_timeout_seconds=3.0)
+
+    assert HANDOFF_TIMING_RULE in message
+    assert "3.0" not in message
+
+
+def test_the_per_session_poll_window_is_at_most_the_businesss() -> None:
+    assert make_settings(
+        handoff_poll_limit_session_per_minute=5, handoff_poll_limit_business_per_minute=5
+    )
+    message = problems(
+        handoff_poll_limit_session_per_minute=6, handoff_poll_limit_business_per_minute=5
+    )
+
+    assert "handoff_poll_limit_session_per_minute must be <=" in message

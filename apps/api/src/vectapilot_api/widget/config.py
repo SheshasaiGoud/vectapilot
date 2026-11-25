@@ -110,6 +110,16 @@ class WidgetConfigError(ValueError):
     rule, never a value."""
 
 
+WEAK_EVIDENCE_HANDOFF_REFUSED: Final = (
+    "rag_weak_evidence_outcome (VECTAPILOT_RAG_WEAK_EVIDENCE_OUTCOME) may not be 'handoff' while a"
+    " widget is enabled: an answer labelled for a human stores no hand-off, so no person would"
+    " ever see it (M8 deviation, noah's PR 2 review)"
+)
+"""`create_app`'s refusal (M8 PR 2, noah's finding 4, option (b)) [proposal]: until the router is
+on or M11 decides, the weak-evidence `handoff` outcome stays a label (`answer.types`), counted
+through `widget_turns.answer_outcome`, and never reaches a customer as a promised hand-off."""
+
+
 # ── Colour contrast (WCAG 2.2, "relative luminance" and "contrast ratio") ─────────────────────
 
 
@@ -256,6 +266,10 @@ class WidgetRegistry:
         an unknown id, a business without a file and a disabled widget)."""
         widget = self.businesses.get(business_id)
         return widget if widget is not None and widget.enabled else None
+
+    def any_enabled(self) -> bool:
+        """Whether some business's widget is enabled (`WEAK_EVIDENCE_HANDOFF_REFUSED`)."""
+        return any(widget.enabled for widget in self.businesses.values())
 
 
 # ── Reading the folder ─────────────────────────────────────────────────────────────────────────

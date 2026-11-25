@@ -79,7 +79,17 @@ from vectapilot_api.staff.router import router as staff_router
 from vectapilot_api.tools.config import ToolsConfig
 from vectapilot_api.tools.executor import TransactionSource
 from vectapilot_api.tools.files import load_tools_dir
-from vectapilot_api.widget.config import WidgetRegistry, load_widget_dir
+from vectapilot_api.ui.pages import load_ui
+from vectapilot_api.ui.pages import router as pages_router
+from vectapilot_api.widget.config import (
+    WEAK_EVIDENCE_HANDOFF_REFUSED,
+    WidgetConfigError,
+    WidgetRegistry,
+    load_widget_dir,
+)
+from vectapilot_api.widget.confirm import router as widget_confirm_router
+from vectapilot_api.widget.feedback import router as widget_feedback_router
+from vectapilot_api.widget.messages import router as widget_messages_router
 from vectapilot_api.widget.router import router as widget_router
 
 logger = logging.getLogger("vectapilot_api")
@@ -317,6 +327,17 @@ def create_app(
             guards,
             allow_http_loopback=settings.environment in WIDGET_HTTP_ORIGIN_ENVIRONMENTS,
         )
+    # Fail fast (M8 PR 2, noah's review): a weak-evidence answer labelled `handoff` stores no
+    # hand-off, so it may not be the outcome while a customer can see it through a widget.
+    if settings.rag_weak_evidence_outcome == "handoff" and widgets.any_enabled():
+        raise WidgetConfigError(WEAK_EVIDENCE_HANDOFF_REFUSED)
+    # Fail fast (M8 PR 2b, D2 (a)): `ui_dir`, when set, must be a folder (UiDirError); Settings
+    # requires `public_origin` with it. Its pages need not exist yet: a missing one is a 404.
+    ui = None
+    if settings.ui_dir is not None:
+        if settings.public_origin is None:  # pragma: no cover (Settings refuses it)
+            raise ValueError("public_origin is required with ui_dir")
+        ui = load_ui(settings.ui_dir, settings.public_origin)
     # Fail fast (D7 (a)): `agent_router = on` needs a live M4 model for the API's embedding model
     # (RouterModelError); Settings requires the folder's setting when it is on.
     router_model = None
@@ -548,6 +569,7 @@ def create_app(
     app.state.guards = guards
     app.state.guard_selftest = guard_selftest
     app.state.widgets = widgets
+    app.state.ui = ui
     app.include_router(health_router)
     app.include_router(kb_router)
     app.include_router(search_router)
@@ -558,7 +580,16 @@ def create_app(
     # M8 PR 1 (ADR 0019): the widget's and the staff's session routes. Identity from the session
     # only (S1), `no-store` on every response (S9, `auth.http.SessionRoute`).
     app.include_router(widget_router)
+    # M8 PR 2 (ADR 0019, S6): the widget's message and hand-off routes, on the same guard and
+    # service objects as `/v1/agent` (its dependency functions), with no unguarded branch.
+    app.include_router(widget_messages_router)
+    # M8 PR 2b (ADR 0019, S6): widget confirm, on the confirm route's own service and limits with
+    # no unguarded branch, and feedback on the session's own turns.
+    app.include_router(widget_confirm_router)
+    app.include_router(widget_feedback_router)
     app.include_router(staff_router)
+    # M8 PR 2b (D2 (a), S9, S13): the product pages from `ui_dir`, their headers on them only.
+    app.include_router(pages_router)
     install_error_handlers(app)
     # G10-S2: the access line names the matched route's template, read from the request's scope
     # (`guards.redact.AccessLine`). For the log only: it screens and changes nothing.

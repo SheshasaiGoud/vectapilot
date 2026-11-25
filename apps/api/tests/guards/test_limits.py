@@ -162,8 +162,13 @@ def test_the_policy_reads_the_settings_placeholders() -> None:
         business=Window(120, 60),
         customer=Window(10, 60),
         budget_micro_usd=500_000,
-        # M8 PR 1: session creation has its own per-business window (the test settings' value).
-        routes={RouteSlug.SESSION: Window(100_000, 60)},
+        # M8 PR 1: session creation has its own per-business window (the test settings' value);
+        # M8 PR 2: a hand-off's status has its own per-business and per-session windows.
+        routes={
+            RouteSlug.SESSION: Window(100_000, 60),
+            RouteSlug.HANDOFF_STATUS: Window(100_000, 60),
+        },
+        customers={RouteSlug.HANDOFF_STATUS: Window(100_000, 60)},
     )
 
 
@@ -179,7 +184,7 @@ def test_m8s_session_route_reads_its_own_placeholder_and_the_rest_keep_the_busin
     policy = LimitPolicy.from_settings(settings)
 
     assert policy.business_window(RouteSlug.SESSION) == Window(60, 60)
-    for route in set(RouteSlug) - {RouteSlug.SESSION}:
+    for route in set(RouteSlug) - {RouteSlug.SESSION, RouteSlug.HANDOFF_STATUS}:
         assert policy.business_window(route) == Window(120, 60)
     # Step B3 (zara's review): staff login has no slug and no window of its own.
     assert "staff_login" not in {route.value for route in RouteSlug}
@@ -189,6 +194,26 @@ def test_m8s_session_route_reads_its_own_placeholder_and_the_rest_keep_the_busin
 
 def test_a_policy_without_route_windows_uses_the_business_window_everywhere() -> None:
     assert all(POLICY.business_window(route) == POLICY.business for route in RouteSlug)
+    assert all(POLICY.customer_window(route) == POLICY.customer for route in RouteSlug)
+
+
+def test_m8s_handoff_status_reads_its_own_per_business_and_per_session_placeholders() -> None:
+    # M8 PR 2 (S17): polling a hand-off is per session; every other route keeps both windows.
+    settings = make_settings(
+        guard_limit_business_per_minute=120,
+        guard_limit_customer_per_minute=10,
+        handoff_poll_limit_business_per_minute=1_200,
+        handoff_poll_limit_session_per_minute=20,
+    )
+
+    policy = LimitPolicy.from_settings(settings)
+
+    assert policy.business_window(RouteSlug.HANDOFF_STATUS) == Window(1_200, 60)
+    assert policy.customer_window(RouteSlug.HANDOFF_STATUS) == Window(20, 60)
+    for route in set(RouteSlug) - {RouteSlug.HANDOFF_STATUS}:
+        assert policy.customer_window(route) == Window(10, 60)
+    with pytest.raises(TypeError):
+        policy.customers[RouteSlug.AGENT] = Window(1, 1)  # type: ignore[index]  # read-only
 
 
 def test_a_window_and_a_budget_are_positive() -> None:
@@ -379,6 +404,35 @@ async def test_a_route_with_its_own_window_sends_that_window(route: RouteSlug, l
     await built.admit("rt-shop", route)
 
     assert stub.calls == [("rate", [f"vp:rt-shop:rl:{route.value}:all"], [limit, 60_000])]
+
+
+async def test_a_route_with_its_own_customer_window_sends_both_of_its_windows() -> None:
+    # M8 PR 2: the hand-off status route's business and session windows, the same script and key
+    # grammar; another route with a customer keeps the policy's `customer` window.
+    policy = LimitPolicy(
+        Window(5, 60),
+        Window(2, 60),
+        budget_micro_usd=1_000,
+        routes={RouteSlug.HANDOFF_STATUS: Window(50, 60)},
+        customers={RouteSlug.HANDOFF_STATUS: Window(7, 60)},
+    )
+    stub = StubRedis(rate=[1, 0])
+    built = RedisLimiter(cast(Redis, stub), policy, timeout_s=0.25, clock=lambda: NOON)
+    session = "s-" + "ab" * 16
+
+    await built.admit("rt-shop", RouteSlug.HANDOFF_STATUS, session)
+    await built.admit("rt-shop", RouteSlug.AGENT, session)
+
+    status_keys = [
+        "vp:rt-shop:rl:handoff_status:all",
+        rate_key("rt-shop", RouteSlug.HANDOFF_STATUS, session),
+    ]
+    agent_keys = ["vp:rt-shop:rl:agent:all", rate_key("rt-shop", RouteSlug.AGENT, session)]
+    assert stub.calls == [
+        ("rate", status_keys, [50, 60_000, 7, 60_000]),
+        ("rate", agent_keys, [5, 60_000, 2, 60_000]),
+    ]
+    assert all(key_business(key) == "rt-shop" for key in [*status_keys, *agent_keys])
 
 
 @pytest.mark.parametrize(("ttl_ms", "retry_after"), [(12_001, 13), (1, 1), (0, 1), (60_000, 60)])

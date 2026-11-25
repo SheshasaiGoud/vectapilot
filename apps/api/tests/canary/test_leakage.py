@@ -66,9 +66,12 @@ from tests.canary.read_paths import (
     sql_on_every_business_table,
 )
 from tests.canary.sessions import (
+    BAIT_HANDOFF_ID,
     BAIT_SESSION_ID,
     BAIT_STAFF_ID,
     BAIT_STAFF_SESSION_ID,
+    BAIT_TRACE_ID,
+    BAIT_WIDGET_SESSION_ID,
     OWNER_SESSION_PLANT,
     SESSION_UPROOT,
     owner_session_params,
@@ -91,6 +94,7 @@ from vectapilot_api.embeddings.catalog import load_embedding_catalog
 from vectapilot_api.embeddings.fake import fake_vector
 from vectapilot_api.extraction import purge as extraction_purge
 from vectapilot_api.extraction.cli import purge_with_owner
+from vectapilot_api.handoffs import store as handoff_store
 from vectapilot_api.ingestion.language_map import text_search_config
 from vectapilot_api.ingestion.types import SourceType
 from vectapilot_api.kb import store as kb_store
@@ -121,6 +125,8 @@ EXTRACTION_TABLES: Final = {"extractions", "extraction_fields"}
 """Migration 0007's tables (M6 PR 3, ADR 0017 decision 6): the catalog must find them too."""
 SESSION_TABLES: Final = {"staff_users", "staff_login_links", "sessions"}
 """Migration 0008's tables (M8 PR 1, ADR 0019 decision 8): the catalog must find them too."""
+HANDOFF_TABLES: Final = {"handoffs", "widget_turns", "turn_feedback"}
+"""Migration 0009's tables (M8 PR 2, D6 (a)): the catalog must find them too."""
 
 VECTOR: Final = "[" + ",".join(["0"] * 1023 + ["1"]) + "]"
 PLANT_LANGUAGE: Final = "en"
@@ -599,6 +605,117 @@ async def test_the_session_tables_keys_are_read_and_pair_the_business(
     }
     assert checks.foreign_key_problems(keys, tables) == []
     assert checks.key_problems(indexes) == []
+
+
+async def test_the_catalog_finds_the_handoff_tables_with_forced_rls(
+    owner_engine: AsyncEngine,
+) -> None:
+    # M8 PR 2 (migration 0009): all three are business tables, so every catalog-wide check covers
+    # them; `plant` seeds each (tests/canary/sessions.py), so the positive controls do too.
+    async with owner_engine.connect() as connection:
+        relations = {r.name: r for r in await load_relations(connection)}
+
+    assert set(relations) >= HANDOFF_TABLES, sorted(relations)
+    for table in HANDOFF_TABLES:
+        assert (relations[table].kind, relations[table].rls_enabled) == ("r", True), table
+        assert relations[table].rls_forced, table
+
+
+async def test_the_handoff_tables_keys_are_read_and_pair_the_business(
+    owner_engine: AsyncEngine,
+) -> None:
+    # The positive control for the key and foreign-key checks on 0009, S17's partial index and the
+    # rating's key into its own session's turn included.
+    async with owner_engine.connect() as connection:
+        keys = [k for k in await load_foreign_keys(connection) if k.table in HANDOFF_TABLES]
+        indexes = [k for k in await load_key_indexes(connection) if k.table in HANDOFF_TABLES]
+        tables = await business_tables(connection)
+
+    composite = {
+        (k.table, k.columns, k.referenced_table, k.referenced_columns)
+        for k in keys
+        if k.referenced_table != "businesses"
+    }
+    session = ("business_id", "session_id")
+    assert composite == {
+        ("handoffs", session, "sessions", ("business_id", "id")),
+        ("handoffs", ("business_id", "claimed_by"), "staff_users", ("business_id", "id")),
+        ("handoffs", ("business_id", "resolved_by"), "staff_users", ("business_id", "id")),
+        ("widget_turns", session, "sessions", ("business_id", "id")),
+        (
+            "turn_feedback",
+            ("business_id", "session_id", "trace_id"),
+            "widget_turns",
+            ("business_id", "session_id", "trace_id"),
+        ),
+    }
+    assert {(k.table, k.columns, k.predicate is not None) for k in indexes} == {
+        ("handoffs", ("business_id", "id"), False),
+        ("handoffs", session, True),  # S17: one open hand-off per session
+        ("widget_turns", ("business_id", "id"), False),
+        ("widget_turns", ("business_id", "trace_id"), False),
+        ("widget_turns", ("business_id", "session_id", "trace_id"), False),
+        ("turn_feedback", ("business_id", "id"), False),
+        ("turn_feedback", ("business_id", "trace_id"), False),
+    }
+    assert checks.foreign_key_problems(keys, tables) == []
+    assert checks.key_problems(indexes) == []
+
+
+HANDOFF_BY_ID: Final = text(
+    "SELECT h.business_id, h.message_masked, h.reply, t.trace_id, f.rating FROM handoffs h"
+    " JOIN widget_turns t ON t.business_id = h.business_id AND t.session_id = h.session_id"
+    " JOIN turn_feedback f ON f.business_id = t.business_id AND f.trace_id = t.trace_id"
+    " WHERE h.id = :handoff_id AND h.session_id = :session_id AND t.trace_id = :trace_id"
+    " ORDER BY 1"
+)
+
+
+async def test_the_same_handoff_turn_and_session_ids_in_both_businesses_are_invisible_across_them(
+    planted: tuple[Planted, Planted], owner_engine: AsyncEngine, fresh_engine: AsyncEngine
+) -> None:
+    # M8 PR 2: both businesses hold BAIT_WIDGET_SESSION_ID, BAIT_HANDOFF_ID and BAIT_TRACE_ID, the
+    # hand-off's texts their own canary. The bait is real: on the owner's connection each id
+    # names both businesses' rows.
+    a, b = planted
+    params = {
+        "handoff_id": BAIT_HANDOFF_ID,
+        "session_id": BAIT_WIDGET_SESSION_ID,
+        "trace_id": BAIT_TRACE_ID,
+    }
+    async with owner_engine.connect() as connection:
+        both = (await connection.execute(HANDOFF_BY_ID, params)).all()
+    assert [tuple(row) for row in both] == sorted(
+        (x.business_id, x.canary, x.canary, BAIT_TRACE_ID, "down") for x in planted
+    )
+
+    for mine, other in ((a, b), (b, a)):
+        async with business_transaction(fresh_engine, mine.business_id) as connection:
+            rows = (await connection.execute(HANDOFF_BY_ID, params)).all()
+        assert {row[0] for row in rows} == {mine.business_id}
+        shown = {"handoff by id": "\n".join(" ".join(map(str, row)) for row in rows)}
+        assert checks.canary_leaks(shown, mine, other) == []
+
+
+async def test_red_proof_the_handoff_status_read_without_its_business_clause_is_caught(
+    owner_engine: AsyncEngine,
+    fresh_engine: AsyncEngine,
+    planted: tuple[Planted, Planted],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # M8 PR 2, as the auth statements' proofs: under RLS the clause is not missed, on the owner's
+    # connection the read sees both businesses' bait (one id, one session id) and raises.
+    a, b = planted
+    clause = "business_id = :business_id AND "
+    statement = str(handoff_store.HANDOFF_STATE.text)
+    assert statement.count(clause) == 1, "the read's clause changed: update this proof"
+    monkeypatch.setattr(handoff_store, "HANDOFF_STATE", text(statement.replace(clause, "")))
+
+    under_rls = checks.canary_leaks(await READ_PATHS["handoff status"](fresh_engine, a), a, b)
+
+    assert under_rls == []  # RLS hides the missing clause...
+    with pytest.raises(MultipleResultsFound):  # ...the owner does not
+        await OWNER_CONNECTION_PATHS["handoff status"](owner_engine, a)
 
 
 SESSION_BY_ID: Final = text(

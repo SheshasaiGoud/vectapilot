@@ -43,6 +43,7 @@ from vectapilot_api.widget.config import (
     DEFAULT_RETENTION_DAYS,
     MAX_FILE_BYTES,
     MIN_ACCENT_CONTRAST,
+    WEAK_EVIDENCE_HANDOFF_REFUSED,
     WidgetConfigError,
     WidgetRegistry,
     contrast_ratio,
@@ -137,10 +138,21 @@ def test_compose_mounts_the_folder_read_only_and_names_it() -> None:
     assert compose.count("../data/widget") == 1  # one mount
 
 
+COMPOSE_ORIGIN: Final = "http://localhost:8000"
+"""M8 PR 2 (PR 1's decision): compose's `VECTAPILOT_PUBLIC_ORIGIN`, the API's local origin."""
+
+
+def test_compose_names_the_apis_public_origin() -> None:
+    compose = (REPO_DIR / "infra" / "compose.yaml").read_text(encoding="utf-8")
+
+    assert f"  VECTAPILOT_PUBLIC_ORIGIN: {COMPOSE_ORIGIN}\n" in compose
+    assert compose.count("VECTAPILOT_PUBLIC_ORIGIN") == 1
+
+
 def test_the_app_starts_with_every_folder_as_compose_sets_them(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # infra/compose.yaml's folders together, in its environment (local).
+    # infra/compose.yaml's folders and origin together, in its environment (local).
     use_answer_key_selftest(monkeypatch)
     settings = make_settings(
         environment="local",
@@ -149,11 +161,13 @@ def test_the_app_starts_with_every_folder_as_compose_sets_them(
         corpus_dir=SAMPLE_CORPUS_DIR,
         guard_config_dir=SAFETY_DIR,
         widget_config_dir=WIDGET_DIR,
+        public_origin=COMPOSE_ORIGIN,
     )
 
     app = create_app(settings)
 
     assert sorted(app.state.widgets.businesses) == list(BUSINESSES)
+    assert app.state.settings.public_origin == COMPOSE_ORIGIN
 
 
 # ── Contrast (WCAG 2.2) ──────────────────────────────────────────────────────────────────────
@@ -750,3 +764,27 @@ def test_the_folder_needs_the_corpus_folder() -> None:
     assert "corpus_dir (VECTAPILOT_CORPUS_DIR) is required with widget_config_dir" in str(
         caught.value
     )
+
+
+# ── M8 PR 2: the weak-evidence `handoff` outcome while a widget is enabled (noah's review) ─────
+
+
+def test_a_weak_evidence_handoff_outcome_is_refused_while_a_widget_is_enabled(
+    tmp_path: Path,
+) -> None:
+    # noah's PR 2 review, option (b) [proposal]: an answer labelled `handoff` stores no hand-off,
+    # so with a widget enabled no person would ever see it. Fixed text, setting names only.
+    with pytest.raises(WidgetConfigError) as caught:
+        create_app(widget_settings(rag_weak_evidence_outcome="handoff"))
+    assert str(caught.value) == WEAK_EVIDENCE_HANDOFF_REFUSED
+
+    # The positive controls: the default outcome starts, and so does `handoff` with every widget
+    # disabled or no widget folder at all.
+    assert create_app(widget_settings()).state.widgets.any_enabled()
+    folder = copy_widget(tmp_path / "widget")
+    for business_id in BUSINESSES:
+        edit_widget(folder, business_id, setting("enabled", False))
+    disabled = widget_settings(rag_weak_evidence_outcome="handoff", widget_config_dir=folder)
+    assert not create_app(disabled).state.widgets.any_enabled()
+    none = widget_settings(rag_weak_evidence_outcome="handoff", widget_config_dir=None)
+    assert create_app(none).state.widgets.businesses == {}

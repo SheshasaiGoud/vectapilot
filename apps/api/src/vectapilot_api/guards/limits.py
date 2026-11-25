@@ -12,7 +12,12 @@ its uuid's hex, so its segment is not enumerable; the hash and the grammar stay.
 a customer, a per-customer window (advisory: client-asserted on the header routes; on the widget,
 one window per session, which a client renews by opening a new session; the per-business windows
 are the control). M8 PR 1 adds one route with its own per-business window and no customer
-(`LimitPolicy.routes`): creating a customer session. Staff login has none (step B3).
+(`LimitPolicy.routes`): creating a customer session. Staff login has none (step B3). M8 PR 2 adds
+one with its own per-business and per-session windows (`LimitPolicy.customers`): a widget session
+polling its own hand-off's status (S17), where the session is the customer. PR 2b's rating of a
+turn (`feedback`) uses the default windows under its own slug (M7's per-business and
+per-customer placeholders, the numbers a session's turns get) [proposal]; the database allows one
+rating per turn.
 One Lua script per request checks every window and increments all of them or none (`RATE_SCRIPT`),
 loaded with `register_script`: redis-py sends EVALSHA and reloads the script on NOSCRIPT after a
 Redis restart. A window is fixed: it starts at its first request and its key expires with it. A
@@ -229,21 +234,31 @@ class LimitPolicy:
     `routes` (M8 PR 1): a route's own per-business window, used instead of `business` for that
     route only. Creating a customer session has its own placeholder
     (`session_limit_business_per_minute`, S14); every other route keeps `business`. Its keys
-    follow the same grammar (`RouteSlug`)."""
+    follow the same grammar (`RouteSlug`).
+
+    `customers` (M8 PR 2): a route's own per-customer window, used instead of `customer` for that
+    route only. A widget session reading its hand-off's status has its own placeholders
+    (`handoff_poll_limit_*`, S17); every other route keeps `customer`."""
 
     business: Window
     customer: Window
     budget_micro_usd: int
     routes: Mapping[RouteSlug, Window] = field(default_factory=dict)
+    customers: Mapping[RouteSlug, Window] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.budget_micro_usd < 1:
             raise ValueError("a day's budget is at least one micro-USD")
         object.__setattr__(self, "routes", MappingProxyType(dict(self.routes)))
+        object.__setattr__(self, "customers", MappingProxyType(dict(self.customers)))
 
     def business_window(self, route: RouteSlug) -> Window:
         """The per-business window of `route`: its own when it has one, else `business`."""
         return self.routes.get(route, self.business)
+
+    def customer_window(self, route: RouteSlug) -> Window:
+        """The per-customer window of `route`: its own when it has one, else `customer`."""
+        return self.customers.get(route, self.customer)
 
     @classmethod
     def from_settings(cls, settings: "Settings") -> Self:
@@ -254,6 +269,14 @@ class LimitPolicy:
             routes={
                 RouteSlug.SESSION: Window(
                     settings.session_limit_business_per_minute, WINDOW_SECONDS
+                ),
+                RouteSlug.HANDOFF_STATUS: Window(
+                    settings.handoff_poll_limit_business_per_minute, WINDOW_SECONDS
+                ),
+            },
+            customers={
+                RouteSlug.HANDOFF_STATUS: Window(
+                    settings.handoff_poll_limit_session_per_minute, WINDOW_SECONDS
                 ),
             },
         )
@@ -431,7 +454,9 @@ class RedisLimiter:
     ) -> None:
         windows = [(rate_key(business_id, route), self._policy.business_window(route))]
         if customer_ref is not None:
-            windows.append((rate_key(business_id, route, customer_ref), self._policy.customer))
+            windows.append(
+                (rate_key(business_id, route, customer_ref), self._policy.customer_window(route))
+            )
         keys = [key for key, _ in windows]
         args = [part for _, w in windows for part in (w.limit, w.period_s * 1000)]
 

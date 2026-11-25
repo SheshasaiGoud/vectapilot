@@ -388,6 +388,9 @@ async def test_the_app_role_is_safe_and_owns_nothing(
     # and UPDATE(revoked_at), staff_login_links' UPDATE(used_at): column grants only, never
     # DELETE (tests/test_migrations.py checks the columns and the restrictive policies).
     sessions = {"staff_users", "staff_login_links", "sessions"}
+    # Migration 0009's tables (M8 PR 2): SELECT on the table; INSERT and UPDATE on named columns
+    # only, never DELETE (tests/test_migrations.py checks the columns and the policies).
+    sessions |= {"handoffs", "widget_turns", "turn_feedback"}
     assert {tuple(row) for row in grants} == (
         {("businesses", "SELECT"), ("llm_calls", "SELECT"), ("llm_calls", "INSERT")}
         | {("documents", privilege) for privilege in write}
