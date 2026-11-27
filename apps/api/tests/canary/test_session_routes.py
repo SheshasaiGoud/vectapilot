@@ -53,6 +53,7 @@ from tests.canary.sessions import (
     bait_token,
 )
 from tests.canary.test_sessions import app_url, owner_url, plant
+from tests.canary.widget import REAL_REDIS_BOUNDS
 from tests.conftest import integration
 from tests.tools.helpers import write_corpus
 from vectapilot_api.auth.cookies import STAFF_COOKIE
@@ -146,6 +147,7 @@ def served(*business_ids: str) -> Iterator[TestClient]:
             guard_config_dir=None,
             public_origin=ORIGIN,
             session_lookup_timeout_seconds=LOOKUP_TIMEOUT_S,
+            **REAL_REDIS_BOUNDS,  # a loaded CI runner (tests/canary/widget.py); test-only
         )
         with TestClient(create_app(settings), base_url="https://testserver") as client:
             yield client

@@ -1,0 +1,58 @@
+{
+  "synthetic": true,
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (apps/api/tests/widget/test_web_fixtures.py) validates every case.",
+  "route": "POST /v1/widget/handoffs",
+  "api": "PR 2 (merged, #89): vectapilot_api.widget.models.HandoffQueued ({id, queued, follow_up}; id is null exactly when not queued; follow_up only when queued, from the open row as stored: D11)",
+  "cases": {
+    "created": {
+      "status": 200,
+      "model": "HandoffQueued",
+      "note": "the session's open hand-off, made now or found (S17): a normal, non-safety row, so follow_up is true",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "queued": true,
+        "follow_up": true
+      }
+    },
+    "created-urgent-row": {
+      "status": 200,
+      "model": "HandoffQueued",
+      "note": "the session's open row is an earlier urgent or safety hand-off (S17): follow_up is false (D11)",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "queued": true,
+        "follow_up": false
+      }
+    },
+    "not-stored": {
+      "status": 200,
+      "model": "HandoffQueued",
+      "note": "the store failed or hung (S14): never a 5xx",
+      "body": {
+        "id": null,
+        "queued": false,
+        "follow_up": false
+      }
+    },
+    "widget-not-found": {
+      "status": 404,
+      "model": "TypedError",
+      "note": "the session's widget was disabled: nothing was queued. As a 401 in the widget (decided 2026-11-25, shesha; as confirm and the status read): the session ends, the guidance and the contact, never a follow-up, and the next send opens a new session",
+      "body": {
+        "detail": "this business has no widget",
+        "error": "widget_not_found"
+      }
+    },
+    "unauthorized": {
+      "status": 401,
+      "model": "TypedError",
+      "body": {
+        "detail": "authentication required",
+        "error": "unauthorized"
+      },
+      "headers": {
+        "WWW-Authenticate": "Bearer"
+      }
+    }
+  }
+}

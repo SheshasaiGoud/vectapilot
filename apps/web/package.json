@@ -8,9 +8,16 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:ui": "VECTAPILOT_UI_BUILD=product next build",
     "start": "next start",
     "lint": "eslint",
-    "avatars": "node scripts/generate-avatars.mjs"
+    "avatars": "node scripts/generate-avatars.mjs",
+    "test:unit": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/test-hooks.mjs --test --test-timeout=10000 \"src/widget/**/*.test.ts\"",
+    "check:i18n": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-i18n.ts",
+    "check:out": "node scripts/check-site-out.mjs --site out --product out-ui",
+    "test:e2e": "playwright test",
+    "demo:host": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/demo-host.ts",
+    "measure:js": "node scripts/measure-js.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.2.0",
@@ -20,8 +27,10 @@
     "react-dom": "19.3.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@dicebear/core": "^9.4.3",
     "@dicebear/notionists": "^9.4.2",
+    "@playwright/test": "1.65.0",
     "@tailwindcss/turbopack": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

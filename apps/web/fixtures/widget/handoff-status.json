@@ -1,0 +1,149 @@
+{
+  "synthetic": true,
+  "note": "Fixture data for the widget's unit tests (M8 PR 4). Every business text, number and id is fictional. Each case's `model` names the API class its body validates against (`TypedError`: exactly {detail, error}; `RateLimited`: guards/limits.py's 429; `ClosedValidation`: auth/http.py's 422; `none`: deliberately not a valid body). The pytest fixture guard in the api job (apps/api/tests/widget/test_web_fixtures.py) validates every case.",
+  "route": "GET /v1/widget/handoffs/{id}",
+  "api": "PR 2 (merged, #89): vectapilot_api.widget.models.HandoffStateResponse ({id, status, reply, replied_at, follow_up}; follow_up from the row as it is now: D11)",
+  "cases": {
+    "open": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "open",
+        "reply": null,
+        "replied_at": null,
+        "follow_up": true
+      }
+    },
+    "claimed": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "claimed",
+        "reply": null,
+        "replied_at": null,
+        "follow_up": true
+      }
+    },
+    "replied": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "resolved",
+        "reply": "Fixture text: hello, this is the front desk. Your appointment request is noted.",
+        "replied_at": "2026-11-24T12:05:00Z",
+        "follow_up": true
+      }
+    },
+    "resolved": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "resolved",
+        "reply": null,
+        "replied_at": null,
+        "follow_up": true
+      }
+    },
+    "raised": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "note": "the row was raised to urgent or safety since (S17): follow_up is false, so polling stops (D11)",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "open",
+        "reply": null,
+        "replied_at": null,
+        "follow_up": false
+      }
+    },
+    "raised-replied": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "note": "raised to urgent or safety, with a staff reply: follow_up false wins, the reply stays in the dashboard (C28 (a))",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "resolved",
+        "reply": "Fixture text: hello, this is the front desk.",
+        "replied_at": "2026-11-24T12:05:00Z",
+        "follow_up": false
+      }
+    },
+    "xss-reply": {
+      "status": 200,
+      "model": "HandoffStateResponse",
+      "body": {
+        "id": "6f1c2a9e-0d4b-4c8e-9a51-2b7e3f4a5c61",
+        "status": "resolved",
+        "reply": "<img src=x onerror=alert(1)> javascript:alert(1)",
+        "replied_at": "2026-11-24T12:05:00Z",
+        "follow_up": true
+      }
+    },
+    "not-found": {
+      "status": 404,
+      "model": "TypedError",
+      "body": {
+        "detail": "there is no hand-off with this id for this session",
+        "error": "handoff_not_found"
+      }
+    },
+    "widget-not-found": {
+      "status": 404,
+      "model": "TypedError",
+      "note": "the session's widget was disabled while it polled: the session has ended, so polling stops, the follow-up goes and the guidance shows (zara's PR 4 review)",
+      "body": {
+        "detail": "this business has no widget",
+        "error": "widget_not_found"
+      }
+    },
+    "rate-limited": {
+      "status": 429,
+      "model": "RateLimited",
+      "headers": {
+        "Retry-After": "4"
+      },
+      "body": {
+        "detail": "too many requests: retry after the number of seconds given",
+        "error": "rate_limited",
+        "retry_after_seconds": 4,
+        "guidance": [
+          "We cannot treat emergencies.",
+          "Please call 112 now, or go to the nearest hospital emergency department, or tell someone near you.",
+          "You do not have to handle this alone.",
+          "Do not wait for a reply in the chat."
+        ]
+      }
+    },
+    "limits-unavailable": {
+      "status": 503,
+      "model": "TypedError",
+      "body": {
+        "detail": "hand-off status cannot be checked now; try again later",
+        "error": "limits_unavailable"
+      }
+    },
+    "store-unavailable": {
+      "status": 503,
+      "model": "TypedError",
+      "body": {
+        "detail": "hand-offs cannot be read now; try again later",
+        "error": "handoff_store_unavailable"
+      }
+    },
+    "unauthorized": {
+      "status": 401,
+      "model": "TypedError",
+      "body": {
+        "detail": "authentication required",
+        "error": "unauthorized"
+      },
+      "headers": {
+        "WWW-Authenticate": "Bearer"
+      }
+    }
+  }
+}

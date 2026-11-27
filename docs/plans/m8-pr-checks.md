@@ -190,7 +190,13 @@ today no business route can be served in production (`business.py:24,38`).
   M7's test), never re-typed into widget configuration, and shown with `lang="en"` (the files
   are English only; localised guidance waits for a reviewed safety file, business-context Q8).
   "A person will reply" is shown only when the hand-off was stored (`queued: true`) and is not
-  urgent; otherwise the business's configured contact fallback. **Urgent hand-offs never invite
+  urgent; otherwise the business's configured contact fallback. **A hand-off that carries
+  guidance never promises a reply** [amended 2026-11-24, shesha: Z4 (b), PR 4 step 4d]: no
+  safety step cleared that message (for example `not_covered_language`, or `safety_floor_off`
+  while the router is off), and the guidance itself says "Do not wait for a reply in the chat.",
+  so whatever its priority the widget shows no `handoff_follow_up` and does not poll, for the
+  rest of that session (a later "Talk to a person" included; only a new session clears it), and
+  shows the guidance and the contact fallback instead. **Urgent hand-offs never invite
   waiting** [D11]: for `priority = urgent` and every `safety` reason the widget shows no generic
   follow-up, no ETA, no reply prompt, does not poll, and drops any open confirmation card (the
   action expires unexecuted, P3), because both safety files end with "Do not wait for a reply in
@@ -975,10 +981,12 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
   during IME composition; one honest "working" status, no invented stage labels; `answer` with
   citation chips only under S9; `reply` with a provenance label; confirmation card (below);
   `handoff` (guidance first as `role="alert"` with `lang="en"`, then the follow-up text only when
-  the response's `follow_up` is true: the server's D11, queued and neither urgent nor `safety`,
-  a missing field counting as false (zara's PR 2 review); otherwise D11 (b)'s `urgent_follow_up`
-  when queued, or nothing; polling only while the status read's `follow_up` is true; open cards
-  dropped for urgent and `safety`, S8); 429 with a `Retry-After` countdown; network error; client timeout; session expired; 422
+  the response's `follow_up` is true (PR 2's server rule, D11: queued and neither urgent nor
+  `safety` as stored; a missing field counts as false; zara's PR 2 review) and no turn hand-off on
+  the session carried guidance (S8 as amended, Z4 (b)); otherwise D11 (b)'s `urgent_follow_up`
+  when queued, or nothing; polling only while the status read's `follow_up` is true and the
+  session is cleared (Z4 (b)); open cards dropped for urgent and `safety`, S8); 429 with a
+  `Retry-After` countdown; network error; client timeout; session expired; 422
   over length; "End chat" (revokes, clears, S18). Every non-success state shows the guidance
   first and keeps the typed message (S16). The widget never re-sends a message by itself; a
   manual retry after a timeout says "your last message may still be processed" (D15). Client
@@ -993,7 +1001,7 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
   | 409 | the fixed failure sentence | done |
   | 404 `action_not_found` (this session, this token) | "Expired, nothing was done" (provable: an executed action returns its stored result whatever its expiry, `actions/confirm.py:15-17`) | done |
   | any other 404 (`widget_not_found`: the widget was disabled) | as 401: it does not claim nothing was done (zara's PR 2 review) | guidance (S16) |
-  | 503 `confirm_failed` or `limits_unavailable` | "Not done yet" | retry with the same token |
+  | 503 `confirm_failed` or `limits_unavailable` | "Not done yet"; after an unknown outcome "We could not check yet" (step 4c) | retry with the same token |
   | 503 `outcome_unknown`, client timeout, network error | "We are checking"; never "nothing happened" | one automatic retry with the same token, then a manual retry with the same token until expiry, plus "Talk to a person" |
   | 429 | a countdown | the same token |
   | 401 | session expired; after an unknown outcome, it does not claim nothing was done | guidance (S16) |
@@ -1019,6 +1027,439 @@ H1: route tests use M7's stand-in matchers, as M7's own tests do. D13 changes no
   (so it stays at $0 and closed), and one e2e check that guidance shows on a network error.
 - **Compose:** the built UI mounted read-only into `api` as `ui_dir` (takes effect at the next
   `make up`). A local demo host page frames the widget from an allowed origin.
+- **Step 4a (built 2026-11-24, sofia, on fixtures; the plan's split point): packaging, state
+  logic, every state, i18n, unit tests, lint rules, the CI step.** `apps/web`: `next.config.ts`
+  (two builds), `src/app/layout.product.tsx`, `product.css`, `widget/page.product.tsx`,
+  `src/widget/` (`api/`, `core/`, `i18n/`, `ui/`, `tests/`), `fixtures/widget/`, `scripts/`
+  (`check-site-out.mjs`, `check-i18n.ts`, `test-hooks.mjs`), `eslint.config.mjs`, `README.md`;
+  `ci.yml` (`web (lint, build)`, name unchanged: `test:unit`, `check:i18n`, `build:ui`,
+  `check:out`) and `deploy-site.yml` (the `out/` check on the Pages artefact before upload).
+  No package beyond D8's two; no Next.js server; no change under `apps/api`, `packages`, `evals`
+  or `data/safety`.
+  - [proposal] **Two builds by `pageExtensions`.** `npm run build` sees only `page.tsx` and
+    `layout.tsx` (the team site, `out/`); `npm run build:ui` (`VECTAPILOT_UI_BUILD=product`) sees
+    only `*.product.tsx` and exports to `out-ui/` (with `output: "export"` a custom `distDir` is
+    the export folder, `next/dist/export/utils.js`; build files stay in `.next/`, so the builds
+    run one after the other). `check:out` fails on any file of `out/` that names `/v1/` or a path
+    starting `widget` or `staff`, and needs `out-ui/widget.html` and a file naming `/v1/widget/`
+    (the positive control). The widget reads its business from `/widget/{business_id}` and only
+    `lang` from the query (S18).
+  - **States** as listed above, in `core/controller.ts` (requests, no React, every browser
+    dependency injected), `core/view.ts` (what each state shows, pure) and `ui/WidgetView.tsx`
+    (markup, text only). Lazy session; the session's timeouts (P7: 65 s and 15 s in the
+    fixtures); one automatic retry only for confirm, never for a message.
+  - [proposal] **Hand-off honesty without the row's priority.** PR 2's `HandoffQueued` is
+    `{id, queued}` (no priority) and "talk to a person" returns the session's open row whatever
+    made it (S17). The row holds the highest priority of every hand-off on the session, so the
+    widget shows `handoff_follow_up` (and polls) only when it created the session, has seen
+    every turn's outcome since, and saw no urgent or `safety` hand-off. After a message whose
+    outcome is unknown (client timeout, network error, a 5xx other than the lookup's typed 503)
+    the row may have been raised: no follow-up and no polling on that session from then on.
+    Adding `priority` to `HandoffQueued` would only let an adopted session show the follow-up;
+    safety does not need it.
+  - [proposal] Resolved without a reply: polling stops and the follow-up gives way to the
+    contact fallback. A poll's 429 or 503 waits for the next 5 s tick; a 404 stops polling.
+  - [proposal] After an urgent hand-off the guidance stays pinned for the rest of the view,
+    also above later successes.
+  - [proposal] `dont_know`, an answer `outcome = handoff`, and an `answered` answer without
+    sources show "no answer found", the guidance and the contact (treated as not a success).
+  - [proposal, replaced in step 4c] The contact fallback shows in every state that is not a
+    success except an urgent stored hand-off (D11's text or nothing). Now: in every state that is
+    not a success, urgent included (zara's review; S8 as decided).
+  - [proposal] A message's 4xx other than 401, 422 and 429 (a widget disabled since:
+    `widget_not_found`) ran nothing: "not sent". A 5xx may have run: "may still be processed".
+  - [proposal] Timings P7 does not name (configuration, unmeasured): 15 s client bound for the
+    config, session, hand-off, poll and end calls; the one automatic confirm retry after 2 s; a
+    429 without a delay waits 30 s (since step 4c a message's 429 only informs; a session-creation
+    429 still blocks Send). One message at a time: Send is disabled while a message or a
+    confirm is in flight.
+  - [proposal] **The config route carries P7's two timeouts** (`message_timeout_seconds`,
+    `confirm_timeout_seconds`), so a reload can adopt the token in `sessionStorage`. PR 2's
+    `WidgetConfigResponse` does not (closed model), so today a reload drops the stored token and
+    the next send opens a new session lazily; the old one expires at its absolute lifetime (P1).
+  - [proposal] Requests: `credentials: "omit"` (the staff cookie shares the origin under D12 (b)),
+    `redirect: "error"` (a bearer token never follows a redirect), `cache: "no-store"`, and the
+    default `mode`: under the page's `Referrer-Policy: no-referrer` a `same-origin`-mode POST sends
+    `Origin: null` (Fetch, "append a request `Origin` header"), which PR 1's same-origin check
+    refuses. Checked in headless Chromium: the session POST carried the page's origin.
+  - [proposal] Safety text (`i18n/safety.ts`, English, `lang="en"`, labelled in a hi or te UI):
+    the AI disclosure, "Talk to a person", "This chat is not for emergencies.", the reply's
+    provenance and every confirmation-card line, for zara's and leo's review. hi and te chrome
+    drafted by Claude and labelled unreviewed in the UI (open question 2).
+  - [proposal] The accent colour is re-checked in the client (4.5:1 against white text, else a
+    default); white is the text colour on it (PR 1 asked).
+  - [proposal] Lint on the product pages beyond `react/no-danger` and `no-console`:
+    `react/jsx-no-script-url`, `no-eval`, `no-implied-eval`, `no-new-func`, and restricted Web
+    Storage (except `ui/browser.ts`), `postMessage`, `message` listeners, `document.title`,
+    `document.cookie`, `innerHTML`, `insertAdjacentHTML` and `document.write`; type-only imports
+    as `import type` (the unit tests run the sources with Node's type stripping). Each rule
+    proven to fire on a bad sample, and none on a team-site file.
+  - [proposal] Keyboard focus never falls to the page when the focused control goes: to the card
+    after its answer, to "Start a new chat" after "End chat", then to the message box. The
+    composer and then the guidance are scrolled into view, instantly, the guidance winning on a
+    phone.
+  - [proposal] `node --test` loads `.tsx` through a 30-line hook over TypeScript's own
+    `transpileModule` (already a dev dependency); each test times out at 10 s.
+    `tsconfig.json` gains `allowImportingTsExtensions` and `erasableSyntaxOnly` (what type
+    stripping needs).
+  - **Fixtures** follow PR 1's merged models and PR 2's working tree as read on 2026-11-24
+    (`MessageResponse`, `HandoffQueued`, `HandoffStateResponse`); each case's `model` names its
+    class. A one-off local run (PR 2's source, main's API venv, no bytecode written) validated
+    58 of 58 cases, and failed on the earlier `{id, queued, priority}` shape as a red proof.
+  - **Tests:** 132 unit tests in 7 files (every non-success state with guidance first; each
+    confirm-card row; urgent never with `handoff_follow_up`; Redis and Postgres down at the first
+    message; S9's invariant and XSS fixtures over every state; unknown kinds; the retry rule; a
+    Telugu text at 2,000 and 2,001 code points; a storage spy; S10's route list and source scan;
+    the i18n check's red proofs), and a mutation probe of the hand-off rules (9 mutants, 9
+    killed).
+  - **Checked in a real browser** (a one-off headless Chromium script outside the repo, not the
+    4b job): `out-ui/` at `/widget/sunrise-clinic` under S9's CSP, every API call stubbed and any
+    other request failing; greeting, urgent hand-off, network error and confirmation card at
+    360×800 and 1280×800, and the hi greeting: axe (`wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`,
+    `wcag22aa`) with zero violations, no CSP violation, no horizontal overflow, the guidance on
+    screen with no animation, no session on page load, only the session key in
+    `sessionStorage`, no confirm token in the DOM, focus returned as above, and the working dots
+    still under reduced motion. Automated results are a floor, not a conformance claim.
+  - **Pending on PR 2:** the pytest fixture guard in the `api` job (added when PR 2 merges, from
+    the `model` names); widget confirm (PR 2b; fixtures follow the agent route's confirm, re-checked
+    when built); UI serving (how a missing or empty `ui_dir` is treated is PR 2's to define; the
+    compose mount is step 4b's); the config-timeouts proposal above.
+  - Feedback controls are not in PR 4's state list and are not built (§6 table: the real stack
+    shows no answered turn).
+- **Step 4b (built 2026-11-24, sofia, on fixtures): the `web e2e` job, the compose mount, the
+  demo host page, the bundle measurement.** `apps/web`: `playwright.config.ts`, `e2e/`
+  (`widget-states`, `confirm-card`, `embed`, `motion` and `harness` specs; `support/serve.ts`,
+  `stack.ts`, `checks.ts`, `widget.ts`), `demo/host.html`, `scripts/demo-host.ts`,
+  `scripts/measure-js.mjs`, `fixtures/widget/end-session.json`, `package.json` (`test:e2e`,
+  `demo:host`, `measure:js`; no new package: D8's two, installed with Chromium on shesha's yes),
+  `.gitignore`, `README.md`; `ci.yml` (new job `web e2e`, not required, and the header comment);
+  `infra/compose.yaml`. Still no change under `apps/api`, `packages`, `evals` or `data/`.
+  - **The job** (`web e2e`, D8 (a)): `npm ci`, `npx playwright install --with-deps --only-shell
+    chromium`, `npm run build:ui`, `npm run test:e2e`; 15-minute limit. Not required until shesha
+    changes the setting (rule 1), after its run and flake counts across M8's PRs (PR 6).
+  - **The pass rule as built:** every state at 360×800 and 1280×800 (two projects), in en and hi
+    at sunrise-clinic and te at paws-and-co, keyboard only (Tab to reach, Enter to use, the focus
+    ring checked at every stop), `prefers-reduced-motion: reduce`; per state: the guidance check
+    (first, verbatim, `role="alert"`, `lang="en"`, on screen, no animation; absent on success),
+    no horizontal overflow, axe with `wcag2a`, `wcag2aa`, `wcag21a`, `wcag21aa`, `wcag22aa` and
+    zero violations of any impact, and one Tab round with a visible ring everywhere.
+    **Disabled axe rules: none.** `retries: 0`. The API is stubbed with `page.route`, and a
+    catch-all records and refuses every other request; the teardown fails on any such request, any
+    page error or any console error the test did not cause on purpose (CSP violations land
+    there). The one required network-error check is "network error: guidance shows, the message is
+    kept" (`e2e/widget-states.spec.ts`), in every language and project.
+  - **Run (local, 2026-11-24; Node 24.21.0, `@playwright/test` 1.65.0, Chromium 158.0.8127.18, axe-core
+    4.14.0, macOS):** 268 tests, 268 passed, 0 flaky, 0 retried, in about 57 s with 4 workers:
+    widget states 26 × 3 languages × 2 projects = 156; confirm card 14 × 3 × 2 = 84; embed 3 × 2
+    businesses × 2 = 12; motion 2 × 2 = 4; harness 6 × 2 = 12. The clock-dependent tests (client
+    timeout, polling) passed 4 of 4 repeats. The first CI run gives the Ubuntu numbers.
+  - **D3, checked (rule 7), Chromium only:** a framed widget's `sessionStorage` is partitioned by
+    the top-level site. The token written while framed by the allowed origin was not visible to
+    the same origin opened top level in the same tab (`e2e/embed.spec.ts`). Safari and Firefox
+    are for the manual pass.
+  - **Bundle sizes (noah's request; "How we will know"'s one M8 measurement).** Method
+    (`npm run measure:js`, `scripts/measure-js.mjs`): every external `<script src>` of the
+    exported HTML, each file once, gzipped by Node's zlib at its default level, summed; Node
+    24.21.0, `next` 16.4.5, `NEXT_TELEMETRY_DISABLED=1`, no base path. M0's 182.7 KB used a method
+    it did not record, so it is not compared.
+
+    | Page | Before: `main` at 763424e | After: `m8/widget-ui`, working tree on 763424e |
+    |---|---|---|
+    | Team site `/` (`npm run build`, `out/index.html`) | 9 scripts, 705,162 B raw, **222,317 B gzipped** | 9 scripts, 705,162 B raw, **222,317 B gzipped** (unchanged; HTML 17,545 → 17,536 B gzipped) |
+    | Widget `/widget/{id}` (`npm run build:ui`, `out-ui/widget.html`) | no such page | 7 scripts, 616,895 B raw, **189,385 B gzipped** (HTML 2,265 B gzipped) |
+
+    "Before" was built from `git archive 763424e` in a scratch folder with this tree's
+    `node_modules` (the lock diff adds only the four test packages, so the bundled packages are
+    the same). The chunk holding the widget's code is 14,682 B gzipped; the other six chunks are
+    Next's and React's runtime (told apart by their content, not measured per package). Measured
+    again at PR 6 (item 3) after PR 2.
+  - **Compose:** `VECTAPILOT_UI_DIR=/app/ui` and `../apps/web/out-ui:/app/ui:ro` on `api`. It
+    changes nothing until PR 2 serves `ui_dir` (main's `config.py`). It takes effect at the next
+    `make up`; Docker creates a missing folder as an empty one, so build the UI first; each build
+    replaces `out-ui/`, so restart `api` after a rebuild. Not run here (no Docker in this step).
+    A three-way merge of this file with PR 2's working tree (`git merge-file`) has 0 conflicts and
+    keeps both settings.
+  - **The demo host page:** `npm run demo:host -- --business <id>` opens Chromium on that
+    business's allowed origin with `demo/host.html` framing the widget. Fixtures by default (closed,
+    $0; every message gets today's real-stack answer, an urgent hand-off); `--stack` passes the
+    widget's requests to `http://localhost:8000` through Playwright; `--check` runs headless and
+    exits. Checked: `--check` passes for both businesses on fixtures, and `--stack` against a
+    throwaway local server that served `out-ui/` as PR 2 will (the session POST arrived with
+    `Origin: http://localhost:8000`, no `Referer`).
+  - [proposal] **No server in the e2e:** the browser context serves `out-ui/` and the stubs at
+    `http://localhost:8000` through `page.route`, so the run is closed by construction and port
+    8000 may be in use. The page's headers are S9's text as the plan writes it
+    (`widgetPageHeaders`, `connect-src` narrowed to `/v1/widget/` under D12 (b), `frame-ancestors`
+    read from `data/widget/`); when PR 2 lands, compare them with its header test and keep the two
+    equal.
+  - [proposal] **The demo's allowed origin exists only inside the browser.** Adding
+    `http://localhost:<port>` to a business's `allowed_origins` instead was rejected: the loader
+    accepts http origins only in `local`, so the test and ci settings would refuse to start.
+  - [proposal] **Fixture bodies adapted per business** in the e2e and the demo, types unchanged:
+    the token's prefix and `ui_language`, and the guidance in a hand-off turn or a 429 body
+    (`adaptBody`). The new `end-session.json` (204 with `model: "none"`, 401 `TypedError`) needs
+    the pytest fixture guard to accept an empty 204.
+  - [proposal] **Timers in the e2e run on `page.clock`** from 2026-11-24 12:00 UTC (`timezoneId:
+    "UTC"`, `locale: "en-IN"`), and time is moved only once the request under test has reached
+    its stub (a held reply's `arrived`): moved earlier, the session call's 15 s bound fires
+    instead (found and fixed while building).
+  - [proposal] **360×800 is a narrow desktop viewport**, not a mobile emulation (no touch, no
+    mobile user agent): the matrix is keyboard only. Touch and VoiceOver on an iPhone stay in the
+    manual pass.
+  - [proposal] **The harness proves it can fail** (`e2e/harness.spec.ts`): an unstubbed request,
+    an unstubbed API call, the CSP refusing `/v1/answer` from the widget page (S10 in the
+    browser), an axe violation, a hidden focus ring, and animated or relabelled guidance each make
+    their check fail.
+  - [proposal] **CI downloads the headless shell on every run**, with no cache and no artifact
+    upload. Uploading traces on failure would need `actions/upload-artifact` at a major checked
+    with `gh api` first (PR 1's failed `setup-uv` ref).
+  - [proposal] **The widget's 189 KB gzipped is mostly framework runtime.** Whether the iframe
+    needs a lighter runtime is a question for M10's hosting, measured again at PR 6; no change
+    now.
+  - [proposal] **`out-ui/` also holds `public/`'s files** (the 9 team avatars, `404.html`, the RSC
+    `.txt` files): Next copies `public/` into every export. PR 2 should serve only
+    `/widget/{business_id}`, `/_next/static/` and `/icon.svg` from `ui_dir`, as the e2e does.
+  - **Pending on PR 2** (besides 4a's list): the header comparison above; `make up` with the
+    mount and the widget on the real stack (PR 6's local smoke).
+- **Step 4c (built 2026-11-24, sofia, on fixtures): zara's and leo's review findings and the
+  mutation review's probes.** No package, no new file outside `apps/web` and this plan; still no
+  change under `apps/api`, `packages`, `evals` or `data/`.
+  - **Hand-off honesty (zara, S8, D11).** "Talk to a person" answered while a message is in
+    flight (when its request went out or when it answered) shows no `handoff_follow_up` and does
+    not poll: that message may still raise the row (S17); the message's own result decides. A
+    turn the widget cannot read (an unknown kind, a malformed hand-off, a 200 that is not JSON),
+    and a non-hand-off turn whose body names a hand-off row, count as an unknown outcome (no
+    follow-up, no polling on that session from then on).
+  - **The contact fallback in every state that is not a success, urgent included** (zara; S8 as
+    decided: D11 forbids a reply prompt or an ETA, and the contact list is neither). An urgent
+    hand-off at a business without guidance (platform red flags apply to every business type) is
+    no longer a dead end.
+  - [proposal] **Two guidance headings** (zara; safety text, English, `lang="en"`): an urgent or
+    `safety` hand-off's guidance, and the guidance pinned after it, is headed "Safety
+    information"; every other state that is not a success heads it "If this is an emergency:",
+    so a network blip never reads as an instruction to call emergency services. The lines stay
+    verbatim (S8).
+  - [proposal] **A confirm that is not definite shows the guidance and the contact** (zara, S16):
+    a new notice, `confirm_problem`, for "We are checking", "We could not check yet", "Not done
+    yet" and a 429 (the 429 body's own guidance first, else the cached copy); a later definite
+    answer clears it. The card says what happened; the status line stays empty.
+  - [proposal] **A message's 429 no longer disables Send** (zara): the countdown informs, the
+    server's limiter decides, and a red-flag message skips it (M7 G1), so it still reaches staff
+    as an urgent hand-off. A 429 on session creation still blocks Send (no red-flag path there).
+  - [proposal] **"End chat" keeps the pinned guidance** after an urgent hand-off (zara: public
+    configuration, not customer data; the customer may be leaving to act on it), also after
+    "Start a new chat"; the transcript, both tokens and the urgent state of the old session go.
+  - [proposal] **A configuration it cannot read still shows its guidance** (zara): the config
+    route's `guidance` and `guidance_language` are read on their own and shown first in the
+    "unavailable" state with their declared language (a language tag pattern, else nothing); the
+    rest fails closed as before. An accent colour it cannot read is ignored (the default accent).
+  - **Lint (zara):** S18's rules now match any object (`parent.postMessage`, `window.top?.`,
+    `globalThis.localStorage`, `self["sessionStorage"]`, `caches`) and any `message` listener named
+    by a non-literal; `ui/browser.ts` lifts only the `sessionStorage` entry. Browser specs may not
+    import `test` from `@playwright/test` (`no-restricted-imports`). Proven on 25 red samples via
+    `eslint --stdin`, with 5 controls clean (a `focusin` listener, `browser.ts`'s
+    `sessionStorage`, a team-site file, an `expect` import, a support module).
+  - **"Connection lost" (zara):** `networkError` is "The connection to the chat was lost." (hi and
+    te updated, unreviewed): the old text claimed the message never arrived and nudged a re-send.
+  - **The card (leo).** After an unknown outcome no later answer says "not done":
+    `confirm_failed`, `limits_unavailable` and a 404 other than `action_not_found` keep "We could
+    not check yet" with the same token and a manual retry, and a 429 keeps the unknown-outcome line.
+    Only `action_not_found` is "Expired" (PR 2b's `widget_not_found` ran nothing: "Not done yet",
+    token kept). "End chat" is disabled while a confirm is in flight or its automatic retry is
+    pending; ended with an unknown outcome, the ended view says "We could not check whether this
+    was done. Talk to a person to check." A confirm cut off by a 401 elsewhere counts as an
+    unknown outcome. The card's 429 line is fixed ("You can try again shortly.") and its seconds
+    are shown with `aria-hidden` (the card sits in the live log), counted from the answer, not
+    the last tick. Card buttons and `confirm()` also wait while "End chat" runs.
+  - **(a) A card offered after an urgent hand-off arrives dropped** (leo's finding 5, L5;
+    zara's note; **decided (a), 2026-11-24, shesha: "Keep (a)"**): its token is never kept, so
+    nothing is confirmed in a chat that had an urgent hand-off; a new chat can confirm again.
+    Chosen over (b) "follow the table" because it keeps "Talk to a person to check" from
+    following the guidance, and it makes "an urgent hand-off while a confirm runs" unreachable,
+    so the half-rule in `#runConfirm` was deleted.
+  - **Reflow (found by the new XSS browser test):** a long unbroken untrusted string overflowed at
+    360 px inside flex rows (a quick reply, a citation chip). `overflow-wrap: anywhere` on the
+    widget's root (inherited by every text) and a wrapping chip row fix it (WCAG 1.4.10).
+  - **Browser checks added:** `expectStateChecks` also asserts `localStorage`, IndexedDB and Cache
+    Storage are empty and `sessionStorage` holds at most the token's key; the guidance's heading
+    per state; the embed host page records every `message` event (none arrive, S18);
+    `e2e/xss.spec.ts` sets a canary from payloads in the config (name, greeting, quick reply,
+    contact, both follow-ups, guidance), an answer, a citation's title and excerpt, a reply, a
+    card's summary and a staff reply: nothing runs, no element or handler is created, no dialog.
+  - **Tests:** 221 unit tests in 7 files (132 before: zara's and leo's findings, the mutation
+    review's 29 probes adapted, parse tests for the new readers). Mutation check in a scratch copy
+    (node_modules linked, nothing written to the repo): 79 mutants, 43 of the review's 44
+    survivors adapted to the moved code (the 44th, F09, targeted the deleted half-rule) plus 36
+    reverts, one per fix; 76 killed by the unit suite, one (the reflow rule) by the browser test
+    (7 px of overflow at 360 px without it), two equivalent: an in-flight card dropped by an
+    urgent hand-off (unreachable under (a)) and "not done" without the unknown line (unreachable
+    after leo's first fix, kept as leo asked).
+  - **Run (local, 2026-11-24; Node 24.21.0, `@playwright/test` 1.65.0, Chromium headless shell,
+    macOS):** 306 tests, 306 passed, 0 flaky, 0 retried, in about 1.1 minutes with 4 workers:
+    widget states 29 × 3 languages × 2 projects = 174; confirm card 17 × 3 × 2 = 102; embed 3 × 2
+    businesses × 2 = 12; motion 2 × 2 = 4; harness 6 × 2 = 12; XSS 1 × 2 = 2. The six new rows
+    that move the clock or hold a reply passed 96 of 96 in three repeats. `npm run lint`, `npm run
+    build`, `npm run build:ui`, `check:out`, `test:unit` (221 of 221) and `check:i18n` pass.
+  - **Step 4c's questions, decided 2026-11-24 (shesha, in chat):**
+    1. **Z4 · Hand-offs no safety step cleared** (zara's finding 4; changes S8, D11 and D7's
+       reach). A Telugu message at paws-and-co (`not_covered_language`, high) and, while the
+       router is off, every health-business message that misses the term list
+       (`safety_floor_off`, normal) arrive with guidance ending "Do not wait for a reply in the
+       chat." and until step 4d also got `handoff_follow_up` and polling. Options: (a) keep S8
+       as written and record the gap; (b) a turn hand-off that carries guidance counts as "not
+       cleared": no follow-up, no polling, guidance and contact, remembered per session like an
+       urgent one (health businesses then get no staff reply in the thread while the router is
+       off); (c) list the reasons explicitly (`not_covered_language`, `safety_floor_off`,
+       `router_failed`, `guard_error`, `turn_timeout`, `guards_not_configured`).
+       **Decided (b)** ("Yes, not cleared", as recommended by zara): one rule that follows the
+       guidance's own words. Remembered for that session; only a new session clears it. S8
+       amended; D7 (a)'s polling now also skips these sessions. Built in step 4d.
+    2. **L5 · A card offered after an urgent hand-off** (leo's finding 5). **Decided (a)**
+       ("Keep (a)"): it arrives dropped, as built in step 4c. Recorded only; no code change.
+    3. **C28 · A staff reply already in flight when a message's outcome becomes unknown** (the
+       mutation review's C28) is dropped: the row may now be urgent (D11). Options: (a) keep
+       dropping it (pinned by a test); (b) show it, since it was written for this session.
+       **Decided (a)** ("Keep dropping"): the reply stays in the dashboard. Recorded only; the
+       test's title now names the decision. Under Z4 (b) a reply in flight when a hand-off that
+       carries guidance arrives is dropped the same way (pinned by step 4d's test).
+  - **Pending on PR 2:** the pytest fixture guard must cover the two new confirm cases
+    (`widget-not-found`: 404 `TypedError`; `session-store-unavailable`: 503 `TypedError`), read
+    from PR 2's `widget/confirm.py` and `auth/dependencies.py` on 2026-11-24.
+- **Step 4d (built 2026-11-24, sofia, on fixtures): Z4 (b).** No package, no new file; still no
+  change under `apps/api`, `packages`, `evals` or `data/`.
+  - **The rule** (`core/controller.ts`): a turn hand-off whose own `guidance` is non-empty sets a
+    per-session flag (`#notCleared`) and stops any earlier row's polling; `followUpAllowed` then
+    stays false on that session, a later "Talk to a person" and later turns included; a new
+    session (`#createSession`: after "End chat", or a 401) clears it. A button hand-off carries
+    no guidance of its own, so a plain `customer_asked` hand-off keeps the follow-up and polling.
+    The view is unchanged: it already shows no follow-up and the contact fallback whenever
+    `followUpAllowed` is false; the guidance keeps the conditional heading (these hand-offs are
+    not urgent). Confirmation cards are not affected (Z4 (b) names the follow-up and polling only;
+    L5's dropping stays urgent-only).
+  - **Fixtures:** `messages.json` `handoff-safety-floor-off` (W11's normal hand-off with
+    guidance, `agent/service.py`); `config.json` `paws-and-co-follow-ups` (the paws-and-co case
+    plus fixture follow-up texts in en and te; the te lines are unreviewed fixture text), so the
+    e2e's te rows check a follow-up that exists (`followUpConfig` now covers both businesses).
+  - **Tests:** 232 unit tests (221 before; 11 new: `not_covered_language` at paws-and-co and
+    `safety_floor_off` at sunrise-clinic show the guidance and contact with no follow-up and no
+    polling; a plain `customer_asked` hand-off by button and by a turn without guidance still gets
+    both, at each business; one line of guidance is enough; the memory survives an answer, a
+    reply, a guidance-less hand-off turn and "Talk to a person"; it stops an earlier row's polling
+    and drops a reply in flight; End chat then a new session, and a 401 then a new session, clear
+    it). Browser: 2 new rows × 3 languages × 2 projects = 12 (the turn, then "Talk to a person" on
+    the same session: no follow-up text, no poll request; no poll is stubbed, so one would hit the
+    catch-all).
+  - **Mutation check** (scratch copy, `node_modules` linked, nothing written to the repo): 14
+    mutants of the change, 14 killed by the unit suite: no marking; remembering without stopping
+    polling and the reverse; `followUpAllowed` ignoring the flag; `> 1` and `>= 0` boundaries; the
+    cached guidance instead of the turn's; urgent only; a reason list (`safety_floor_off` only);
+    no reset on a new session; reset by End chat only; forgotten on a later turn, by "Talk to a
+    person", or by a hand-off turn without guidance. Not a mutant: moving the reset into
+    `#forgetSession` behaves the same (every new session follows a forget).
+  - **Run (local, 2026-11-24; Node 24.21.0, `@playwright/test` 1.65.0, Chromium headless shell,
+    macOS):** 318 tests, 318 passed, 0 flaky, 0 retried: widget states 31 × 3 × 2 = 186; confirm
+    card 102; embed 12; motion 4; harness 12; XSS 2. The 12 new rows passed 36 of 36 in three
+    repeats. `npm run lint`, `npx tsc --noEmit`, `test:unit` (232 of 232), `check:i18n`, `npm run
+    build`, `npm run build:ui` and `check:out` pass.
+- **Step 4e (2026-11-25, sofia): integrated with PR 2 as merged (#89).** `origin/main` merged
+  into `m8/widget-ui` (this plan's two conflicts resolved to the server's D11 and Z4 (b) together,
+  and to zara's `widget_not_found` row). No package; under `apps/api` one new test file only.
+  - **D11 from the server** (`api/types.ts`, `api/parse.ts`, `core/controller.ts`): the
+    message's and the press's `handoff.follow_up` and the status read's `follow_up` are read; a
+    missing field is false, any other non-boolean (or a `follow_up` without a stored row) makes
+    the body unreadable ("not stored"). The generic follow-up shows only when the server says
+    true and nothing the widget knows tightens it (urgent, an unknown outcome, a message in
+    flight around a press, Z4 (b)); polling starts only then and stops at a status read whose
+    `follow_up` is false, which also withdraws the follow-up and drops a reply that came with it
+    (C28 (a)).
+  - **Decided 2026-11-25 (shesha, "Accept"): a queued row with `follow_up` false is treated as
+    urgent**: by the server's rule it is urgent or `safety` as stored (S17: perhaps an earlier
+    hand-off the view did not see), so D11 (b)'s `urgent_follow_up`, the "Safety information"
+    heading, and open cards dropped (L5 (a)), from the message, the press and the status read
+    alike. Not stored is never treated as urgent (tested).
+  - **The confirm card** (`core/confirm.ts`): any 404 other than `action_not_found`
+    (`widget_not_found`, or a body it cannot read) is a 401: "session ended", no claim either
+    way, "We could not check whether this was done" after an unknown outcome, the session
+    forgotten, the guidance (S16); the next send starts a new session.
+  - **Fixtures:** `follow_up` on every `HandoffQueued` and `HandoffStateResponse` body (as the
+    server computes it); new cases `handoffs` `created-urgent-row`, `messages`
+    `handoff-normal-queued-urgent-row`, `handoff-status` `raised`, `raised-replied` and
+    `store-unavailable` (503 `handoff_store_unavailable`). 69 cases.
+  - **The fixture guard** (`apps/api/tests/widget/test_web_fixtures.py`, in the `api` job's
+    normal pytest run): every case validated strictly in JSON mode against the class it names
+    (`widget.models`, `ConfirmResponse`; `TypedError`, `RateLimited` and `ClosedValidation`
+    mirrored from their handlers, a typed error's code named in the API's source), at a status
+    its route declares, on a registered widget route; `none` bodies must not validate. Red proof:
+    run on HEAD's fixtures (before the update, 64 cases) it fails 17, all on the missing
+    `follow_up` (5 `handoff-status`, 2 `handoffs`, 10 `messages`; measured by zara, and again
+    with the final guard); 17 broken copies of real cases (a missing or textual `follow_up`, a
+    `follow_up` without a row, an extra field, an unknown code, a mismatched `Retry-After`, an
+    executed confirm at 409, a valid body labelled `none`, an undeclared status, an unknown
+    route) all fail.
+  - **zara's PR 4 review (applied, 2026-11-25):**
+    - **The status read** (`core/controller.ts` `#poll`): a 404 stops polling and withdraws the
+      follow-up (no reply can reach the view); any 404 other than `handoff_not_found`
+      (`widget_not_found`, or a body it cannot read) also ends the session, as confirm does. A
+      200 it cannot read (a `follow_up` that is not a boolean, among others) stops polling and
+      withdraws the follow-up. A readable `follow_up` false now applies the message's and the
+      press's whole rule: the row is urgent or `safety` (raised from a duplicated tab or by
+      staff), so open cards are dropped (L5 (a)), the guidance is pinned under the urgent
+      heading and the follow-up becomes `urgent_follow_up` (D11 (b)); a reply with it still
+      stays in the dashboard (C28 (a)). The card drop from a poll is part of the rule decided
+      above (2026-11-25, shesha).
+    - **Fixtures:** new `handoff-status` and `handoffs` `widget-not-found` (404). 71 cases.
+    - **The fixture guard:** the rules that link `turn` and `handoff` (a hand-off turn always
+      carries `HandoffQueued`, every other kind none; a queued row never invites a follow-up
+      the turn's priority and reason forbid, `invites_follow_up`), and typed-error codes per
+      route and status (`ROUTE_CODES`), each code tied to the module that raises it (imported
+      from `CONFIRM_ERRORS` and `DecidedBy`, or quoted in its module's source, tested). Seven
+      new red-proof rows (a code from another route, a word that is not a code, the three link
+      rules) fail; disabling either new check turns its rows red. 98 tests.
+    - **Mutation check** (the new `#poll` branches, restored after): 6 mutants, 6 killed.
+  - **Tests:** 249 unit tests (232 before). Browser: 4 new rows × 3 languages × 2 projects = 24
+    (a press whose row is urgent; a status read that turns `follow_up` false; confirm
+    `widget_not_found` first and after an unknown outcome).
+  - **Mutation check** (scratch copy, `node_modules` linked, nothing written to the repo): 20
+    mutants of the change, 18 killed by the unit suite. The first run left 3; one was a missing
+    test (a not-stored hand-off treated as urgent), added and killed. Two are equivalent:
+    dropping `ref.follow_up === true` from `followUpAllowed` (a queued row with `follow_up` false
+    is already urgent, and `followUpAllowed` needs `!urgent`; the term stays so a later change
+    to that rule cannot open the follow-up) and dropping `!urgent` from it (the view reads
+    `followUpAllowed` only when not urgent, and polling refuses after `urgentSeen`).
+  - **Run (local, 2026-11-25, after zara's PR 4 review; Node 24.21.0, `@playwright/test`
+    1.65.0, Chromium headless shell, macOS):** 354 tests (342 + 2 new rows × 3 languages × 2
+    projects), 354 passed, 0 flaky, 0 retried. `npm run lint`, `npx tsc --noEmit`, `test:unit`
+    (257 of 257), `check:i18n`, `npm run build`, `npm run build:ui` and `check:out` pass; in
+    `apps/api`, `ruff format --check`, `ruff check`, `mypy` and `pytest tests/widget` (408
+    passed, the fixture guard's 98 included) pass.
+- **Step 4f (2026-11-25, sofia): shesha's answers (chat, 2026-11-25).** No package; nothing under
+  `apps/api` changes.
+  - **The row whose `follow_up` is false** ("Accept"): recorded as decided in step 4e above; the
+    code was already built.
+  - **"Talk to a person" answered 404 is a 401** ("Treat as 401"; `core/controller.ts`
+    `talkToPerson`): `widget_not_found` (the widget was disabled) and any other 404, a body it
+    cannot read included, end the session exactly as a 401 does: "session expired", the guidance
+    under its normal heading and the contact first, no follow-up of either kind, no polling, the
+    token forgotten, an open card "session ended" (never "dropped": a 404 is not an urgent
+    hand-off), and the next send opens a new session. The rule confirm and the status read
+    already follow. The `handoffs` `widget-not-found` fixture's note says so (body unchanged).
+  - **Tests:** the press-404 unit test is now one per case (`widget_not_found`, the router's own
+    `{"detail": "Not Found"}`, an empty body), each also checking the new session on the next
+    send and that a normal hand-off on it still invites a reply and polls; one new test for the
+    open card. 260 unit tests (257 before). Browser: one new row, en only (the rule has no text of
+    its own), both projects = 2; no poll is stubbed, so the catch-all stays closed.
+  - **Mutation check** (scratch copy, `node_modules` linked, nothing written to the repo): 9
+    mutants of the press's 404 branch (only 401; only a typed `widget_not_found`; every 404 but
+    it; no `return`; the notice without ending the session; the session ended without the
+    notice; as "not stored"; as urgent with no guidance, then ended; as urgent with the
+    configured guidance, then ended). The first run left one (as urgent with no guidance: the
+    heading stays normal, but `urgentSeen` would turn the next session's normal hand-off urgent
+    and drop the card instead of ending it); two checks added (the second press, the card), and
+    the re-run killed 9 of 9.
+  - **Run (local, 2026-11-25; Node 24.21.0, `@playwright/test` 1.65.0, Chromium headless shell,
+    macOS):** 356 tests (354 + 1 new row × 2 projects), 356 passed, 0 flaky, 0 retried. `npm run
+    lint`, `npx tsc --noEmit`, `test:unit` (260 of 260) and `npm run build:ui` pass; in
+    `apps/api`, the fixture guard (`pytest tests/widget/test_web_fixtures.py`) 98 passed.
 
 ## PR 5 — `m8/staff-ui` (sofia; ananya reviews extraction review, noah the labels) · M · starts after PR 2, merges after PR 3
 - **Login** [D4 (a)]: the page reads the fragment, POSTs JSON, then clears the fragment from the

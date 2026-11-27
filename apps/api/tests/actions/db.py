@@ -205,12 +205,27 @@ WAITING: Final = text(
 )
 
 
-async def until_waiting(owner: AsyncEngine, n: int, *, timeout_s: float = 5.0) -> None:
-    """Return once `n` app-role backends wait on a lock; fail after `timeout_s`."""
-    async with asyncio.timeout(timeout_s), owner.connect() as connection:
-        # Polling on purpose: the waiters are other Postgres backends, there is no event to await.
-        while (await connection.scalar(WAITING) or 0) < n:  # noqa: ASYNC110
-            await asyncio.sleep(0.02)
+RACE_BUDGET_S: Final = 30.0
+"""The write budget a race test gives its racing requests (patched in the test only), so they
+stay at the lock until `until_waiting` sees them: on a loaded CI runner under coverage the
+routes' own budgets (2-5 s) ran out first (PR 4's CI runs, 2026-11-25). Production unchanged."""
+
+
+async def until_waiting(owner: AsyncEngine, n: int, *, timeout_s: float = 20.0) -> None:
+    """Return once `n` app-role backends wait on a lock; fail after `timeout_s`, naming the most
+    waiters seen (it returns as soon as `n` wait)."""
+    most = 0
+    try:
+        async with asyncio.timeout(timeout_s), owner.connect() as connection:
+            # Polling on purpose: the waiters are other Postgres backends, no event to await.
+            while (seen := await connection.scalar(WAITING) or 0) < n:
+                most = max(most, seen)
+                await asyncio.sleep(0.02)
+    except TimeoutError:
+        raise AssertionError(
+            f"{n} app-role backends never waited on a lock together within {timeout_s:g} s"
+            f" (at most {most} seen)"
+        ) from None
 
 
 @asynccontextmanager

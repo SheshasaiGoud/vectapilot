@@ -33,6 +33,10 @@ x-api-environment: &api-environment
   # matcher unavailable, so once PR 6–8 guard the routes, each guarded route hands off (fail
   # closed). No route is guarded before PR 6.
   VECTAPILOT_GUARD_CONFIG_DIR: /app/data/safety
+  # M8 PR 4 (ADR 0019 decision 4, D2 (a) with (i)): the product pages, apps/web's `npm run
+  # build:ui` (apps/web/out-ui/), mounted read-only below as the API's ui_dir. The API serves them
+  # from PR 2 (`/widget/{business_id}` on its own origin); until then the setting changes nothing.
+  VECTAPILOT_UI_DIR: /app/ui
   # M8 PR 1 (ADR 0019, rule 9): the widget files per business (synthetic), mounted read-only
   # below. The API validates the whole folder at startup: strict origins, each UI language one its
   # corpus manifest supports, and an enabled health business needs its guard guidance (S8).
@@ -106,6 +110,11 @@ services:
       # M8 PR 1: takes effect when the api container is next recreated (`make up`); a recreate,
       # not a reset.
       - ../data/widget:/app/data/widget:ro
+      # M8 PR 4: the built UI (`cd apps/web && npm run build:ui`, git-ignored). Build it before
+      # `make up`: Docker creates a missing folder as an empty one, and then no page is served.
+      # Each build deletes and recreates out-ui/, so after a rebuild run `docker compose -f
+      # infra/compose.yaml restart api`, which binds the new folder (a restart, not a reset).
+      - ../apps/web/out-ui:/app/ui:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
